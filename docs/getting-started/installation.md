@@ -10,7 +10,7 @@
 ## Quick Install
 
 ```bash
-pip install git+https://github.com/ravenholm462/csttool.git
+pip install git+https://github.com/alemnalo/csttool.git
 ```
 
 ---
@@ -80,7 +80,7 @@ For contributing or local development:
 
 ```bash
 # Clone repository
-git clone https://github.com/ravenholm462/csttool.git
+git clone https://github.com/alemnalo/csttool.git
 cd csttool
 
 # Create virtual environment (recommended)

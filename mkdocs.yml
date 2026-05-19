@@ -2,11 +2,11 @@
 site_name: csttool Documentation
 site_description: Automated assessment of the corticospinal tract using diffusion MRI
 site_author: Alem Nalo
-# site_url: https://github.com/ravenholm462/csttool.git
+# site_url: https://github.com/alemnalo/csttool.git
 
 # Repo
-repo_name: ravenholm462/csttool
-repo_url: https://github.com/ravenholm462/csttool
+repo_name: alemnalo/csttool
+repo_url: https://github.com/alemnalo/csttool
 edit_uri: edit/main/docs/
 
 # Copyright

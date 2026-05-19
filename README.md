@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Documentation](https://img.shields.io/badge/docs-available-brightgreen.svg)](https://ravenholm462.github.io/csttool/)
+[![Documentation](https://img.shields.io/badge/docs-available-brightgreen.svg)](https://alemnalo.github.io/csttool/)
 
 `csttool` is a command-line tool for automated assessment of the corticospinal tract (CST) from diffusion-weighted MRI (DWI/DTI) data. It runs a full analysis pipeline — from DICOM import through tractography, CST extraction, and quantitative metrics — and produces BIDS-aligned derivative outputs.
 
@@ -73,13 +73,13 @@ Downloads the FMRIB58_FA template and Harvard-Oxford atlas under the FSL non-com
 ## Installation
 
 ```bash
-pip install git+https://github.com/ravenholm462/csttool.git
+pip install git+https://github.com/alemnalo/csttool.git
 ```
 
 Development install:
 
 ```bash
-git clone https://github.com/ravenholm462/csttool.git
+git clone https://github.com/alemnalo/csttool.git
 cd csttool
 pip install -e .[test]
 ```

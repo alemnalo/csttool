@@ -5,7 +5,7 @@ Get a working development environment in five minutes.
 ## Clone and install
 
 ```bash
-git clone https://github.com/ravenholm462/csttool.git
+git clone https://github.com/alemnalo/csttool.git
 cd csttool
 
 python -m venv .venv

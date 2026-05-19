@@ -7,7 +7,7 @@ Welcome to the csttool documentation!
 ## Quick Start
 ```bash
 # Install
-pip install git+https://github.com/ravenholm462/csttool.git
+pip install git+https://github.com/alemnalo/csttool.git
 
 # Run complete pipeline
 csttool run --dicom /path/to/dicom --out results --subject-id sub-01
@@ -52,4 +52,4 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/).
 
 ## License
 
-csttool is released under the MIT License. See [LICENSE](https://github.com/ravenholm462/csttool/blob/main/LICENSE) for details.
+csttool is released under the MIT License. See [LICENSE](https://github.com/alemnalo/csttool/blob/main/LICENSE) for details.
