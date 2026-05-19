@@ -50,3 +50,9 @@ thesis/chapters/*.aux
 lib/
 lib64/
 pyvenv.cfg
+
+# Reproducibility outputs
+reports/repro/
+configs/
+scripts/repro/
+reports/repro/
