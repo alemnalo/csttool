@@ -56,3 +56,10 @@ reports/repro/
 configs/
 scripts/repro/
 reports/repro/
+
+# Virtual environment
+bin/
+lib/
+lib64/
+include/
+pyvenv.cfg
