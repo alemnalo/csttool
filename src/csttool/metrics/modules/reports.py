@@ -482,23 +482,36 @@ def html_to_pdf(html_file, pdf_file):
     try:
         from weasyprint import HTML
         from weasyprint.text.fonts import FontConfiguration
-        
+    except ImportError:
+        print(
+            "  ⚠ PDF skipped: weasyprint not installed.\n"
+            "    Install with:  pip install 'csttool[reports]'\n"
+            "    Or via conda:  conda install -c conda-forge weasyprint\n"
+            f"    HTML report is available at: {html_file}"
+        )
+        return None
+
+    try:
         font_config = FontConfiguration()
         html = HTML(filename=str(html_file))
-        
-        # Render PDF using the embedded CSS from the template
         html.write_pdf(
             str(pdf_file),
             font_config=font_config,
-            presentational_hints=True
+            presentational_hints=True,
         )
-        
-        print(f"  ✓ PDF generated: {pdf_file}")
-        return pdf_file
-        
-    except ImportError:
-        print("⚠️ Install weasyprint: pip install weasyprint")
+    except OSError as exc:
+        print(
+            "  ⚠ PDF skipped: weasyprint's native libraries (Cairo/Pango/GDK-PixBuf) "
+            "could not be loaded.\n"
+            f"    Error: {exc}\n"
+            "    On Windows, install via conda-forge to get the native libraries:\n"
+            "      conda install -c conda-forge weasyprint pango cairo gdk-pixbuf\n"
+            f"    HTML report is available at: {html_file}"
+        )
         return None
+
+    print(f"  ✓ PDF generated: {pdf_file}")
+    return pdf_file
 
 def save_pdf_report(
     comparison,

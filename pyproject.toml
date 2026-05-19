@@ -21,11 +21,13 @@ dependencies = [
     "pydicom",
     "nilearn",
     "platformdirs",
-    "weasyprint",
     "jinja2"
 ]
 
 [project.optional-dependencies]
+reports = [
+    "weasyprint"
+]
 test = [
     "pytest",
     "pytest-mock",

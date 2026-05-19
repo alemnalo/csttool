@@ -39,30 +39,40 @@ All outputs are written to a BIDS-aligned derivative directory:
 - HTML and PDF clinical reports
 - QC visualizations (optional)
 
-## Dependencies
+## Installation
 
-**Python packages** (installed automatically):
+### Recommended: conda (Linux, macOS, Windows)
 
-- `dipy`, `nibabel`, `nilearn`, `numpy`, `scipy`, `matplotlib`, `weasyprint`, `jinja2`
-
-**External tool** (recommended):
-
-- [`dcm2niix`](https://github.com/rordenlab/dcm2niix) — used by `csttool import` for DICOM conversion
+Conda handles both the Python stack and the external `dcm2niix` binary, plus the native libraries (Cairo, Pango, GDK-PixBuf) that the PDF report backend depends on. This is the only path that gives full functionality on Windows out of the box.
 
 ```bash
-# Debian / Ubuntu
-sudo apt install dcm2niix
-
-# macOS
-brew install dcm2niix
-
-# conda
-conda install -c conda-forge dcm2niix
+git clone https://github.com/alemnalo/csttool.git
+cd csttool
+conda env create -f environment.yml
+conda activate csttool
+csttool fetch-data --accept-fsl-license
 ```
 
-If `dcm2niix` is not on `PATH`, csttool falls back to `dicom2nifti` (installed automatically). The fallback does not produce BIDS JSON sidecars and is less reliable for non-Siemens data.
+### Advanced: pip
 
-**Atlas data** (required for extraction):
+```bash
+pip install csttool             # core pipeline + HTML reports
+pip install 'csttool[reports]'  # adds PDF rendering (Linux/macOS)
+```
+
+On Windows, `pip install 'csttool[reports]'` will install `weasyprint` but its native dependencies (Cairo, Pango) are not bundled — PDF generation will fail at runtime with a missing-DLL error. Use the conda install path on Windows if you need PDF reports. HTML reports work on all platforms regardless.
+
+You will also need to install `dcm2niix` separately:
+
+```bash
+sudo apt install dcm2niix        # Debian / Ubuntu (check version >= 1.0.20220720)
+brew install dcm2niix            # macOS
+conda install -c conda-forge dcm2niix    # any platform
+```
+
+If `dcm2niix` is not on `PATH`, csttool falls back to `dicom2nifti`. The fallback does not produce BIDS JSON sidecars and is less reliable for non-Siemens data.
+
+### Atlas data (required for extraction)
 
 ```bash
 csttool fetch-data --accept-fsl-license
@@ -70,18 +80,12 @@ csttool fetch-data --accept-fsl-license
 
 Downloads the FMRIB58_FA template and Harvard-Oxford atlas under the FSL non-commercial license.
 
-## Installation
-
-```bash
-pip install git+https://github.com/alemnalo/csttool.git
-```
-
-Development install:
+### Development install
 
 ```bash
 git clone https://github.com/alemnalo/csttool.git
 cd csttool
-pip install -e .[test]
+pip install -e '.[reports,test]'
 ```
 
 ## Usage

@@ -1,0 +1,34 @@
+name: csttool
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+
+  # Core scientific stack
+  - numpy
+  - scipy
+  - cython
+  - matplotlib
+
+  # Neuroimaging
+  - dipy
+  - nibabel
+  - nilearn
+  - dicom2nifti
+  - pydicom
+
+  # External binary for DICOM conversion (BIDS sidecar generation)
+  - dcm2niix>=1.0.20220720
+
+  # Utilities
+  - platformdirs
+  - jinja2
+
+  # PDF report backend with native libs bundled by conda-forge.
+  # Pulls in cairo, pango, gdk-pixbuf automatically; works on Windows.
+  - weasyprint
+
+  # pip-installable extras and csttool itself
+  - pip
+  - pip:
+      - -e .

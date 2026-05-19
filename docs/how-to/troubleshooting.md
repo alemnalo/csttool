@@ -34,19 +34,29 @@ csttool preprocess --nifti raw.nii.gz --out ./preproc --denoise-method nlmeans
 
 ### WeasyPrint fails to install or render PDFs
 
-**Symptom**: `--generate-pdf` raises `OSError: cannot load library 'libgobject-2.0-0'` or similar.
+**Symptom**: `csttool` prints `⚠ PDF skipped: weasyprint not installed` or `⚠ PDF skipped: weasyprint's native libraries (Cairo/Pango/GDK-PixBuf) could not be loaded`. The HTML report is still produced.
 
-**Fix**: WeasyPrint needs system libraries that are not pulled in by `pip`.
+**Recommended fix (all platforms, including Windows)**: install via conda, which bundles the native libraries cleanly.
 
 ```bash
-# Debian / Ubuntu
-sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi-dev
-
-# macOS
-brew install pango libffi
+conda install -c conda-forge weasyprint pango cairo gdk-pixbuf
 ```
 
-If you do not need PDF reports, omit `--generate-pdf`; HTML and JSON outputs are produced regardless.
+**Pip-only fix (Linux/macOS)**: install the optional extra and the system libraries.
+
+```bash
+pip install 'csttool[reports]'
+
+# Debian / Ubuntu
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi-dev libcairo2 libgdk-pixbuf2.0-0
+
+# macOS
+brew install pango cairo gdk-pixbuf libffi
+```
+
+**Windows + pip**: not officially supported. PDF generation will fail with a missing-DLL error even after `pip install 'csttool[reports]'` because the native libraries are not bundled. Use the conda install path.
+
+If you do not need PDF reports, omit `--generate-pdf`; HTML, JSON, and CSV outputs are produced regardless.
 
 ### Missing FSL / MRtrix dependencies
 

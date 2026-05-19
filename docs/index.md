@@ -6,14 +6,18 @@ Welcome to the csttool documentation!
 
 ## Quick Start
 ```bash
-# Install
-pip install git+https://github.com/alemnalo/csttool.git
+# Install (recommended: conda)
+git clone https://github.com/alemnalo/csttool.git
+cd csttool
+conda env create -f environment.yml
+conda activate csttool
+csttool fetch-data --accept-fsl-license
 
 # Run complete pipeline
 csttool run --dicom /path/to/dicom --out results --subject-id sub-01
 ```
 
-See the [Quick Start Guide](getting-started/quickstart.md) for more details (COMING SOON).
+See the [Installation Guide](getting-started/installation.md) for the pip path and Windows notes, or the [Quick Start Guide](getting-started/quickstart.md) for analysis examples.
 
 ## Pipeline Overview
 ```mermaid
