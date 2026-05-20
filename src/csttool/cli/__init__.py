@@ -7,6 +7,7 @@ from pathlib import Path
 from .. import __version__
 from .utils import add_io_arguments
 from .commands.check import cmd_check
+from .commands.doctor import cmd_doctor
 from .commands.check_dataset import cmd_check_dataset
 from .commands.import_cmd import cmd_import
 from .commands.preprocess import cmd_preprocess
@@ -34,9 +35,15 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command")
 
     # -------------------------------------------------------------------------
-    # check subtool
+    # doctor subtool
     # -------------------------------------------------------------------------
-    p_check = subparsers.add_parser("check", help="Run environment checks")
+    p_doctor = subparsers.add_parser("doctor", help="Run comprehensive environment diagnostics")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    # -------------------------------------------------------------------------
+    # check subtool (deprecated alias for doctor)
+    # -------------------------------------------------------------------------
+    p_check = subparsers.add_parser("check", help="Run environment checks (deprecated: use doctor)")
     p_check.set_defaults(func=cmd_check)
 
     # -------------------------------------------------------------------------

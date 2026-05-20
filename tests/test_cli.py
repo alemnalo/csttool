@@ -26,4 +26,30 @@ def test_cli_check_command(mock_cmd_check):
     """Test that 'check' command calls the correct function."""
     with patch('sys.argv', ['csttool', 'check']):
         main()
-        mock_cmd_check.assert_called_once()    
+        mock_cmd_check.assert_called_once()
+
+
+@patch('csttool.cli.cmd_doctor')
+def test_cli_doctor_command(mock_cmd_doctor):
+    """Test that 'doctor' command calls the correct function."""
+    with patch('sys.argv', ['csttool', 'doctor']):
+        main()
+        mock_cmd_doctor.assert_called_once()
+
+
+def test_cli_doctor_runs(capsys):
+    """Smoke-test: doctor command runs without raising and prints header."""
+    with patch('sys.argv', ['csttool', 'doctor']):
+        main()
+    captured = capsys.readouterr()
+    assert "csttool doctor" in captured.out
+    assert "Python packages" in captured.out
+
+
+def test_cli_check_deprecated_redirects(capsys):
+    """check command should print a deprecation notice and run doctor."""
+    with patch('sys.argv', ['csttool', 'check']):
+        main()
+    captured = capsys.readouterr()
+    assert "deprecated" in captured.err
+    assert "csttool doctor" in captured.out

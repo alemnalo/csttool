@@ -111,6 +111,7 @@ nav:
   - Reference:
       - CLI Commands:
           - Overview: reference/cli/overview.md
+          - doctor: reference/cli/doctor.md
           - check: reference/cli/check.md
           - check-dataset: reference/cli/check_dataset.md
           - import: reference/cli/import.md

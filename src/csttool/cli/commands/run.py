@@ -16,7 +16,7 @@ from csttool.bids.output import (
     write_derivative_sidecar,
 )
 
-from .check import cmd_check
+from .doctor import cmd_doctor as cmd_check
 from .import_cmd import cmd_import
 from .preprocess import cmd_preprocess
 from .track import cmd_track

@@ -4,6 +4,7 @@ import sys
 import tomllib
 from pathlib import Path
 from csttool import __version__
+from .doctor import cmd_doctor
 
 # Map package names to import names (for cases where they differ)
 IMPORT_NAME_MAP = {
@@ -91,40 +92,6 @@ def _check_csttool_modules() -> bool:
 
 
 def cmd_check(args: argparse.Namespace) -> bool:
-    """Runs environment checks. Returns True if all checks pass."""
-    print("=" * 60)
-    print("ENVIRONMENT CHECK")
-    print("=" * 60)
-    print(f"  Python:  {sys.version.split()[0]}")
-    print(f"  csttool: {__version__}")
-    print()
-
-    required = _get_project_dependencies()
-
-    all_ok = True
-
-    # Check required dependencies
-    for dep_spec in required:
-        package_name = _extract_package_name(dep_spec)
-        is_optional = package_name in OPTIONAL_DEPS
-        import_name = _get_import_name(package_name)
-
-        # Special case for weasyprint (in requirements but treated as optional)
-        ok = _check_dependency(package_name, import_name, optional=is_optional)
-        if not ok and not is_optional:
-            all_ok = False
-
-    print()
-
-    # Check csttool modules
-    modules_ok = _check_csttool_modules()
-    all_ok = all_ok and modules_ok
-
-    print()
-
-    if all_ok:
-        print("  ✓ All required dependencies and modules available")
-    else:
-        print("  ✗ Some dependencies or modules missing - install with: pip install -e .")
-
-    return all_ok
+    """Deprecated: redirects to cmd_doctor."""
+    print("Note: 'csttool check' is deprecated — use 'csttool doctor' instead.", file=sys.stderr)
+    return cmd_doctor(args)
