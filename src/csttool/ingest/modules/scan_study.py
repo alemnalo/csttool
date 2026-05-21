@@ -64,8 +64,9 @@ def is_dicom_directory(directory: Path) -> bool:
     if not directory.is_dir():
         return False
     
-    # Check for .dcm files first (fast)
-    dcm_files = list(directory.glob("*.dcm")) + list(directory.glob("*.DCM"))
+    # Check for .dcm files first (fast); use set to avoid double-counting on
+    # case-insensitive filesystems (Windows).
+    dcm_files = set(directory.glob("*.dcm")) | set(directory.glob("*.DCM"))
     if dcm_files:
         return True
     
@@ -94,9 +95,10 @@ def count_dicom_files(directory: Path) -> int:
     """
     directory = Path(directory)
     
-    # Count .dcm files
-    dcm_count = len(list(directory.glob("*.dcm"))) + len(list(directory.glob("*.DCM")))
-    
+    # Count .dcm files; use set to avoid double-counting on case-insensitive
+    # filesystems (Windows).
+    dcm_count = len(set(directory.glob("*.dcm")) | set(directory.glob("*.DCM")))
+
     if dcm_count > 0:
         return dcm_count
     
