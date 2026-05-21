@@ -21,7 +21,8 @@ dependencies = [
     "pydicom",
     "nilearn",
     "platformdirs",
-    "jinja2"
+    "jinja2",
+    "filelock"
 ]
 
 [project.optional-dependencies]

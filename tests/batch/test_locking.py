@@ -1,6 +1,5 @@
 import pytest
 import os
-import fcntl
 from pathlib import Path
 from csttool.batch.modules.locking import acquire_batch_lock, acquire_subject_lock, release_lock, LockError
 
@@ -20,7 +19,7 @@ def test_batch_lock_flow(tmp_path):
     
     # 4. Acquire again - should succeed
     lock2 = acquire_batch_lock(tmp_path)
-    assert lock2.fd is not None
+    assert lock2._filelock is not None
     release_lock(lock2)
 
 def test_subject_lock_flow(tmp_path):

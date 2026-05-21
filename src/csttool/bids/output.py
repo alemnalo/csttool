@@ -10,13 +10,14 @@ Three compliance tiers:
                                          (no finalised BIDS tractography schema)
 """
 
-import fcntl
 import hashlib
 import json
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from filelock import FileLock
 
 from csttool import __version__
 
@@ -262,9 +263,8 @@ def update_participants_tsv(
     sex_val = _normalise_sex(sex_raw)
     age_str = f"{age_val:.1f}" if isinstance(age_val, (int, float)) else "n/a"
 
-    with open(dest, "a+") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        try:
+    with FileLock(str(dest) + ".lock"):
+        with open(dest, "a+") as fh:
             fh.seek(0)
             content = fh.read()
             lines = content.splitlines()
@@ -286,8 +286,6 @@ def update_participants_tsv(
             if not has_header:
                 fh.write("participant_id\tage\tsex\n")
             fh.write(f"{subject_id}\t{age_str}\t{sex_val}\n")
-        finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
 
     write_participants_json(output_root)
     return dest

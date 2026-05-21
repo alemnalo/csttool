@@ -23,6 +23,7 @@ dependencies:
   # Utilities
   - platformdirs
   - jinja2
+  - filelock
 
   # PDF report backend with native libs bundled by conda-forge.
   # Pulls in cairo, pango, gdk-pixbuf automatically; works on Windows.
