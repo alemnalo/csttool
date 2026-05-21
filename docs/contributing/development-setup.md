@@ -33,10 +33,10 @@ brew install dcm2niix pango libffi
 ## Sanity-check the install
 
 ```bash
-csttool check
+csttool doctor
 ```
 
-`check` verifies that Python is recent enough and that every required Python library imports cleanly. Any failure printed here is the right place to start debugging.
+`doctor` verifies that Python is recent enough and that every required Python library imports cleanly. Any failure printed here is the right place to start debugging.
 
 ## Run the test suite
 

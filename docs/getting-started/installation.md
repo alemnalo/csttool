@@ -136,7 +136,7 @@ pip install -e '.[reports,test]'
 csttool --version
 
 # Verify environment and dependencies
-csttool check
+csttool doctor
 ```
 
 ---

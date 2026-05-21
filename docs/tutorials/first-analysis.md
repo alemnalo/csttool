@@ -13,11 +13,11 @@ Throughout this tutorial, `~/data/sub-001/dwi/` stands for the directory contain
 ## Step 0 — Verify the environment
 
 ```bash
-csttool check
+csttool doctor
 csttool fetch-data --accept-fsl-license
 ```
 
-`check` confirms that Python, DIPY, ANTs and supporting libraries are present. `fetch-data` downloads the FMRIB58_FA and Harvard-Oxford atlases used for registration and ROI extraction. The download runs once per machine.
+`doctor` confirms that Python, DIPY, ANTs and supporting libraries are present. `fetch-data` downloads the FMRIB58_FA and Harvard-Oxford atlases used for registration and ROI extraction. The download runs once per machine.
 
 ## Step 1 — Inspect the data
 

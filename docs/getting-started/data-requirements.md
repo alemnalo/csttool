@@ -154,7 +154,7 @@ save_tractogram(sft, "tractogram_rasmm.trk")
 
 ## Validating Your Data
 
-Run `csttool check` to verify your environment, then:
+Run `csttool doctor` to verify your environment, then:
 
 ```bash
 # Check DICOM study

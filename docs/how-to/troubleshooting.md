@@ -60,7 +60,7 @@ If you do not need PDF reports, omit `--generate-pdf`; HTML, JSON, and CSV outpu
 
 ### Missing FSL / MRtrix dependencies
 
-**Symptom**: `csttool check` flags missing external binaries.
+**Symptom**: `csttool doctor` flags missing external binaries.
 
 **Fix**: `csttool` itself does not require FSL or MRtrix, but the atlases shipped via `csttool fetch-data` are derived from FSL data. Install FSL only if you intend to compare against FSL-tractography pipelines or run advanced QC.
 
