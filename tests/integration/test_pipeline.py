@@ -193,24 +193,20 @@ def test_step_by_step_pipeline(synthetic_nifti_data, tmp_path):
         
     assert report_file.exists(), f"Metrics report not found in {metrics_dir}"
 
-@patch('csttool.ingest.modules.convert_series.convert_dicom')
-def test_full_run_command(mock_convert, synthetic_dicom_dir, tmp_path):
+def test_full_run_command(synthetic_dicom_dir, tmp_path):
     """Test the 'run' command (end-to-end)."""
-    
+
     out_dir = tmp_path / "output_run"
-    
-    # Mock DICOM conversion to produce a valid NIfTI
-    # Use real NIfTI creation to ensure downstream steps work
+
+    # Pre-create the synthetic NIfTI that the mocked ingest will "produce"
     nifti_path = out_dir / "dwi" / "subject_dwi.nii.gz"
     nifti_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Create valid synthetic data there
+
     shape = (10, 10, 10, 6)
     nib.save(nib.Nifti1Image(np.random.random(shape).astype(np.float32), np.eye(4)), nifti_path)
-    bval_path = nifti_path.with_suffix('.bval').with_suffix('') # remove .gz and .nii? path logic... 
     bval_path = out_dir / "dwi" / "subject_dwi.bval"
     bvec_path = out_dir / "dwi" / "subject_dwi.bvec"
-    
+
     np.savetxt(bval_path, [0, 1000, 1000, 1000, 1000, 1000], fmt='%d')
     bvecs = np.array([
         [0, 0, 0],
@@ -221,15 +217,20 @@ def test_full_run_command(mock_convert, synthetic_dicom_dir, tmp_path):
         [0, 1, 0]
     ]).T
     np.savetxt(bvec_path, bvecs, fmt='%.8f')
-    
-    mock_convert.dicom_series_to_nifti.return_value = {
-        'NII_FILE': str(nifti_path),
-        'BVAL_FILE': str(bval_path),
-        'BVEC_FILE': str(bvec_path)
+
+    mock_ingest_result = {
+        'nifti_path': nifti_path,
+        'bval_path': bval_path,
+        'bvec_path': bvec_path,
+        'subject_id': 'test_subj',
+        'success': True,
+        'warnings': [],
+        'converter': 'mocked',
     }
-    
+
     # Mock registration and extraction
-    with patch('csttool.extract.modules.registration.register_mni_to_subject') as mock_reg, \
+    with patch('csttool.ingest.run_ingest_pipeline', return_value=mock_ingest_result), \
+         patch('csttool.extract.modules.registration.register_mni_to_subject') as mock_reg, \
          patch('csttool.extract.modules.registration.load_mni_template') as mock_load, \
          patch('csttool.extract.modules.warp_atlas_to_subject.fetch_harvard_oxford') as mock_atlas, \
          patch('csttool.extract.modules.passthrough_filtering.extract_cst_passthrough') as mock_extract, \
@@ -309,5 +310,9 @@ def test_full_run_command(mock_convert, synthetic_dicom_dir, tmp_path):
         
         assert run_cli(cmd)
         
-    # Check key outputs
-    assert (out_dir / "metrics" / "test_subj_bilateral_metrics.json").exists()
+    # After _write_bids_derivatives, the metrics JSON is moved from metrics/ to
+    # sub-<id>/reports/ and the stage directories are removed.
+    reports_dir = out_dir / "sub-test_subj" / "reports"
+    assert reports_dir.exists(), f"BIDS reports dir not found: {reports_dir}"
+    metrics_files = list(reports_dir.glob("*metrics*.json"))
+    assert len(metrics_files) > 0, f"No metrics JSON found in {reports_dir}"
