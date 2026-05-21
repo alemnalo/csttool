@@ -43,7 +43,7 @@ def test_load_valid_manifest(tmp_path):
     s1 = subjects[0]
     assert s1["id"] == "sub-01"
     assert s1["session"] == "ses-01"
-    assert str(s1["nifti"]) == "/data/sub-01.nii.gz"
+    assert s1["nifti"].as_posix() == "/data/sub-01.nii.gz"
     assert s1["options"]["sh_order"] == 4
     
     s2 = subjects[1]

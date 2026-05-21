@@ -237,7 +237,7 @@ def update_participants_tsv(
     """
     Append one row to participants.tsv, ensuring no duplicate subjects.
 
-    Uses fcntl.flock for safe concurrent batch writes.
+    Uses a file lock for safe concurrent batch writes.
 
     Parameters
     ----------
