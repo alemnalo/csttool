@@ -12,7 +12,7 @@ The pipeline runs in six sequential steps:
 
 | Step | Command | Description |
 |------|---------|-------------|
-| 1 | `check` | Verify Python environment and external dependencies |
+| 1 | `doctor` | Verify Python environment and external dependencies |
 | 2 | `import` | Convert DICOM to NIfTI, or validate an existing NIfTI dataset |
 | 3 | `preprocess` | Denoise (patch2self or NLMEANS), skull-strip, optional motion correction and Gibbs unringing |
 | 4 | `track` | Whole-brain deterministic tractography using a CSA ODF model |
