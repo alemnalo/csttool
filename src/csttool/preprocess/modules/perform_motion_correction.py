@@ -51,5 +51,9 @@ def perform_motion_correction(
             gtab,
             affine=affine
         )
-    
+
+    # dipy.align.motion_correction returns a Nifti1Image; extract the array
+    if hasattr(data_corrected, 'get_fdata'):
+        data_corrected = data_corrected.get_fdata(dtype=np.float32)
+
     return data_corrected, reg_affines
