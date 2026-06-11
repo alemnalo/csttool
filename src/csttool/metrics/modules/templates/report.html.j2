@@ -115,9 +115,9 @@
                     <tr>
                         <th style="width: 16%;">Metric</th>
                         <th style="width: 18%;">Left Mean±SD</th>
-                        <th style="width: 18%;">Left Med (Range)</th>
                         <th style="width: 18%;">Right Mean±SD</th>
-                        <th style="width: 18%;">Right Med (Range)</th>
+                        <th style="width: 18%;">Left Median</th>
+                        <th style="width: 18%;">Right Median</th>
                         <th style="width: 12%;">LI</th>
                     </tr>
                 </thead>
@@ -126,8 +126,8 @@
                     <tr>
                         <td>{{ m.label }}</td>
                         <td>{{ m.left_mean_sd }}</td>
-                        <td>{{ m.left_med_range }}</td>
                         <td>{{ m.right_mean_sd }}</td>
+                        <td>{{ m.left_med_range }}</td>
                         <td>{{ m.right_med_range }}</td>
                         <td class="{{ 'li-positive' if m.li > 0 else 'li-negative' }}">
                             {%- if m.li > 0 %}+{% endif %}{{ "%.3f" | format(m.li) }}
