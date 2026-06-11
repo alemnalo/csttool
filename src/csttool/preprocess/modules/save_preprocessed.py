@@ -70,7 +70,7 @@ def save_preprocessed(
     ...     filename_stem="sub01_dwi_preproc",
     ...     gradient_files={"bval": "original.bval", "bvec": "original.bvec"},
     ...     brain_mask=mask,
-    ...     processing_params={"denoise_method": "patch2self", "motion_correction": True}
+    ...     processing_params={"denoise_method": "nlmeans", "motion_correction": True}
     ... )
     """
     # Validate inputs

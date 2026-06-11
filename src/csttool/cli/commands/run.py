@@ -218,7 +218,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 nifti=nifti_path,
                 out=preproc_out,
                 coil_count=getattr(args, 'coil_count', 4),
-                denoise_method=getattr(args, 'denoise_method', 'patch2self'),
+                denoise_method=getattr(args, 'denoise_method', 'nlmeans'),
                 show_plots=getattr(args, 'show_plots', False),
                 save_visualizations=getattr(args, 'save_visualizations', False),
                 unring=getattr(args, 'unring', False),
@@ -248,7 +248,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         # Record metadata for report
         pipeline_metadata['preprocessing'] = {
             'status': 'Executed',
-            'method': getattr(args, 'denoise_method', 'patch2self'),
+            'method': getattr(args, 'denoise_method', 'nlmeans'),
             'unring': getattr(args, 'unring', False),
             'motion_correction': getattr(args, 'perform_motion_correction', False)
         }

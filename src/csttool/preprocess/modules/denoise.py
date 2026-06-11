@@ -13,7 +13,7 @@ def denoise(
     data: np.ndarray, 
     bvals: np.ndarray = None, 
     brain_mask: np.ndarray = None, 
-    denoise_method: str = "patch2self", 
+    denoise_method: str = "nlmeans",
     N: int = 4
 ):
     """

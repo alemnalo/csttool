@@ -132,7 +132,7 @@ def cmd_batch(args: argparse.Namespace) -> None:
         timeout_minutes=args.timeout_minutes,
         keep_work=args.keep_work,
         # Pipeline options (inherit from global options then CLI)
-        denoise_method=getattr(args, 'denoise_method', global_options.get('denoise_method', 'patch2self')),
+        denoise_method=getattr(args, 'denoise_method', global_options.get('denoise_method', 'nlmeans')),
         preprocessing=getattr(args, 'preprocessing', global_options.get('preprocessing', True)),
         generate_pdf=getattr(args, 'generate_pdf', global_options.get('generate_pdf', False)),
         # Additional options can be added here

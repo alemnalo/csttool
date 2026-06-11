@@ -24,7 +24,7 @@ def run_preprocessing(
     filename: str,
     *,
     # Denoising options
-    denoise_method: str = "patch2self",
+    denoise_method: str = "nlmeans",
     coil_count: int = 4,
     # Optional steps
     apply_gibbs_correction: bool = False,
@@ -54,8 +54,8 @@ def run_preprocessing(
         Output directory for preprocessed files.
     filename : str
         Base filename without extension (e.g., "sub01_dwi").
-    denoise_method : str, default="patch2self"
-        Denoising method: "patch2self" or "nlmeans".
+    denoise_method : str, default="nlmeans"
+        Denoising method: "nlmeans" or "patch2self".
     coil_count : int, default=4
         Number of scanner coils (for NLMeans noise estimation).
     apply_gibbs_correction : bool, default=False

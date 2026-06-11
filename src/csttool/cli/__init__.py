@@ -189,9 +189,9 @@ def main() -> None:
     p_preproc.add_argument(
         "--denoise-method",
         type=str,
-        default="patch2self",
-        choices=["patch2self", "nlmeans"],
-        help="Denoising method to use (patch2self or nlmeans)."
+        default="nlmeans",
+        choices=["nlmeans", "patch2self"],
+        help="Denoising method to use (nlmeans or patch2self, default: nlmeans)."
     )
     p_preproc.add_argument(
         "--save-visualizations",
@@ -535,9 +535,9 @@ def main() -> None:
     p_run.add_argument(
         "--denoise-method",
         type=str,
-        default="patch2self",
-        choices=["patch2self", "nlmeans"],
-        help="Denoising method (patch2self or nlmeans, default: patch2self)"
+        default="nlmeans",
+        choices=["nlmeans", "patch2self"],
+        help="Denoising method (nlmeans or patch2self, default: nlmeans)"
     )
     p_run.add_argument(
         "--unring",
@@ -755,9 +755,9 @@ def main() -> None:
     p_batch.add_argument(
         "--denoise-method",
         type=str,
-        default="patch2self",
-        choices=["patch2self", "nlmeans", "none"],
-        help="Denoising method (default: patch2self)"
+        default="nlmeans",
+        choices=["nlmeans", "patch2self", "none"],
+        help="Denoising method (default: nlmeans)"
     )
     
     preproc_group = p_batch.add_mutually_exclusive_group()

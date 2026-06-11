@@ -52,7 +52,7 @@ class BatchConfig:
     timeout_minutes: int = 120
     keep_work: bool = False
     # Pipeline overrides
-    denoise_method: str = "patch2self"
+    denoise_method: str = "nlmeans"
     preprocessing: bool = True
     generate_pdf: bool = False
     # ... any other arguments that cmd_run accepts

@@ -79,7 +79,7 @@ def save_manifest_template(path: Path) -> None:
         "name": "Example Study",
         "description": "Template manifest for csttool batch processing",
         "options": {
-            "denoise_method": "patch2self",
+            "denoise_method": "nlmeans",
             "generate_pdf": True
         },
         "subjects": [
