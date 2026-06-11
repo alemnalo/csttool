@@ -1,5 +1,6 @@
 
 import argparse
+import json
 from pathlib import Path
 from dipy.io.streamline import load_tractogram
 from dipy.io.image import load_nifti
@@ -19,6 +20,48 @@ from csttool.metrics.modules.reports import (
     save_html_report,
     save_pdf_report,
 )
+
+
+def _build_extraction_metadata(raw: dict | None) -> dict | None:
+    """Build the self-documenting extraction block for the report metadata.
+
+    The artifact index is only defined for bidirectional extraction; for every
+    other method ``artifact_index`` is None. We always carry the method and an
+    explicit availability flag + reason so the JSON/PDF never has to infer
+    absence from missing structure.
+    """
+    if not raw or not raw.get('method'):
+        return None
+    ai = raw.get('artifact_index')
+    return {
+        'method': raw.get('method'),
+        'artifact_index': ai,
+        'forward_reverse_ratio_left': raw.get('forward_reverse_ratio_left'),
+        'forward_reverse_ratio_right': raw.get('forward_reverse_ratio_right'),
+        'artifact_index_available': ai is not None,
+        'artifact_index_reason': None if ai is not None
+            else 'defined only for bidirectional extraction',
+    }
+
+
+def _find_extraction_statistics(cst_left_path: Path, subject_id: str) -> dict | None:
+    """Locate the on-disk extraction report next to a standalone tractogram input.
+
+    Returns its ``statistics`` dict, or None if not found / unreadable.
+    """
+    name = f"{subject_id}_cst_extraction_report.json"
+    candidates = [
+        cst_left_path.parent.parent / "logs" / name,   # .../extraction/trk/ -> .../extraction/logs/
+        cst_left_path.parent / "logs" / name,           # report alongside the tractogram dir
+    ]
+    for path in candidates:
+        try:
+            if path.exists():
+                return json.loads(path.read_text()).get('statistics')
+        except Exception:
+            continue
+    return None
+
 
 def cmd_metrics(args: argparse.Namespace) -> dict | None:
     """
@@ -172,7 +215,17 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
     
     # Add ROI approach (static for now - atlas-based)
     metadata['processing']['roi_approach'] = 'Atlas-to-Subject (Harvard-Oxford)'
-    
+
+    # Add extraction artifact-index diagnostic. Prefer pipeline metadata (run.py);
+    # for a standalone `csttool metrics` call, fall back to the on-disk extraction
+    # report next to the input tractogram. Populated only when the method is known.
+    extraction_raw = pipeline_metadata.get('extraction')
+    if not extraction_raw:
+        extraction_raw = _find_extraction_statistics(args.cst_left, args.subject_id)
+    extraction_meta = _build_extraction_metadata(extraction_raw)
+    if extraction_meta is not None:
+        metadata['processing']['extraction'] = extraction_meta
+
     # Remove None values from qc_thresholds
     metadata['qc_thresholds'] = {k: v for k, v in metadata['qc_thresholds'].items() if v is not None}
 

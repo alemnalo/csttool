@@ -384,7 +384,19 @@ def cmd_run(args: argparse.Namespace) -> None:
             cst_left_path = extract_result.get('cst_left_path')
             cst_right_path = extract_result.get('cst_right_path')
             step_results['extract'] = {'success': True, 'result': extract_result}
-            
+
+            # Carry artifact-index diagnostic into report metadata. Only the
+            # bidirectional method populates artifact_index in its stats; for all
+            # other methods it stays None (rendered as N/A downstream), because the
+            # index only describes the bidirectional bundle.
+            stats = extract_result['stats']
+            pipeline_metadata['extraction'] = {
+                'method': extraction_method,
+                'artifact_index': stats.get('artifact_index'),
+                'forward_reverse_ratio_left': stats.get('forward_reverse_ratio_left'),
+                'forward_reverse_ratio_right': stats.get('forward_reverse_ratio_right'),
+            }
+
             if extract_result['stats']['cst_total_count'] == 0:
                 print(f"  ⚠️ No CST streamlines extracted")
         else:

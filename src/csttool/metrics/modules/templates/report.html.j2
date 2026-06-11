@@ -103,6 +103,19 @@
                             N/A
                         {% endif %}
                     </span>
+                    <span class="param-label">Artifact Index:</span>
+                    <span class="param-value">
+                        {% if processing.extraction and processing.extraction.artifact_index is not none %}
+                            {{ "%.2f"|format(processing.extraction.artifact_index) }}
+                            {% if processing.extraction.artifact_index > 0.20 %}
+                                <span class="flag-warn">(&gt;0.20 — asymmetry may be methodological)</span>
+                            {% else %}
+                                <span class="flag-ok">(&le;0.20 — no strong placement-artifact signal)</span>
+                            {% endif %}
+                        {% else %}
+                            N/A <small>(bidirectional extraction only)</small>
+                        {% endif %}
+                    </span>
                 </div>
             </div>
         </div>
