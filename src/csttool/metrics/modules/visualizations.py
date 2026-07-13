@@ -16,6 +16,8 @@ matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+from csttool.viz import geometry as _geo
+
 
 def plot_tract_profiles(
     left_metrics,
@@ -356,8 +358,10 @@ def plot_tractogram_qc_preview(
     
     if set_title:
         ax.set_title(f'CST Tractogram ({slice_type.title()})', fontsize=10, fontweight='bold')
-    
+
     ax.axis('off')
+    # Enforce radiological orientation + L/R markers (axial/coronal carry L/R).
+    _geo.finalize_image_view(ax, affine, slice_type)
     
     plt.tight_layout()
     

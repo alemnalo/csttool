@@ -29,6 +29,27 @@ VIEW_AXES = {
 # ---------------------------------------------------------------------------
 # Coordinate transforms
 # ---------------------------------------------------------------------------
+def to_ras(data, affine):
+    """Reorient a 3D array + affine to RAS+ voxel orientation.
+
+    Returns ``(data_ras, affine_ras)``. Used so a figure's background image can
+    be placed in the same voxel grid as data (e.g. ROI masks) that the pipeline
+    produced in RAS-reoriented space. This is a pure relabelling of voxel axes
+    (no resampling); anatomical content is unchanged.
+    """
+    import nibabel as nib
+    from nibabel.orientations import (
+        io_orientation, axcodes2ornt, ornt_transform, apply_orientation,
+        inv_ornt_aff,
+    )
+    src = io_orientation(affine)
+    dst = axcodes2ornt(("R", "A", "S"))
+    transform = ornt_transform(src, dst)
+    data_ras = apply_orientation(np.asarray(data), transform)
+    affine_ras = affine @ inv_ornt_aff(transform, np.asarray(data).shape)
+    return data_ras, affine_ras
+
+
 def voxel_to_world(points_vox, affine):
     """Map voxel coordinates (N,3) to world/RASMM coordinates (N,3)."""
     pts = np.asarray(points_vox, dtype=float)
@@ -51,13 +72,18 @@ def voxel_axis_world_x_sign(affine, voxel_axis):
     """Sign of world-X change as the given voxel axis increases.
 
     Returns +1 if increasing this voxel index moves toward anatomical Right
-    (world +X in RAS), -1 toward anatomical Left, 0 if this axis carries no
-    left/right component.
+    (world +X in RAS), -1 toward anatomical Left, and 0 if this voxel axis is
+    not the dominant left/right axis (e.g. the anterior/superior axes, whose
+    X-component is only a small rotation term).
     """
-    comp = affine[0, voxel_axis]
-    if comp > 0:
+    col = affine[:3, voxel_axis]
+    # The X (left/right) component must dominate this voxel axis for it to be a
+    # left/right axis; otherwise a tiny rotation term must not be treated as L/R.
+    if abs(col[0]) < max(abs(col[1]), abs(col[2])):
+        return 0
+    if col[0] > 0:
         return 1
-    if comp < 0:
+    if col[0] < 0:
         return -1
     return 0
 
@@ -113,6 +139,35 @@ def add_lr_markers(ax, fontsize=11, color="white", pad=0.02):
     ax.text(1 - pad, 0.5, "L", transform=ax.transAxes, ha="right", va="center",
             fontsize=fontsize, fontweight="bold", color=color,
             path_effects=_outline())
+
+
+def finalize_image_view(ax, affine, view, markers=True):
+    """One-call radiological finalize for an anatomical-image axis.
+
+    Ensures the view is radiological for its affine and, if the view carries a
+    left/right axis (axial/coronal), adds "R"/"L" markers. Returns True if L/R
+    markers were added.
+    """
+    has_lr = enforce_radiological_image(ax, affine, view)
+    if has_lr and markers:
+        add_lr_markers(ax)
+    return has_lr
+
+
+def finalize_world_plane(ax, horizontal_world_axis, markers=True):
+    """One-call radiological finalize for a world-coordinate plot axis.
+
+    If the horizontal axis is world-X (index 0) the axis is oriented radiologically
+    (anatomical Left on the viewer's right) and "R"/"L" markers are added.
+    Non-X horizontal axes (e.g. sagittal Y-Z) are left untouched. Returns True
+    if L/R markers were added.
+    """
+    if horizontal_world_axis != 0:
+        return False
+    set_world_x_radiological(ax)
+    if markers:
+        add_lr_markers(ax, color="black")
+    return True
 
 
 def _outline():

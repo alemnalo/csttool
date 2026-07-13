@@ -7,6 +7,8 @@ from dipy.io.image import load_nifti
 from dipy.io import read_bvals_bvecs
 from dipy.core.gradients import gradient_table
 
+from csttool.viz import geometry as _viz_geometry
+
 def cmd_extract(args: argparse.Namespace) -> dict | None:
     """
     Extract bilateral CST using atlas-based ROI filtering.
@@ -217,11 +219,16 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
     
     if getattr(args, 'save_visualizations', False):
         from csttool.extract.modules import save_all_extraction_visualizations
+        # Reorient the FA background into the same (RAS) voxel grid as the ROI
+        # masks so overlays and slice selection align; the masks and affine are
+        # produced by registration in RAS. Presentation only - does not affect
+        # extracted streamlines or metrics.
+        _fa_viz, _affine_viz = _viz_geometry.to_ras(fa_data, fa_affine)
         save_all_extraction_visualizations(
             cst_result=cst_result,
-            fa=fa_data,
+            fa=_fa_viz,
             masks=masks,
-            affine=warped['subject_affine'],
+            affine=_affine_viz,
             output_dir=args.out,
             subject_id=args.subject_id,
             jacobian_det=reg_result.get('jacobian_det'),
@@ -383,11 +390,13 @@ def run_roi_seeded_extraction(
     # Visualizations
     if getattr(args, 'save_visualizations', False):
         from csttool.extract.modules import save_all_extraction_visualizations
+        # Reorient FA into the masks' (RAS) grid so overlays align (see cmd_extract).
+        _fa_viz, _affine_viz = _viz_geometry.to_ras(fa_data, fa_affine)
         save_all_extraction_visualizations(
             cst_result=cst_result,
-            fa=fa_data,
+            fa=_fa_viz,
             masks=masks,
-            affine=fa_affine,
+            affine=_affine_viz,
             output_dir=output_dir,
             subject_id=subject_id,
             jacobian_det=reg_result.get('jacobian_det'),
@@ -537,11 +546,13 @@ def run_bidirectional_extraction(
 
     if getattr(args, 'save_visualizations', False):
         from csttool.extract.modules import save_all_extraction_visualizations
+        # Reorient FA into the masks' (RAS) grid so overlays align (see cmd_extract).
+        _fa_viz, _affine_viz = _viz_geometry.to_ras(fa_data, fa_affine)
         save_all_extraction_visualizations(
             cst_result=cst_result,
-            fa=fa_data,
+            fa=_fa_viz,
             masks=masks,
-            affine=fa_affine,
+            affine=_affine_viz,
             output_dir=output_dir,
             subject_id=subject_id,
             jacobian_det=reg_result.get('jacobian_det'),

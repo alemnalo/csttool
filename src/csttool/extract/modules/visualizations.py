@@ -11,6 +11,8 @@ matplotlib.use('Agg')  # Non-interactive backend for file saving
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+from csttool.viz import geometry as _geo
+
 
 # =============================================================================
 # SHARED HELPERS
@@ -113,6 +115,7 @@ def plot_registration_comparison(
     mni_warped,
     output_dir,
     subject_id=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -202,7 +205,13 @@ def plot_registration_comparison(
         axes[row, 0].text(-0.15, 0.5, view_name, transform=axes[row, 0].transAxes,
                          fontsize=12, fontweight='bold', va='center', ha='right',
                          rotation=90)
-    
+
+        # Radiological orientation + L/R markers for all three panels of this view.
+        if affine is not None:
+            view = view_name.lower()
+            for c in range(3):
+                _geo.finalize_image_view(axes[row, c], affine, view)
+
     fig_path = viz_dir / f"{prefix}registration_qc.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -222,6 +231,7 @@ def plot_roi_masks(
     masks,
     output_dir,
     subject_id=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -325,7 +335,13 @@ def plot_roi_masks(
         axes[1, col].set_title(f'{view_name}\nROI overlay')
         axes[1, col].axis('off')
         axes[1, col].set_box_aspect(1)
-    
+
+        # Enforce radiological orientation + L/R markers (axial/coronal only).
+        if affine is not None:
+            view = view_name.lower()
+            _geo.finalize_image_view(axes[0, col], affine, view)
+            _geo.finalize_image_view(axes[1, col], affine, view)
+
     # Add legend
     from matplotlib.patches import Patch
     legend_elements = [
@@ -354,6 +370,7 @@ def plot_jacobian_map(
     fa,
     output_dir,
     subject_id=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -427,6 +444,11 @@ def plot_jacobian_map(
         axes[1, col].set_title(f'{name}\nJacobian overlay')
         axes[1, col].axis('off')
         axes[1, col].set_box_aspect(1)
+
+        if affine is not None:
+            view = name.lower()
+            _geo.finalize_image_view(axes[0, col], affine, view)
+            _geo.finalize_image_view(axes[1, col], affine, view)
 
     # Colorbar
     cbar = fig.colorbar(im, ax=axes[1, :], orientation='horizontal',
@@ -519,7 +541,8 @@ def plot_cst_extraction(
         ax.set_title(f'{name}\nFA background')
         ax.axis('off')
         ax.set_box_aspect(1)
-    
+        _geo.finalize_image_view(ax, affine, name.lower())
+
     # Row 1: Streamlines ONLY (no FA background) on neutral background
     views_sl = [
         ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)'),   # Y vs Z
@@ -561,6 +584,8 @@ def plot_cst_extraction(
         ax.set_aspect('equal', adjustable='box')
         ax.grid(True, alpha=0.3, color='white')
         ax.set_box_aspect(1)
+        # Radiological world orientation + L/R markers for X-bearing planes.
+        _geo.finalize_world_plane(ax, d1)
     
     # Add legend INSIDE the bottom-right plot (cleanest solution)
     from matplotlib.lines import Line2D
@@ -676,10 +701,11 @@ def plot_hemisphere_separation(
         fontsize=14, fontweight='bold'
     )
 
-    # View configurations
+    # View configurations. Radiological display (anatomical Left on the viewer's
+    # right) is enforced below with explicit R/L markers, so the x label stays plain.
     views = [
-        ('Coronal (X-Z)', 0, 2, 'X (mm) [Left <- | -> Right]', 'Z (mm)'),
-        ('Axial (X-Y)', 0, 1, 'X (mm) [Left <- | -> Right]', 'Y (mm)'),
+        ('Coronal (X-Z)', 0, 2, 'X (mm)', 'Z (mm)'),
+        ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)'),
     ]
 
     # Compute axis limits from all streamlines
@@ -744,6 +770,10 @@ def plot_hemisphere_separation(
         ax_right.set_title(f'RIGHT CST\n{view_name}' if row == 0 else '')
         ax_right.set_aspect('equal', adjustable='box')
         ax_right.grid(True, alpha=0.3, color='white')
+
+        # Radiological world orientation + L/R markers (all three panels of the row).
+        for ax in (ax_left, ax_both, ax_right):
+            _geo.finalize_world_plane(ax, d1)
 
     # Add legend to middle panel
     from matplotlib.lines import Line2D
@@ -890,7 +920,8 @@ def create_extraction_summary(
         ax.imshow(overlay, origin='lower', extent=padded_extent)
         ax.set_title(f'{name}: ROI Masks', fontsize=12)
         ax.axis('off')
-        
+        _geo.finalize_image_view(ax, affine, name.lower())
+
         # Add ROI legend only to the sagittal view (last column)
         if col == 2:  # Sagittal view
             from matplotlib.patches import Patch
@@ -946,7 +977,8 @@ def create_extraction_summary(
         ax.set_aspect('equal', adjustable='box')
         ax.grid(True, alpha=0.3, color='white')
         ax.tick_params(labelsize=10)
-        
+        _geo.finalize_world_plane(ax, d1)
+
         # Add CST legend only to the sagittal view (last column)
         if col == 2:  # Sagittal view
             from matplotlib.lines import Line2D
@@ -1054,18 +1086,18 @@ def save_all_extraction_visualizations(
     # Registration QC (if MNI warped provided)
     if mni_warped is not None:
         viz_paths['registration_qc'] = plot_registration_comparison(
-            fa, mni_warped, output_dir, subject_id, verbose=verbose
+            fa, mni_warped, output_dir, subject_id, affine=affine, verbose=verbose
         )
 
     # Jacobian map (if Jacobian data provided)
     if jacobian_det is not None:
         viz_paths['jacobian_map'] = plot_jacobian_map(
-            jacobian_det, fa, output_dir, subject_id, verbose=verbose
+            jacobian_det, fa, output_dir, subject_id, affine=affine, verbose=verbose
         )
 
     # ROI masks
     viz_paths['roi_masks'] = plot_roi_masks(
-        fa, masks, output_dir, subject_id, verbose=verbose
+        fa, masks, output_dir, subject_id, affine=affine, verbose=verbose
     )
 
     # CST extraction

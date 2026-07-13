@@ -33,6 +33,18 @@ class TestVoxelWorldSign:
         assert geo.voxel_axis_world_x_sign(LAS_AFFINE, 1) == 0
         assert geo.voxel_axis_world_x_sign(LAS_AFFINE, 2) == 0
 
+    def test_small_rotation_term_is_not_lr(self):
+        # A realistic affine has small off-diagonal rotation terms; a tiny X
+        # component on the anterior/superior axes must NOT be treated as L/R
+        # (otherwise sagittal views wrongly get R/L markers).
+        rot = np.array([[-1.997, 0.0, 0.106, 90.0],
+                        [0.0, 2.0, -0.006, -75.0],
+                        [0.106, 0.006, 1.997, -70.0],
+                        [0.0, 0.0, 0.0, 1.0]])
+        assert geo.voxel_axis_world_x_sign(rot, 0) == -1  # X-dominant axis
+        assert geo.voxel_axis_world_x_sign(rot, 1) == 0   # Y axis, tiny X term
+        assert geo.voxel_axis_world_x_sign(rot, 2) == 0   # Z axis, small X term
+
 
 class TestRadiologicalImage:
     @pytest.mark.parametrize("view", ["axial", "coronal"])
