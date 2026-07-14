@@ -248,21 +248,30 @@ def plot_roi_masks(
     viz_dir.mkdir(parents=True, exist_ok=True)
     
     prefix = f"{subject_id}_" if subject_id else ""
-    
-    # Get slice indices
-    mid_ax = fa.shape[2] // 2
-    mid_cor = fa.shape[1] // 2
-    mid_sag = fa.shape[0] // 2
-    
-    # Create figure
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
-    fig.suptitle(f"ROI Masks - {subject_id or 'Subject'}\nMotor Cortex (L/R) + Brainstem",
-                 fontsize=14, fontweight='bold')
-    
+
     # Get masks (keys from create_cst_roi_masks: 'motor_left', 'motor_right', 'brainstem')
     motor_left = masks.get('motor_left', np.zeros_like(fa))
     motor_right = masks.get('motor_right', np.zeros_like(fa))
     brainstem = masks.get('brainstem', np.zeros_like(fa))
+
+    # Pick, per view, the slice containing the most ROI voxels so panels are not
+    # near-empty (a mid slice often misses the ROIs entirely). Fall back to the
+    # middle slice when no ROI intersects that axis (NEW-6).
+    combined = (motor_left > 0) | (motor_right > 0) | (brainstem > 0)
+
+    def _densest(axis, fallback):
+        other = tuple(a for a in range(3) if a != axis)
+        counts = combined.sum(axis=other)
+        return int(counts.argmax()) if counts.any() else fallback
+
+    mid_sag = _densest(0, fa.shape[0] // 2)
+    mid_cor = _densest(1, fa.shape[1] // 2)
+    mid_ax = _densest(2, fa.shape[2] // 2)
+
+    # Create figure
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
+    fig.suptitle(f"ROI Masks - {subject_id or 'Subject'}\nMotor Cortex (L/R) + Brainstem",
+                 fontsize=14, fontweight='bold')
     
     views = [
         ('Axial', fa[:, :, mid_ax], motor_left[:, :, mid_ax], 
@@ -568,11 +577,11 @@ def plot_cst_extraction(
         
         # Plot left CST (blue)
         for sl in left_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.3, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.3, linewidth=0.8)
         
         # Plot right CST (red)
         for sl in right_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.3, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.3, linewidth=0.8)
         
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -589,8 +598,8 @@ def plot_cst_extraction(
     # Add legend INSIDE the bottom-right plot (cleanest solution)
     from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0], [0], color='blue', linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
-        Line2D([0], [0], color='red', linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
+        Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
+        Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
     ]
     
     # Place legend in the bottom-right plot (axial view)
@@ -718,7 +727,7 @@ def plot_hemisphere_separation(
         ax_left = axes[row, 0]
         ax_left.set_facecolor('#f5f5f5')
         for sl in left_vis:
-            ax_left.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.4, linewidth=0.8)
+            ax_left.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.4, linewidth=0.8)
 
         # Add midline reference
         ax_left.axvline(midline_x, color='gray', linestyle='--', linewidth=1.5,
@@ -728,7 +737,7 @@ def plot_hemisphere_separation(
         ax_left.set_ylim(ylim)
         ax_left.set_xlabel(xlabel)
         ax_left.set_ylabel(ylabel)
-        ax_left.set_title(f'LEFT CST\n{view_name}' if row == 0 else '')
+        ax_left.set_title(f'LEFT CST\n{view_name}' if row == 0 else view_name)
         ax_left.set_aspect('equal', adjustable='box')
         ax_left.grid(True, alpha=0.3, color='white')
 
@@ -736,9 +745,9 @@ def plot_hemisphere_separation(
         ax_both = axes[row, 1]
         ax_both.set_facecolor('#f5f5f5')
         for sl in left_vis:
-            ax_both.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.3, linewidth=0.8)
+            ax_both.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.3, linewidth=0.8)
         for sl in right_vis:
-            ax_both.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.3, linewidth=0.8)
+            ax_both.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.3, linewidth=0.8)
 
         ax_both.axvline(midline_x, color='black', linestyle='-', linewidth=2,
                         alpha=0.8)
@@ -747,7 +756,7 @@ def plot_hemisphere_separation(
         ax_both.set_ylim(ylim)
         ax_both.set_xlabel(xlabel)
         ax_both.set_ylabel(ylabel)
-        ax_both.set_title(f'BILATERAL\n{view_name}' if row == 0 else '')
+        ax_both.set_title(f'BILATERAL\n{view_name}' if row == 0 else view_name)
         ax_both.set_aspect('equal', adjustable='box')
         ax_both.grid(True, alpha=0.3, color='white')
 
@@ -755,7 +764,7 @@ def plot_hemisphere_separation(
         ax_right = axes[row, 2]
         ax_right.set_facecolor('#f5f5f5')
         for sl in right_vis:
-            ax_right.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.4, linewidth=0.8)
+            ax_right.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.4, linewidth=0.8)
 
         ax_right.axvline(midline_x, color='gray', linestyle='--', linewidth=1.5,
                          alpha=0.7)
@@ -764,7 +773,7 @@ def plot_hemisphere_separation(
         ax_right.set_ylim(ylim)
         ax_right.set_xlabel(xlabel)
         ax_right.set_ylabel(ylabel)
-        ax_right.set_title(f'RIGHT CST\n{view_name}' if row == 0 else '')
+        ax_right.set_title(f'RIGHT CST\n{view_name}' if row == 0 else view_name)
         ax_right.set_aspect('equal', adjustable='box')
         ax_right.grid(True, alpha=0.3, color='white')
 
@@ -775,8 +784,8 @@ def plot_hemisphere_separation(
     # Add legend to middle panel
     from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0], [0], color='blue', linewidth=2, label=f'Left ({left_count:,})'),
-        Line2D([0], [0], color='red', linewidth=2, label=f'Right ({right_count:,})'),
+        Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({left_count:,})'),
+        Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({right_count:,})'),
         Line2D([0], [0], color='black', linestyle='-', linewidth=2, label='Midsagittal plane'),
     ]
     axes[0, 1].legend(handles=legend_elements, loc='upper right', fontsize=9,
@@ -806,7 +815,9 @@ def plot_hemisphere_separation(
         qc_color = '#ccffcc'  # Light green - OK
         qc_text += "\n[OK: Good hemisphere separation]"
 
-    fig.text(0.5, 0.02, qc_text, ha='center', fontsize=10,
+    # Place the QC box below the panels (negative y + tight bbox on save) so it
+    # never overlaps the bottom row (NEW-7).
+    fig.text(0.5, -0.04, qc_text, ha='center', va='top', fontsize=10,
              bbox=dict(boxstyle='round', facecolor=qc_color, alpha=0.8))
 
     # Save
@@ -921,8 +932,8 @@ def create_extraction_summary(
         if col == 2:  # Sagittal view
             from matplotlib.patches import Patch
             legend_elements = [
-                Patch(facecolor='blue', alpha=0.5, label='Motor L'),
-                Patch(facecolor='red', alpha=0.5, label='Motor R'),
+                Patch(facecolor=_style.MOTOR_LEFT, alpha=0.5, label='Motor L'),
+                Patch(facecolor=_style.MOTOR_RIGHT, alpha=0.5, label='Motor R'),
                 Patch(facecolor='green', alpha=0.5, label='Brainstem'),
             ]
             # Place legend in upper right corner
@@ -956,11 +967,11 @@ def create_extraction_summary(
         
         # Plot left CST
         for sl in left_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.25, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.25, linewidth=0.8)
         
         # Plot right CST
         for sl in right_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.25, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.25, linewidth=0.8)
         
         ax.set_xlabel(xlabel, fontsize=11)
         ax.set_ylabel(ylabel, fontsize=11)
@@ -978,8 +989,8 @@ def create_extraction_summary(
         if col == 2:  # Sagittal view
             from matplotlib.lines import Line2D
             legend_elements = [
-                Line2D([0], [0], color='blue', linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
-                Line2D([0], [0], color='red', linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
+                Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
+                Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
             ]
             # Place legend in upper right corner
             ax.legend(handles=legend_elements, loc='upper right', fontsize=9,

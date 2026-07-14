@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for file saving
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, to_rgba
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
@@ -339,10 +339,12 @@ def plot_brain_mask_overlay(
         # Row 1: b0 with mask overlay
         axes[1, col].imshow(b0_slice.T, cmap='gray', origin='lower', vmin=0, vmax=vmax)
         
-        # Create masked array for overlay
-        mask_overlay = np.ma.masked_where(mask_slice.T == 0, mask_slice.T)
-        axes[1, col].imshow(mask_overlay, cmap='Reds', alpha=0.4, origin='lower')
-        
+        # Solid semi-transparent fill where the mask is set (a Reds colormap on a
+        # constant array normalizes to near-white and is effectively invisible).
+        overlay = np.zeros((*mask_slice.T.shape, 4))
+        overlay[mask_slice.T > 0] = to_rgba('red', 0.30)
+        axes[1, col].imshow(overlay, origin='lower')
+
         # Add contour
         axes[1, col].contour(mask_slice.T, levels=[0.5], colors='red', linewidths=1)
         axes[1, col].set_title(f'{view_name}\nwith brain mask')
@@ -577,11 +579,12 @@ def create_preprocessing_summary(
     proc_std = np.std(data_preprocessed[brain_mask])
     
     # Create figure with constrained_layout
-    fig = plt.figure(figsize=(18, 12), constrained_layout=True)
+    fig = plt.figure(figsize=(18, 10), constrained_layout=True)
     fig.suptitle(f"Preprocessing Summary - {title_id or stem}", fontsize=16, fontweight='bold')
-    
-    # Create grid
-    gs = fig.add_gridspec(3, 4, hspace=0.3, wspace=0.3)
+
+    # Create grid. The stats row is text-only, so give it a much smaller height
+    # than the two image rows to remove the empty band above the stats box (NEW-4).
+    gs = fig.add_gridspec(3, 4, height_ratios=[1.0, 1.0, 0.35])
     
     vmax = np.percentile(orig_b0[mask_slice], 99) if mask_slice.any() else np.percentile(orig_b0, 99)
     diff_vmax = np.percentile(diff[mask_slice], 99) if diff[mask_slice].any() else 1
@@ -632,7 +635,8 @@ def create_preprocessing_summary(
     for i, (name, img, msk) in enumerate(views_data):
         ax = fig.add_subplot(gs[1, i])
         ax.imshow(img.T, cmap='gray', origin='lower')
-        ax.contour(msk.T, levels=[0.5], colors='cyan', linewidths=1)
+        # Same contour colour as the dedicated Brain Mask panel (red) for consistency.
+        ax.contour(msk.T, levels=[0.5], colors='red', linewidths=1)
         ax.set_title(name)
         ax.axis('off')
         if affine is not None:
