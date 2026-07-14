@@ -693,9 +693,9 @@ print("\n" + "=" * 70)
 print("TEST 18: create_cst_roi_masks()")
 print("=" * 70)
 
+from csttool.extract.modules.visualizations import plot_roi_masks
 from csttool.extract.modules.create_roi_masks import (
     create_cst_roi_masks,
-    visualize_roi_masks,
     extract_roi_mask,
     separate_hemispheres
 )
@@ -769,16 +769,17 @@ print("✓ Test 19 PASSED")
 # =============================================================================
 
 print("\n" + "=" * 70)
-print("TEST 20: visualize_roi_masks()")
+print("TEST 20: plot_roi_masks()")
 print("=" * 70)
 
 t0 = time()
 
-viz_path = visualize_roi_masks(
+viz_path = plot_roi_masks(
+    fa=subject_data,
     masks=masks,
-    subject_fa=subject_data,
     output_dir=viz_dir / "roi_masks",
     subject_id="17_cmrr",
+    affine=subject_affine,
     verbose=True
 )
 

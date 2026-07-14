@@ -12,7 +12,9 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz import style as _style
 from csttool.viz.utils import deterministic_subsample
+from matplotlib.colors import to_rgba
 
 
 # =============================================================================
@@ -315,18 +317,16 @@ def plot_roi_masks(
             extent=padded_extent
         )
         
-        # Create colored overlays
-        # Motor cortex left (blue)
+        # Create colored overlays using the shared hemisphere/ROI palette:
+        # motor-left = Left (blue), motor-right = Right (orange), brainstem = green.
         ml_rgb = np.zeros((*padded_ml.shape, 4))  # RGBA array
-        ml_rgb[padded_ml > 0] = [0, 0, 1, 0.6]  # Blue with alpha
-        
-        # Motor cortex right (red)
+        ml_rgb[padded_ml > 0] = to_rgba(_style.MOTOR_LEFT, 0.6)
+
         mr_rgb = np.zeros((*padded_mr.shape, 4))
-        mr_rgb[padded_mr > 0] = [1, 0, 0, 0.6]  # Red with alpha
-        
-        # Brainstem (green)
+        mr_rgb[padded_mr > 0] = to_rgba(_style.MOTOR_RIGHT, 0.6)
+
         bs_rgb = np.zeros((*padded_bs.shape, 4))
-        bs_rgb[padded_bs > 0] = [0, 1, 0, 0.6]  # Green with alpha
+        bs_rgb[padded_bs > 0] = to_rgba(_style.BRAINSTEM, 0.6)
         
         # Apply overlays
         axes[1, col].imshow(ml_rgb, origin='lower', extent=padded_extent)
@@ -346,9 +346,9 @@ def plot_roi_masks(
     # Add legend
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor='blue', alpha=0.6, label='Motor Cortex Left'),
-        Patch(facecolor='red', alpha=0.6, label='Motor Cortex Right'),
-        Patch(facecolor='green', alpha=0.6, label='Brainstem'),
+        Patch(facecolor=_style.MOTOR_LEFT, alpha=0.6, label='Motor Cortex Left'),
+        Patch(facecolor=_style.MOTOR_RIGHT, alpha=0.6, label='Motor Cortex Right'),
+        Patch(facecolor=_style.BRAINSTEM, alpha=0.6, label='Brainstem'),
     ]
     fig.legend(handles=legend_elements, loc='lower center', ncol=3, fontsize=11)
     
