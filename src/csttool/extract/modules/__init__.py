@@ -11,7 +11,6 @@ from .registration import (
     compute_jacobian_hemisphere_stats,
     register_mni_to_subject,
     save_registration_report,
-    plot_registration_comparison
 )
 
 from .visualizations import (
