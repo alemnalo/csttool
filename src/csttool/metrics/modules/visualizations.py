@@ -6,7 +6,7 @@ Visualization functions for CST metrics analysis.
 This module provides:
 - Tract profile plots (FA/MD along the tract)
 - Bilateral comparison bar charts
-- 3D streamline visualizations with scalar coloring
+- Tractogram QC slice previews
 - Multi-panel summary figures
 """
 
@@ -62,25 +62,30 @@ def plot_tract_profiles(
         print(f"Warning: {scalar.upper()} not available in metrics")
         return None
     
-    left_profile = np.array(left_metrics[scalar]['profile'])
-    right_profile = np.array(right_metrics[scalar]['profile'])
-    
+    # MD is stored in mm²/s (~8e-4); the axis is labelled ×10⁻³ mm²/s, so scale
+    # the profile and mean lines by 1000 to match (same convention as
+    # plot_stacked_profiles). FA is dimensionless and unscaled.
+    scale = 1000.0 if scalar == 'md' else 1.0
+
+    left_profile = np.array(left_metrics[scalar]['profile']) * scale
+    right_profile = np.array(right_metrics[scalar]['profile']) * scale
+
     n_points = len(left_profile)
     x = np.linspace(0, 100, n_points)  # Normalized position (0-100%)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     # Plot profiles
     ax.plot(x, left_profile, 'b-', linewidth=2, label='Left CST', marker='o', markersize=4)
     ax.plot(x, right_profile, 'r-', linewidth=2, label='Right CST', marker='s', markersize=4)
-    
+
     # Add mean lines
-    left_mean = left_metrics[scalar]['mean']
-    right_mean = right_metrics[scalar]['mean']
+    left_mean = left_metrics[scalar]['mean'] * scale
+    right_mean = right_metrics[scalar]['mean'] * scale
     ax.axhline(left_mean, color='b', linestyle='--', alpha=0.5, label=f'Left mean: {left_mean:.3f}')
     ax.axhline(right_mean, color='r', linestyle='--', alpha=0.5, label=f'Right mean: {right_mean:.3f}')
-    
+
     # Labels and formatting
     scalar_label = 'Fractional Anisotropy' if scalar == 'fa' else 'Mean Diffusivity (×10⁻³ mm²/s)'
     
@@ -503,81 +508,6 @@ def plot_bilateral_comparison(
     return fig_path
 
 
-def plot_3d_streamlines(
-    streamlines_left,
-    streamlines_right,
-    fa_map,
-    affine,
-    output_dir,
-    subject_id
-):
-    """
-    Create 3D visualization of CST streamlines colored by FA.
-    
-    Parameters
-    ----------
-    streamlines_left : Streamlines
-        Left CST streamlines
-    streamlines_right : Streamlines
-        Right CST streamlines
-    fa_map : ndarray
-        3D FA map for coloring
-    affine : ndarray
-        4x4 affine transformation matrix
-    output_dir : str or Path
-        Output directory
-    subject_id : str
-        Subject identifier
-        
-    Returns
-    -------
-    fig_path : Path
-        Path to saved figure
-    """
-    
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        from dipy.viz import window, actor
-        
-        # Create renderer
-        renderer = window.Renderer()
-        renderer.SetBackground(1, 1, 1)  # White background
-        
-        # Add left CST (blue tones)
-        if len(streamlines_left) > 0:
-            renderer.add(actor.line(
-                streamlines_left,
-                colors=(0.2, 0.4, 0.8),
-                linewidth=2,
-                opacity=0.8
-            ))
-        
-        # Add right CST (red tones)
-        if len(streamlines_right) > 0:
-            renderer.add(actor.line(
-                streamlines_right,
-                colors=(0.8, 0.2, 0.2),
-                linewidth=2,
-                opacity=0.8
-            ))
-        
-        # Set camera
-        renderer.set_camera(position=(200, 200, 200), focal_point=(0, 0, 0))
-        
-        # Save figure
-        fig_path = output_dir / f"{subject_id}_3d_streamlines.png"
-        window.record(renderer, out_path=str(fig_path), size=(800, 800))
-        
-        print(f"  ✓ 3D streamlines saved: {fig_path}")
-        return fig_path
-        
-    except Exception as e:
-        print(f"  ⚠️ 3D visualization failed: {e}")
-        return None
-
-
 def create_summary_figure(
     comparison,
     streamlines_left,
@@ -726,8 +656,12 @@ def create_summary_figure(
     ax6.set_xlabel('Laterality Index (LI)')
     ax6.set_title('Asymmetry Analysis', fontweight='bold')
     ax6.grid(True, axis='x', alpha=0.3)
-    ax6.text(0.12, 0.5, 'Left > Right', transform=ax6.transAxes, fontsize=9, color='blue')
-    ax6.text(-0.12, 0.5, 'Right > Left', transform=ax6.transAxes, fontsize=9, color='red', ha='right')
+    # Positive LI bars extend right (Left > Right); negative extend left
+    # (Right > Left). Label each side where its bars actually point.
+    ax6.text(0.98, 0.95, 'Left > Right', transform=ax6.transAxes, fontsize=9,
+             color='#2196F3', ha='right', va='top')
+    ax6.text(0.02, 0.95, 'Right > Left', transform=ax6.transAxes, fontsize=9,
+             color='#F44336', ha='left', va='top')
     
     # Overall title
     plt.suptitle(f'CST Analysis Summary - {subject_id}', fontsize=16, fontweight='bold', y=0.98)

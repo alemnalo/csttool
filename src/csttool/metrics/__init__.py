@@ -29,7 +29,6 @@ from .modules.bilateral_analysis import (
 from .modules.visualizations import (
     plot_tract_profiles,
     plot_bilateral_comparison,
-    plot_3d_streamlines,
     create_summary_figure,
     plot_asymmetry_radar,
     plot_stacked_profiles,
@@ -62,7 +61,6 @@ __all__ = [
     # Visualizations
     'plot_tract_profiles',
     'plot_bilateral_comparison',
-    'plot_3d_streamlines',
     'create_summary_figure',
     'plot_asymmetry_radar',
     'plot_stacked_profiles',
