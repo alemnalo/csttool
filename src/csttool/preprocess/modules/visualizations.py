@@ -21,6 +21,7 @@ from matplotlib.colors import Normalize
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz.utils import viz_rng
 
 
 def plot_denoising_comparison(
@@ -38,7 +39,7 @@ def plot_denoising_comparison(
     Create before/after denoising comparison figure.
     
     Shows three orthogonal views comparing original and denoised data,
-    plus RMS residuals highlighting removed noise.
+    plus per-voxel absolute-difference residuals highlighting removed noise.
     
     Parameters
     ----------
@@ -81,18 +82,19 @@ def plot_denoising_comparison(
     before = data_before[..., vol_idx]
     after = data_after[..., vol_idx]
     
-    # Compute RMS residuals (accentuates outliers)
-    rms_diff = np.sqrt((before.astype(np.float64) - after.astype(np.float64)) ** 2)
+    # Per-voxel absolute difference (removed signal). sqrt(x**2) == |x|; there is
+    # no mean here, so this is |before - after|, not an RMS.
+    abs_diff = np.abs(before.astype(np.float64) - after.astype(np.float64))
     if brain_mask is not None and brain_mask.shape == before.shape:
-        rms_diff[~brain_mask] = 0
-    
+        abs_diff[~brain_mask] = 0
+
     # Define orthogonal views
     views = [
-        ('Axial', before[:, :, mid_ax], after[:, :, mid_ax], rms_diff[:, :, mid_ax]),
-        ('Coronal', before[:, mid_cor, :], after[:, mid_cor, :], rms_diff[:, mid_cor, :]),
-        ('Sagittal', before[mid_sag, :, :], after[mid_sag, :, :], rms_diff[mid_sag, :, :]),
+        ('Axial', before[:, :, mid_ax], after[:, :, mid_ax], abs_diff[:, :, mid_ax]),
+        ('Coronal', before[:, mid_cor, :], after[:, mid_cor, :], abs_diff[:, mid_cor, :]),
+        ('Sagittal', before[mid_sag, :, :], after[mid_sag, :, :], abs_diff[mid_sag, :, :]),
     ]
-    
+
     # Create figure: 3 rows (views) × 3 columns (original, denoised, residuals)
     fig, axes = plt.subplots(3, 3, figsize=(12, 12),
                               subplot_kw={'xticks': [], 'yticks': []})
@@ -102,7 +104,7 @@ def plot_denoising_comparison(
     # Column titles
     axes[0, 0].set_title('Original', fontsize=12)
     axes[0, 1].set_title('Denoised', fontsize=12)
-    axes[0, 2].set_title('Residuals (RMS)', fontsize=12)
+    axes[0, 2].set_title('|Difference|', fontsize=12)
     
     for row, (view_name, orig, den, res) in enumerate(views):
         # Original
@@ -144,7 +146,7 @@ def plot_gibbs_unringing_comparison(
     Create before/after Gibbs unringing comparison figure.
     
     Shows three orthogonal views comparing data before and after
-    unringing, plus RMS residuals highlighting removed ringing artifacts.
+    unringing, plus per-voxel absolute-difference residuals highlighting removed ringing artifacts.
     
     Parameters
     ----------
@@ -185,18 +187,19 @@ def plot_gibbs_unringing_comparison(
     before = data_before[..., vol_idx]
     after = data_after[..., vol_idx]
     
-    # Compute RMS residuals (accentuates outliers)
-    rms_diff = np.sqrt((before.astype(np.float64) - after.astype(np.float64)) ** 2)
+    # Per-voxel absolute difference (removed ringing). sqrt(x**2) == |x|; there is
+    # no mean here, so this is |before - after|, not an RMS.
+    abs_diff = np.abs(before.astype(np.float64) - after.astype(np.float64))
     if brain_mask is not None and brain_mask.shape == before.shape:
-        rms_diff[~brain_mask] = 0
-    
+        abs_diff[~brain_mask] = 0
+
     # Define orthogonal views
     views = [
-        ('Axial', before[:, :, mid_ax], after[:, :, mid_ax], rms_diff[:, :, mid_ax]),
-        ('Coronal', before[:, mid_cor, :], after[:, mid_cor, :], rms_diff[:, mid_cor, :]),
-        ('Sagittal', before[mid_sag, :, :], after[mid_sag, :, :], rms_diff[mid_sag, :, :]),
+        ('Axial', before[:, :, mid_ax], after[:, :, mid_ax], abs_diff[:, :, mid_ax]),
+        ('Coronal', before[:, mid_cor, :], after[:, mid_cor, :], abs_diff[:, mid_cor, :]),
+        ('Sagittal', before[mid_sag, :, :], after[mid_sag, :, :], abs_diff[mid_sag, :, :]),
     ]
-    
+
     # Create figure: 3 rows (views) × 3 columns (before, after, residuals)
     fig, axes = plt.subplots(3, 3, figsize=(12, 12),
                               subplot_kw={'xticks': [], 'yticks': []})
@@ -206,7 +209,7 @@ def plot_gibbs_unringing_comparison(
     # Column titles
     axes[0, 0].set_title('Before', fontsize=12)
     axes[0, 1].set_title('After', fontsize=12)
-    axes[0, 2].set_title('Residuals (RMS)', fontsize=12)
+    axes[0, 2].set_title('|Difference|', fontsize=12)
     
     for row, (view_name, bef, aft, res) in enumerate(views):
         # Before
@@ -510,9 +513,13 @@ def create_preprocessing_summary(
     proc_shape = data_preprocessed.shape[:3]
     mask_shape = brain_mask.shape
     
-    # If original and preprocessed have different shapes, use preprocessed for all comparisons
-    if orig_shape != proc_shape or orig_shape != mask_shape:
-        # Use preprocessed data as "original" for visualization when shapes mismatch
+    # A true before/after in one slice grid needs matching shapes. Reslicing or
+    # cropping changes the preprocessed grid, so the raw "original" is no longer
+    # co-registered with it. Rather than silently substituting preprocessed data
+    # while still labelling a panel "Original" (a misleading figure), record the
+    # mismatch and annotate the affected panels honestly below.
+    shapes_match = (orig_shape == proc_shape and orig_shape == mask_shape)
+    if not shapes_match:
         data_original = data_preprocessed
     
     # Get b0 volume index
@@ -554,19 +561,22 @@ def create_preprocessing_summary(
     diff_vmax = np.percentile(diff[mask_slice], 99) if diff[mask_slice].any() else 1
     
     # Row 0: Original, Preprocessed, Difference, Mask
+    orig_title = 'Original b0' if shapes_match else 'Preprocessed b0\n(original grid differs)'
+    diff_title = 'Difference (denoising)' if shapes_match else 'Difference N/A\n(shape changed)'
+
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.imshow(orig_b0.T, cmap='gray', origin='lower', vmin=0, vmax=vmax)
-    ax1.set_title('Original b0')
+    ax1.set_title(orig_title)
     ax1.axis('off')
-    
+
     ax2 = fig.add_subplot(gs[0, 1])
     ax2.imshow(proc_b0.T, cmap='gray', origin='lower', vmin=0, vmax=vmax)
     ax2.set_title('Preprocessed b0')
     ax2.axis('off')
-    
+
     ax3 = fig.add_subplot(gs[0, 2])
     ax3.imshow(diff.T, cmap='hot', origin='lower', vmin=0, vmax=diff_vmax)
-    ax3.set_title('Difference (denoising)')
+    ax3.set_title(diff_title)
     ax3.axis('off')
     
     ax4 = fig.add_subplot(gs[0, 3])
@@ -605,9 +615,9 @@ def create_preprocessing_summary(
     orig_vals = data_original[brain_mask].flatten()
     proc_vals = data_preprocessed[brain_mask].flatten()
     
-    # Subsample for efficiency
+    # Subsample for efficiency (deterministic local RNG; no global-state mutation)
     if len(orig_vals) > 100000:
-        idx = np.random.choice(len(orig_vals), 100000, replace=False)
+        idx = np.sort(viz_rng().choice(len(orig_vals), 100000, replace=False))
         orig_vals = orig_vals[idx]
         proc_vals = proc_vals[idx]
     
@@ -623,7 +633,13 @@ def create_preprocessing_summary(
     ax_stats.axis('off')
     
     mc_status = "Applied" if motion_correction_applied else "Not applied"
-    
+    bvalues = sorted({int(b) for b in gtab.bvals})  # plain ints (no numpy repr leak)
+    grid_note = (
+        "" if shapes_match
+        else "\nNOTE: original grid differs from preprocessed (reslice/crop);\n"
+             "      'Original' and 'Difference' panels are not directly comparable.\n"
+    )
+
     stats_text = (
         f"{'─' * 80}\n"
         f"PREPROCESSING STATISTICS\n"
@@ -631,12 +647,13 @@ def create_preprocessing_summary(
         f"Data Shape:           {data_original.shape}\n"
         f"Voxel Dimensions:     {data_original.shape[:3]}\n"
         f"Number of Volumes:    {data_original.shape[3]}\n"
-        f"B-values:             {sorted(set(gtab.bvals.astype(int)))}\n\n"
+        f"B-values:             {bvalues}\n\n"
         f"Brain Mask Coverage:  {brain_voxels:,} voxels ({coverage:.1f}%)\n\n"
         f"Intensity (in brain):\n"
         f"  Original:           mean = {orig_mean:.1f}, std = {orig_std:.1f}\n"
         f"  Preprocessed:       mean = {proc_mean:.1f}, std = {proc_std:.1f}\n\n"
         f"Motion Correction:    {mc_status}\n"
+        f"{grid_note}"
         f"{'─' * 80}"
     )
     
