@@ -13,6 +13,7 @@ from matplotlib.colors import Normalize
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz import style as _style
 from csttool.viz.utils import deterministic_subsample, viz_rng
 
 
@@ -59,7 +60,7 @@ def plot_tensor_maps(
     
     # Create figure
     n_cols = 4 if rgb is not None else 3
-    fig, axes = plt.subplots(3, n_cols, figsize=(4*n_cols, 12))
+    fig, axes = plt.subplots(3, n_cols, figsize=(4*n_cols, 12), constrained_layout=True)
     fig.suptitle(f"Tensor Maps - {stem}", fontsize=14, fontweight='bold')
     
     # Statistics for display
@@ -79,9 +80,10 @@ def plot_tensor_maps(
             axes[row, 0].set_title(f'FA\nmean={fa_brain.mean():.3f}')
         axes[row, 0].axis('off')
         
-        # MD
-        axes[row, 1].imshow(slicer(md).T, cmap='hot', origin='lower', 
-                           vmin=0, vmax=np.percentile(md_brain, 99))
+        # MD (displayed ×10⁻³ mm²/s to match the labelled scale + colorbar)
+        md_mappable = axes[row, 1].imshow(
+            slicer(md).T * 1000, cmap=_style.MD_CMAP, origin='lower',
+            vmin=0, vmax=np.percentile(md_brain * 1000, 99))
         if row == 0:
             axes[row, 1].set_title(f'MD (×10⁻³)\nmean={md_brain.mean()*1000:.2f}')
         axes[row, 1].axis('off')
@@ -111,8 +113,10 @@ def plot_tensor_maps(
             for c in range(n_cols):
                 _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
 
-    plt.tight_layout()
-    
+    # One shared colorbar for the continuous MD column (constrained_layout makes room).
+    _style.add_scalar_colorbar(fig, md_mappable, list(axes[:, 1]),
+                               'MD (×10⁻³ mm²/s)')
+
     fig_path = viz_dir / f"{stem}_tensor_maps.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -630,9 +634,15 @@ def create_tracking_summary(
     ax_fa.axis('off')
     
     ax_md = fig.add_subplot(gs[0, 1])
-    ax_md.imshow(md[:, :, mid_ax].T, cmap='hot', origin='lower')
-    ax_md.set_title('MD (Axial)')
+    md_slice = md[:, :, mid_ax].T * 1000  # ×10⁻³ mm²/s to match the label
+    md_vmax = np.percentile(md[brain_mask > 0] * 1000, 99) if brain_mask.any() else None
+    md_im = ax_md.imshow(md_slice, cmap=_style.MD_CMAP, origin='lower', vmin=0, vmax=md_vmax)
+    ax_md.set_title('MD (Axial, ×10⁻³)')
     ax_md.axis('off')
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    _md_cax = make_axes_locatable(ax_md).append_axes('right', size='5%', pad=0.05)
+    _md_cbar = fig.colorbar(md_im, cax=_md_cax)
+    _md_cbar.ax.tick_params(labelsize=8)
     
     ax_wm = fig.add_subplot(gs[0, 2])
     ax_wm.imshow(fa[:, :, mid_ax].T, cmap='gray', origin='lower', vmin=0, vmax=1)
