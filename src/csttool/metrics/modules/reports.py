@@ -417,15 +417,12 @@ def save_html_report(
             'ad': fmt_localized('ad', region_key)
         })
 
-    # Build visualization data for template (coronal only)
+    # Build visualization data for template (coronal only). The report shows the
+    # single stacked-profiles figure (all four scalars); the old per-scalar
+    # profile_fa/md/rd/ad keys were never populated and only fed a dead template
+    # fallback, so they are dropped (BUG-2).
     viz = {
         "stacked_profiles": _embed_image(visualization_paths.get('stacked_profiles')),
-        "profiles": [
-            {"title": "Fractional Anisotropy", "data": _embed_image(visualization_paths.get('profile_fa'))},
-            {"title": "Mean Diffusivity", "data": _embed_image(visualization_paths.get('profile_md'))},
-            {"title": "Radial Diffusivity", "data": _embed_image(visualization_paths.get('profile_rd'))},
-            {"title": "Axial Diffusivity", "data": _embed_image(visualization_paths.get('profile_ad'))},
-        ],
         "tractogram_coronal": _embed_image(visualization_paths.get('tractogram_qc_coronal'))
     }
     
