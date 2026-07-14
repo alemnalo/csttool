@@ -217,6 +217,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 dicom=None,
                 nifti=nifti_path,
                 out=preproc_out,
+                subject_id=subject_id,
                 coil_count=getattr(args, 'coil_count', 4),
                 denoise_method=getattr(args, 'denoise_method', 'nlmeans'),
                 show_plots=getattr(args, 'show_plots', False),

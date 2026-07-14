@@ -34,6 +34,7 @@ def plot_denoising_comparison(
     denoise_method,
     vol_idx=None,
     affine=None,
+    title_id=None,
     verbose=True
 ):
     """
@@ -104,7 +105,7 @@ def plot_denoising_comparison(
     fig, axes = plt.subplots(3, 3, figsize=(12, 12),
                               subplot_kw={'xticks': [], 'yticks': []},
                               constrained_layout=True)
-    fig.suptitle(f"Denoising using {denoise_method} - {stem} (Volume {vol_idx})", fontsize=14, fontweight='bold')
+    fig.suptitle(f"Denoising using {denoise_method} - {title_id or stem} (Volume {vol_idx})", fontsize=14, fontweight='bold')
 
     # Column titles
     axes[0, 0].set_title('Original', fontsize=12)
@@ -151,6 +152,7 @@ def plot_gibbs_unringing_comparison(
     stem,
     vol_idx=None,
     affine=None,
+    title_id=None,
     verbose=True
 ):
     """
@@ -219,7 +221,7 @@ def plot_gibbs_unringing_comparison(
     fig, axes = plt.subplots(3, 3, figsize=(12, 12),
                               subplot_kw={'xticks': [], 'yticks': []},
                               constrained_layout=True)
-    fig.suptitle(f"Gibbs Unringing - {stem} (Volume {vol_idx})", fontsize=14, fontweight='bold')
+    fig.suptitle(f"Gibbs Unringing - {title_id or stem} (Volume {vol_idx})", fontsize=14, fontweight='bold')
 
     # Column titles
     axes[0, 0].set_title('Before', fontsize=12)
@@ -265,6 +267,7 @@ def plot_brain_mask_overlay(
     output_dir,
     stem,
     affine=None,
+    title_id=None,
     verbose=True
 ):
     """
@@ -315,7 +318,7 @@ def plot_brain_mask_overlay(
     
     # Create figure
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
-    fig.suptitle(f"Brain Mask QC - {stem}\n"
+    fig.suptitle(f"Brain Mask QC - {title_id or stem}\n"
                  f"Coverage: {brain_voxels:,} voxels ({coverage:.1f}%)",
                  fontsize=14, fontweight='bold')
     
@@ -364,6 +367,7 @@ def plot_motion_correction_summary(
     reg_affines,
     output_dir,
     stem,
+    title_id=None,
     verbose=True
 ):
     """
@@ -415,7 +419,7 @@ def plot_motion_correction_summary(
     
     # Create figure
     fig, axes = plt.subplots(2, 2, figsize=(15, 10), constrained_layout=True)
-    fig.suptitle(f"Motion Correction QC - {stem}\n{n_vols} volumes",
+    fig.suptitle(f"Motion Correction QC - {title_id or stem}\n{n_vols} volumes",
                  fontsize=14, fontweight='bold')
     
     volumes = np.arange(n_vols)
@@ -493,6 +497,7 @@ def create_preprocessing_summary(
     stem,
     motion_correction_applied=False,
     affine=None,
+    title_id=None,
     verbose=True
 ):
     """
@@ -573,7 +578,7 @@ def create_preprocessing_summary(
     
     # Create figure with constrained_layout
     fig = plt.figure(figsize=(18, 12), constrained_layout=True)
-    fig.suptitle(f"Preprocessing Summary - {stem}", fontsize=16, fontweight='bold')
+    fig.suptitle(f"Preprocessing Summary - {title_id or stem}", fontsize=16, fontweight='bold')
     
     # Create grid
     gs = fig.add_gridspec(3, 4, hspace=0.3, wspace=0.3)
@@ -710,6 +715,7 @@ def save_all_preprocessing_visualizations(
     reg_affines=None,
     motion_correction_applied=False,
     affine=None,
+    title_id=None,
     verbose=True
 ):
     """
@@ -757,37 +763,39 @@ def save_all_preprocessing_visualizations(
         print("\nGenerating preprocessing visualizations...")
 
     viz_paths = {}
-    
+
     # Denoising comparison
     if data_denoised is not None:
         viz_paths['denoising_qc'] = plot_denoising_comparison(
             data_original, data_denoised, brain_mask,
-            output_dir, stem, denoise_method, affine=affine, verbose=verbose
+            output_dir, stem, denoise_method, affine=affine,
+            title_id=title_id, verbose=verbose
         )
 
     # Gibbs unringing comparison (both inputs are cropped/masked)
     if data_unringed is not None and data_masked is not None:
         viz_paths['gibbs_unringing_qc'] = plot_gibbs_unringing_comparison(
             data_masked, data_unringed, brain_mask,
-            output_dir, stem, affine=affine, verbose=verbose
+            output_dir, stem, affine=affine, title_id=title_id, verbose=verbose
         )
 
     # Brain mask overlay
     viz_paths['brain_mask_qc'] = plot_brain_mask_overlay(
         data_preprocessed, brain_mask, gtab,
-        output_dir, stem, affine=affine, verbose=verbose
+        output_dir, stem, affine=affine, title_id=title_id, verbose=verbose
     )
 
     # Motion correction (if applied)
     if motion_correction_applied and reg_affines is not None:
         viz_paths['motion_qc'] = plot_motion_correction_summary(
-            reg_affines, output_dir, stem, verbose=verbose
+            reg_affines, output_dir, stem, title_id=title_id, verbose=verbose
         )
 
     # Summary figure
     viz_paths['summary'] = create_preprocessing_summary(
         data_original, data_preprocessed, brain_mask, gtab,
-        output_dir, stem, motion_correction_applied, affine=affine, verbose=verbose
+        output_dir, stem, motion_correction_applied, affine=affine,
+        title_id=title_id, verbose=verbose
     )
     
     if verbose:

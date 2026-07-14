@@ -30,6 +30,7 @@ def cmd_preprocess(args: argparse.Namespace) -> dict | None:
         apply_motion_correction=getattr(args, 'perform_motion_correction', False),
         target_voxel_size=tuple(args.target_voxel_size) if args.target_voxel_size else None,
         save_visualizations=getattr(args, 'save_visualizations', False),
+        title_id=getattr(args, 'subject_id', None),
         verbose=getattr(args, 'verbose', False),
     )
 

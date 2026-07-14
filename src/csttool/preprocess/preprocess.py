@@ -32,6 +32,7 @@ def run_preprocessing(
     target_voxel_size: tuple[float, float, float] | None = None,
     # Visualization options
     save_visualizations: bool = False,
+    title_id: str | None = None,
     verbose: bool = False,
 ) -> dict:
     """
@@ -230,6 +231,7 @@ def run_preprocessing(
                 reg_affines=reg_affines,
                 motion_correction_applied=motion_correction_applied,
                 affine=affine,
+                title_id=title_id,
             )
             print("PREPROCESSING: QC visualizations saved")
         except Exception as e:
