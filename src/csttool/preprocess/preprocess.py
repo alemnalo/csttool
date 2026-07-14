@@ -212,8 +212,10 @@ def run_preprocessing(
     if save_visualizations:
         try:
             from .modules.visualizations import save_all_preprocessing_visualizations
-            viz_dir = output_dir / "visualizations"
-            viz_dir.mkdir(parents=True, exist_ok=True)
+            # Pass the stage directory; save_all_preprocessing_visualizations appends
+            # the single "visualizations/" subdir itself. Passing an already-"visualizations"
+            # path here doubled it (…/visualizations/visualizations/) so the BIDS reorg,
+            # which globs …/preprocessing/visualizations/*.png, never found the figures.
             save_all_preprocessing_visualizations(
                 data_original=data,  # Raw data before any processing
                 data_denoised=denoised,  # Denoised (same shape as original)
@@ -222,7 +224,7 @@ def run_preprocessing(
                 data_preprocessed=preprocessed,
                 brain_mask=brain_mask,
                 gtab=gtab,
-                output_dir=viz_dir,
+                output_dir=output_dir,
                 stem=filename,
                 denoise_method=denoise_method,
                 reg_affines=reg_affines,
