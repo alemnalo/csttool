@@ -21,6 +21,7 @@ from matplotlib.colors import Normalize
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz import style as _style
 from csttool.viz.utils import viz_rng
 
 
@@ -95,17 +96,22 @@ def plot_denoising_comparison(
         ('Sagittal', before[mid_sag, :, :], after[mid_sag, :, :], abs_diff[mid_sag, :, :]),
     ]
 
+    # Shared |difference| scale across all three views so panels are comparable.
+    res_pool = abs_diff[brain_mask] if (brain_mask is not None and brain_mask.shape == before.shape) else abs_diff
+    res_vmax = np.percentile(res_pool, 99) if np.any(res_pool) else None
+
     # Create figure: 3 rows (views) × 3 columns (original, denoised, residuals)
     fig, axes = plt.subplots(3, 3, figsize=(12, 12),
-                              subplot_kw={'xticks': [], 'yticks': []})
-    fig.subplots_adjust(hspace=0.1, wspace=0.05)
+                              subplot_kw={'xticks': [], 'yticks': []},
+                              constrained_layout=True)
     fig.suptitle(f"Denoising using {denoise_method} - {stem} (Volume {vol_idx})", fontsize=14, fontweight='bold')
-    
+
     # Column titles
     axes[0, 0].set_title('Original', fontsize=12)
     axes[0, 1].set_title('Denoised', fontsize=12)
     axes[0, 2].set_title('|Difference|', fontsize=12)
-    
+
+    res_im = None
     for row, (view_name, orig, den, res) in enumerate(views):
         # Original
         axes[row, 0].imshow(orig.T, cmap='gray', interpolation='none', origin='lower')
@@ -114,13 +120,18 @@ def plot_denoising_comparison(
         # Denoised
         axes[row, 1].imshow(den.T, cmap='gray', interpolation='none', origin='lower')
 
-        # Residuals
-        axes[row, 2].imshow(res.T, cmap='gray', interpolation='none', origin='lower')
+        # Residuals (shared scale + perceptually-uniform residual colormap)
+        res_im = axes[row, 2].imshow(res.T, cmap=_style.RESIDUAL_CMAP, interpolation='none',
+                                     origin='lower', vmin=0, vmax=res_vmax)
 
         # Radiological orientation + L/R markers for all three panels of this view.
         if affine is not None:
             for c in range(3):
                 _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
+
+    # Labelled colorbar for the shared |difference| column.
+    if res_im is not None:
+        _style.add_scalar_colorbar(fig, res_im, list(axes[:, 2]), 'Removed signal |Δ|')
 
     fig_path = viz_dir / f"{stem}_denoising_qc.png"
     fig.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -200,17 +211,22 @@ def plot_gibbs_unringing_comparison(
         ('Sagittal', before[mid_sag, :, :], after[mid_sag, :, :], abs_diff[mid_sag, :, :]),
     ]
 
+    # Shared |difference| scale across all three views so panels are comparable.
+    res_pool = abs_diff[brain_mask] if (brain_mask is not None and brain_mask.shape == before.shape) else abs_diff
+    res_vmax = np.percentile(res_pool, 99) if np.any(res_pool) else None
+
     # Create figure: 3 rows (views) × 3 columns (before, after, residuals)
     fig, axes = plt.subplots(3, 3, figsize=(12, 12),
-                              subplot_kw={'xticks': [], 'yticks': []})
-    fig.subplots_adjust(hspace=0.1, wspace=0.05)
+                              subplot_kw={'xticks': [], 'yticks': []},
+                              constrained_layout=True)
     fig.suptitle(f"Gibbs Unringing - {stem} (Volume {vol_idx})", fontsize=14, fontweight='bold')
-    
+
     # Column titles
     axes[0, 0].set_title('Before', fontsize=12)
     axes[0, 1].set_title('After', fontsize=12)
     axes[0, 2].set_title('|Difference|', fontsize=12)
-    
+
+    res_im = None
     for row, (view_name, bef, aft, res) in enumerate(views):
         # Before
         axes[row, 0].imshow(bef.T, cmap='gray', interpolation='none', origin='lower')
@@ -219,13 +235,18 @@ def plot_gibbs_unringing_comparison(
         # After
         axes[row, 1].imshow(aft.T, cmap='gray', interpolation='none', origin='lower')
 
-        # Residuals
-        axes[row, 2].imshow(res.T, cmap='gray', interpolation='none', origin='lower')
+        # Residuals (shared scale + perceptually-uniform residual colormap)
+        res_im = axes[row, 2].imshow(res.T, cmap=_style.RESIDUAL_CMAP, interpolation='none',
+                                     origin='lower', vmin=0, vmax=res_vmax)
 
         # Radiological orientation + L/R markers for all three panels of this view.
         if affine is not None:
             for c in range(3):
                 _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
+
+    # Labelled colorbar for the shared |difference| column.
+    if res_im is not None:
+        _style.add_scalar_colorbar(fig, res_im, list(axes[:, 2]), 'Removed signal |Δ|')
 
     fig_path = viz_dir / f"{stem}_gibbs_unringing_qc.png"
     fig.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -575,9 +596,12 @@ def create_preprocessing_summary(
     ax2.axis('off')
 
     ax3 = fig.add_subplot(gs[0, 2])
-    ax3.imshow(diff.T, cmap='hot', origin='lower', vmin=0, vmax=diff_vmax)
+    diff_im = ax3.imshow(diff.T, cmap=_style.RESIDUAL_CMAP, origin='lower', vmin=0, vmax=diff_vmax)
     ax3.set_title(diff_title)
     ax3.axis('off')
+    if shapes_match:
+        # constrained_layout-compatible colorbar (no make_axes_locatable here).
+        fig.colorbar(diff_im, ax=ax3, fraction=0.046, pad=0.04).ax.tick_params(labelsize=8)
     
     ax4 = fig.add_subplot(gs[0, 3])
     ax4.imshow(proc_b0.T, cmap='gray', origin='lower', vmin=0, vmax=vmax)
