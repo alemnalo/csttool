@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz.utils import deterministic_subsample
 
 
 # =============================================================================
@@ -496,10 +497,8 @@ def plot_cst_extraction(
     
     # Subsample if needed
     def subsample(streamlines, max_n):
-        if len(streamlines) <= max_n:
-            return list(streamlines)
-        indices = np.random.choice(len(streamlines), max_n, replace=False)
-        return [streamlines[i] for i in indices]
+        # Deterministic (seeded) subsample; no global RNG mutation.
+        return deterministic_subsample(streamlines, max_n)
     
     left_vis = subsample(cst_left, max_streamlines)
     right_vis = subsample(cst_right, max_streamlines)
@@ -672,10 +671,8 @@ def plot_hemisphere_separation(
 
     # Subsample for visualization
     def subsample(streamlines, max_n):
-        if len(streamlines) <= max_n:
-            return list(streamlines)
-        indices = np.random.choice(len(streamlines), max_n, replace=False)
-        return [streamlines[i] for i in indices]
+        # Deterministic (seeded) subsample; no global RNG mutation.
+        return deterministic_subsample(streamlines, max_n)
 
     left_vis = subsample(cst_left, max_streamlines)
     right_vis = subsample(cst_right, max_streamlines)
@@ -854,10 +851,8 @@ def create_extraction_summary(
     
     # Subsample for visualization
     def subsample(streamlines, max_n):
-        if len(streamlines) <= max_n:
-            return list(streamlines)
-        indices = np.random.choice(len(streamlines), max_n, replace=False)
-        return [streamlines[i] for i in indices]
+        # Deterministic (seeded) subsample; no global RNG mutation.
+        return deterministic_subsample(streamlines, max_n)
     
     left_vis = subsample(cst_left, max_streamlines)
     right_vis = subsample(cst_right, max_streamlines)

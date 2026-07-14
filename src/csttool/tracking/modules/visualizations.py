@@ -13,6 +13,7 @@ from matplotlib.colors import Normalize
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz.utils import deterministic_subsample, viz_rng
 
 
 # =============================================================================
@@ -346,11 +347,10 @@ def plot_streamlines_2d(
             print("  ⚠️ No streamlines to visualize")
         return None
     
-    # Subsample if needed
+    # Subsample if needed (deterministic; no global RNG mutation)
     if n_streamlines > max_streamlines:
-        indices = np.random.choice(n_streamlines, max_streamlines, replace=False)
-        vis_streamlines = [streamlines[i] for i in indices]
-        n_vis = max_streamlines
+        vis_streamlines = deterministic_subsample(streamlines, max_streamlines)
+        n_vis = len(vis_streamlines)
     else:
         vis_streamlines = streamlines
         n_vis = n_streamlines
@@ -505,8 +505,8 @@ def plot_streamline_statistics(
     
     # Length vs points scatter
     ax3 = fig.add_subplot(gs[0, 2])
-    sample_idx = np.random.choice(n_streamlines, min(1000, n_streamlines), replace=False)
-    ax3.scatter(lengths[sample_idx], points_per_sl[sample_idx], 
+    sample_idx = np.sort(viz_rng().choice(n_streamlines, min(1000, n_streamlines), replace=False))
+    ax3.scatter(lengths[sample_idx], points_per_sl[sample_idx],
                alpha=0.3, s=10, color='purple')
     ax3.set_xlabel('Length (mm)')
     ax3.set_ylabel('Points')
@@ -662,9 +662,8 @@ def create_tracking_summary(
     
     # Row 1: Streamlines only (no FA background)
     if n_streamlines > 0:
-        n_vis = min(3000, n_streamlines)
-        indices = np.random.choice(n_streamlines, n_vis, replace=False)
-        vis_sl = [streamlines[i] for i in indices]
+        vis_sl = deterministic_subsample(streamlines, min(3000, n_streamlines))
+        n_vis = len(vis_sl)
         
         views_2d = [
             ('Sagittal', 1, 2, 'blue'),
