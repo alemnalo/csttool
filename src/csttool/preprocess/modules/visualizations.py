@@ -752,9 +752,10 @@ def save_all_preprocessing_visualizations(
     viz_paths : dict
         Dictionary mapping visualization names to file paths.
     """
+    _style.apply_house_style()  # shared typography/spines/DPI for this stage
     if verbose:
         print("\nGenerating preprocessing visualizations...")
-    
+
     viz_paths = {}
     
     # Denoising comparison

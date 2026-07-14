@@ -590,7 +590,9 @@ def generate_complete_report(
         plot_stacked_profiles,
         plot_tractogram_qc_preview
     )
-    
+    from csttool.viz import style as _style
+    _style.apply_house_style()  # shared typography/spines/DPI for metrics figures
+
     # Use package version if not specified
     if version is None:
         version = __version__

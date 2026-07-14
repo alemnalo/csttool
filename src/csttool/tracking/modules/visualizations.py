@@ -399,10 +399,12 @@ def plot_streamlines_2d(
 
     # Row 1: Streamlines only (world coordinates, no FA background)
     # World dimensions: 0=X, 1=Y, 2=Z
+    # Whole-brain streamlines carry no L/R meaning here -> one neutral colour.
+    _n = _style.NEUTRAL_STREAMLINE
     streamline_views = [
-        ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)', 'blue'),
-        ('Coronal (X-Z)', 0, 2, 'X (mm)', 'Z (mm)', 'green'),
-        ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)', 'red'),
+        ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)', _n),
+        ('Coronal (X-Z)', 0, 2, 'X (mm)', 'Z (mm)', _n),
+        ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)', _n),
     ]
 
     volume_bounds = _volume_world_bounds(fa.shape, affine)
@@ -675,10 +677,12 @@ def create_tracking_summary(
         vis_sl = deterministic_subsample(streamlines, min(3000, n_streamlines))
         n_vis = len(vis_sl)
         
+        # Whole-brain streamlines carry no L/R meaning here -> one neutral colour.
+        _n = _style.NEUTRAL_STREAMLINE
         views_2d = [
-            ('Sagittal', 1, 2, 'blue'),
-            ('Coronal', 0, 2, 'green'),
-            ('Axial', 0, 1, 'red'),
+            ('Sagittal', 1, 2, _n),
+            ('Coronal', 0, 2, _n),
+            ('Axial', 0, 1, _n),
         ]
 
         volume_bounds = _volume_world_bounds(fa.shape, affine)
@@ -777,6 +781,7 @@ def save_all_tracking_visualizations(
     """
     Generate and save all tracking visualizations.
     """
+    _style.apply_house_style()  # shared typography/spines/DPI for this stage
     if verbose:
         print("  → Generating tracking visualizations...")
 

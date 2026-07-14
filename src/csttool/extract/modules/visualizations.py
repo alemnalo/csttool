@@ -1073,6 +1073,7 @@ def save_all_extraction_visualizations(
     viz_paths : dict
         Dictionary of paths to saved visualizations.
     """
+    _style.apply_house_style()  # shared typography/spines/DPI for this stage
     if verbose:
         print("\nGenerating extraction visualizations...")
 
