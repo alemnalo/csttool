@@ -227,6 +227,7 @@ def run_preprocessing(
                 denoise_method=denoise_method,
                 reg_affines=reg_affines,
                 motion_correction_applied=motion_correction_applied,
+                affine=affine,
             )
             print("PREPROCESSING: QC visualizations saved")
         except Exception as e:

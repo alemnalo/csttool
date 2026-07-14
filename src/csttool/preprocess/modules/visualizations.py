@@ -20,6 +20,8 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 
+from csttool.viz import geometry as _geo
+
 
 def plot_denoising_comparison(
     data_before,
@@ -29,6 +31,7 @@ def plot_denoising_comparison(
     stem,
     denoise_method,
     vol_idx=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -105,13 +108,18 @@ def plot_denoising_comparison(
         # Original
         axes[row, 0].imshow(orig.T, cmap='gray', interpolation='none', origin='lower')
         axes[row, 0].set_ylabel(view_name, fontsize=12, fontweight='bold')
-        
+
         # Denoised
         axes[row, 1].imshow(den.T, cmap='gray', interpolation='none', origin='lower')
-        
+
         # Residuals
         axes[row, 2].imshow(res.T, cmap='gray', interpolation='none', origin='lower')
-    
+
+        # Radiological orientation + L/R markers for all three panels of this view.
+        if affine is not None:
+            for c in range(3):
+                _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
+
     fig_path = viz_dir / f"{stem}_denoising_qc.png"
     fig.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -129,6 +137,7 @@ def plot_gibbs_unringing_comparison(
     output_dir,
     stem,
     vol_idx=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -203,13 +212,18 @@ def plot_gibbs_unringing_comparison(
         # Before
         axes[row, 0].imshow(bef.T, cmap='gray', interpolation='none', origin='lower')
         axes[row, 0].set_ylabel(view_name, fontsize=12, fontweight='bold')
-        
+
         # After
         axes[row, 1].imshow(aft.T, cmap='gray', interpolation='none', origin='lower')
-        
+
         # Residuals
         axes[row, 2].imshow(res.T, cmap='gray', interpolation='none', origin='lower')
-    
+
+        # Radiological orientation + L/R markers for all three panels of this view.
+        if affine is not None:
+            for c in range(3):
+                _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
+
     fig_path = viz_dir / f"{stem}_gibbs_unringing_qc.png"
     fig.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -226,6 +240,7 @@ def plot_brain_mask_overlay(
     gtab,
     output_dir,
     stem,
+    affine=None,
     verbose=True
 ):
     """
@@ -305,7 +320,12 @@ def plot_brain_mask_overlay(
         axes[1, col].contour(mask_slice.T, levels=[0.5], colors='red', linewidths=1)
         axes[1, col].set_title(f'{view_name}\nwith brain mask')
         axes[1, col].axis('off')
-    
+
+        # Radiological orientation + L/R markers for both rows of this view.
+        if affine is not None:
+            _geo.finalize_image_view(axes[0, col], affine, view_name.lower())
+            _geo.finalize_image_view(axes[1, col], affine, view_name.lower())
+
     fig_path = viz_dir / f"{stem}_brain_mask_qc.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -448,6 +468,7 @@ def create_preprocessing_summary(
     output_dir,
     stem,
     motion_correction_applied=False,
+    affine=None,
     verbose=True
 ):
     """
@@ -553,6 +574,11 @@ def create_preprocessing_summary(
     ax4.contour(mask_slice.T, levels=[0.5], colors='red', linewidths=1.5)
     ax4.set_title(f'Brain Mask\n({brain_voxels:,} voxels)')
     ax4.axis('off')
+
+    # Row 0 panels are all axial: radiological orientation + L/R markers.
+    if affine is not None:
+        for _ax in (ax1, ax2, ax3, ax4):
+            _geo.finalize_image_view(_ax, affine, 'axial')
     
     # Row 1: Three orthogonal views with mask overlay
     views_data = [
@@ -570,6 +596,8 @@ def create_preprocessing_summary(
         ax.contour(msk.T, levels=[0.5], colors='cyan', linewidths=1)
         ax.set_title(name)
         ax.axis('off')
+        if affine is not None:
+            _geo.finalize_image_view(ax, affine, name.lower())
     
     # Row 1, col 3: Histogram comparison
     ax_hist = fig.add_subplot(gs[1, 3])
@@ -640,6 +668,7 @@ def save_all_preprocessing_visualizations(
     denoise_method,
     reg_affines=None,
     motion_correction_applied=False,
+    affine=None,
     verbose=True
 ):
     """
@@ -691,32 +720,32 @@ def save_all_preprocessing_visualizations(
     if data_denoised is not None:
         viz_paths['denoising_qc'] = plot_denoising_comparison(
             data_original, data_denoised, brain_mask,
-            output_dir, stem, denoise_method, verbose=verbose
+            output_dir, stem, denoise_method, affine=affine, verbose=verbose
         )
 
     # Gibbs unringing comparison (both inputs are cropped/masked)
     if data_unringed is not None and data_masked is not None:
         viz_paths['gibbs_unringing_qc'] = plot_gibbs_unringing_comparison(
             data_masked, data_unringed, brain_mask,
-            output_dir, stem, verbose=verbose
+            output_dir, stem, affine=affine, verbose=verbose
         )
-    
+
     # Brain mask overlay
     viz_paths['brain_mask_qc'] = plot_brain_mask_overlay(
         data_preprocessed, brain_mask, gtab,
-        output_dir, stem, verbose=verbose
+        output_dir, stem, affine=affine, verbose=verbose
     )
-    
+
     # Motion correction (if applied)
     if motion_correction_applied and reg_affines is not None:
         viz_paths['motion_qc'] = plot_motion_correction_summary(
             reg_affines, output_dir, stem, verbose=verbose
         )
-    
+
     # Summary figure
     viz_paths['summary'] = create_preprocessing_summary(
         data_original, data_preprocessed, brain_mask, gtab,
-        output_dir, stem, motion_correction_applied, verbose=verbose
+        output_dir, stem, motion_correction_applied, affine=affine, verbose=verbose
     )
     
     if verbose:

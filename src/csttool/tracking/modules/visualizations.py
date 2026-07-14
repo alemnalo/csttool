@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 
+from csttool.viz import geometry as _geo
+
 
 # =============================================================================
 # TENSOR MAPS VISUALIZATION
@@ -24,6 +26,7 @@ def plot_tensor_maps(
     output_dir,
     stem,
     tenfit=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -101,7 +104,12 @@ def plot_tensor_maps(
         axes[row, 0].text(-0.15, 0.5, view_name, transform=axes[row, 0].transAxes,
                          fontsize=12, fontweight='bold', va='center', ha='right',
                          rotation=90)
-    
+
+        # Radiological orientation + L/R markers for every column of this view.
+        if affine is not None:
+            for c in range(n_cols):
+                _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
+
     plt.tight_layout()
     
     fig_path = viz_dir / f"{stem}_tensor_maps.png"
@@ -125,6 +133,7 @@ def plot_white_matter_mask(
     output_dir,
     stem,
     fa_thresh=0.2,
+    affine=None,
     verbose=True
 ):
     """
@@ -170,6 +179,10 @@ def plot_white_matter_mask(
                             linewidths=1, linestyles='--')
         axes[1, col].set_title(f'{view_name}\nWM mask (blue) + brain (red)')
         axes[1, col].axis('off')
+
+        if affine is not None:
+            _geo.finalize_image_view(axes[0, col], affine, view_name.lower())
+            _geo.finalize_image_view(axes[1, col], affine, view_name.lower())
     
     # Add legend
     from matplotlib.patches import Patch
@@ -378,7 +391,8 @@ def plot_streamlines_2d(
         ax.set_title(f'{name}\nFA background')
         ax.axis('off')
         ax.set_box_aspect(1)
-    
+        _geo.finalize_image_view(ax, affine, name.lower())
+
     # Row 1: Streamlines only (world coordinates, no FA background)
     # World dimensions: 0=X, 1=Y, 2=Z
     streamline_views = [
@@ -412,9 +426,10 @@ def plot_streamlines_2d(
         ax.set_aspect('equal', adjustable='box')
         ax.grid(True, alpha=0.3, color='white')
         ax.set_box_aspect(1)
-    
+        _geo.finalize_world_plane(ax, d1)
+
     plt.tight_layout()
-    
+
     fig_path = viz_dir / f"{stem}_streamlines_2d.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -509,10 +524,11 @@ def plot_streamline_statistics(
     seeds_vox = (seeds_h @ inv_affine.T)[:, :3]
     
     near_slice = np.abs(seeds_vox[:, 2] - mid_ax) < 3
-    ax4.scatter(seeds_vox[near_slice, 0], seeds_vox[near_slice, 1], 
+    ax4.scatter(seeds_vox[near_slice, 0], seeds_vox[near_slice, 1],
                s=1, alpha=0.3, color='yellow')
     ax4.set_title(f'Seed Points (axial, z≈{mid_ax})')
     ax4.axis('off')
+    _geo.finalize_image_view(ax4, affine, 'axial')
     
     # Cumulative length distribution
     ax5 = fig.add_subplot(gs[1, 1])
@@ -624,7 +640,10 @@ def create_tracking_summary(
     ax_wm.imshow(wm_overlay, cmap='Blues', alpha=0.5, origin='lower')
     ax_wm.set_title('WM Mask (Axial)')
     ax_wm.axis('off')
-    
+
+    for _ax in (ax_fa, ax_md, ax_wm):
+        _geo.finalize_image_view(_ax, affine, 'axial')
+
     # Parameters panel
     ax_params = fig.add_subplot(gs[0, 3])
     ax_params.axis('off')
@@ -673,7 +692,8 @@ def create_tracking_summary(
             ax.set_aspect('equal', adjustable='box')
             ax.grid(True, alpha=0.3, color='white')
             ax.set_box_aspect(1)
-    
+            _geo.finalize_world_plane(ax, d1)
+
     # Length histogram
     if n_streamlines > 0:
         lengths = np.array([length(s) for s in streamlines])
@@ -754,11 +774,12 @@ def save_all_tracking_visualizations(
     viz_paths = {}
 
     viz_paths['tensor_maps'] = plot_tensor_maps(
-        fa, md, brain_mask, output_dir, stem, tenfit, verbose=verbose
+        fa, md, brain_mask, output_dir, stem, tenfit, affine=affine, verbose=verbose
     )
 
     viz_paths['wm_mask_qc'] = plot_white_matter_mask(
-        fa, white_matter, brain_mask, output_dir, stem, fa_thresh, verbose=verbose
+        fa, white_matter, brain_mask, output_dir, stem, fa_thresh,
+        affine=affine, verbose=verbose
     )
 
     viz_paths['streamlines_2d'] = plot_streamlines_2d(
