@@ -32,7 +32,6 @@ from dipy.align.reslice import reslice
 from nibabel.orientations import axcodes2ornt, ornt_transform, apply_orientation
 from ...data.loader import load_mni152_template as load_bundled_mni152
 from ...data.loader import get_fmrib58_fa_path
-from dipy.viz import regtools
 import json
 from datetime import datetime
 
@@ -759,45 +758,28 @@ def register_mni_to_subject(
         if verbose:
             print(f"    ✓ Warped template: {warped_path}")
     
-    # Generate QC visualizations
+    # Generate QC visualization. Use the single styled, radiological registration
+    # figure (subject FA vs warped template) that matches the rest of the tool,
+    # instead of DIPY's overlay_slices (which emitted 6 unstyled figures that
+    # landed under stage-misc). This one figure names to *_registration_qc.png
+    # and routes to stage-extraction.
     if generate_qc:
-        viz_dir = output_dir / "visualizations"
-        viz_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Resample MNI to subject grid with identity (before registration)
-        identity_map = AffineMap(
-            np.eye(4),
-            subject_data.shape, subject_affine,
-            mni_data.shape, mni_affine
-        )
-        mni_resampled_before = identity_map.transform(mni_data)
-        
-        # Before registration QC
-        plot_registration_comparison(
-            static_data=subject_data,
-            moving_data=mni_resampled_before,
-            ltitle=f"Subject FA",
-            rtitle=f"Template (Before)",
-            output_dir=viz_dir,
-            fname_prefix=f"{subject_id}_registration_qc_before"
-        )
-        result['qc_before_path'] = viz_dir / f"{subject_id}_registration_qc_before_axial.png"
-        
-        # After registration QC
+        from .visualizations import plot_registration_comparison as _plot_registration_qc
+
         warped_template = mapping.transform(mni_data)
-        plot_registration_comparison(
-            static_data=subject_data,
-            moving_data=warped_template,
-            ltitle=f"Subject FA",
-            rtitle=f"Template (After)",
-            output_dir=viz_dir,
-            fname_prefix=f"{subject_id}_registration_qc_after"
+        qc_path = _plot_registration_qc(
+            subject_fa=subject_data,
+            mni_warped=warped_template,
+            output_dir=output_dir,
+            subject_id=subject_id,
+            affine=subject_affine,
+            verbose=verbose,
         )
-        result['qc_after_path'] = viz_dir / f"{subject_id}_registration_qc_after_axial.png"
-        
+        result['qc_after_path'] = qc_path
+        result['qc_before_path'] = None
+
         if verbose:
-            print(f"    ✓ QC before: {result['qc_before_path']}")
-            print(f"    ✓ QC after: {result['qc_after_path']}")
+            print(f"    ✓ Registration QC: {qc_path}")
     
     # Save registration report
     log_dir = output_dir / "logs"
@@ -887,90 +869,6 @@ def save_registration_report(result, output_dir, subject_id):
         json.dump(report, f, indent=2)
     
     print(f"  ✓ Registration report saved: {report_path}")
-    
+
     return report_path
-
-
-def plot_registration_comparison(
-    static_data,
-    moving_data,
-    slice_indices=None,
-    ltitle="Static",
-    rtitle="Moving",
-    output_dir=None,
-    fname_prefix="registration_qc"
-):
-    """
-    Plot registration comparison for all three views using DIPY's regtools.overlay_slices.
-    
-    Parameters
-    ----------
-    static_data : ndarray
-        Reference image (e.g., subject FA map). Shape (X, Y, Z).
-    moving_data : ndarray
-        Moving image, must be resampled to same grid as static.
-    slice_indices : dict, optional
-        Dictionary with keys 'sagittal', 'coronal', 'axial' specifying 
-        slice indices. If None, uses middle slices.
-    ltitle : str, optional
-        Title for static image.
-    rtitle : str, optional
-        Title for moving image.
-    output_dir : str or Path, optional
-        Directory to save images. If None, images are not saved.
-    fname_prefix : str, optional
-        Prefix for saved filenames.
-        
-    Returns
-    -------
-    figs : dict
-        Dictionary with keys 'sagittal', 'coronal', 'axial' containing figures.
-    """
-    sh = static_data.shape
-    
-    # Determine slice indices (middle if not specified)
-    if slice_indices is None:
-        slice_indices = {
-            'sagittal': sh[0] // 2,
-            'coronal': sh[1] // 2,
-            'axial': sh[2] // 2
-        }
-    
-    # Convert output_dir to Path once (if provided)
-    if output_dir is not None:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Map view names to slice_type integers
-    views = {
-        'sagittal': 0,
-        'coronal': 1,
-        'axial': 2
-    }
-    
-    figs = {}
-    
-    for view_name, slice_type in views.items():
-        # Determine output filename
-        fname = None
-        if output_dir is not None:
-            fname = str(output_dir / f"{fname_prefix}_{view_name}.png")
-        
-        # Call DIPY's overlay_slices
-        fig = regtools.overlay_slices(
-            static_data,
-            moving_data,
-            slice_index=slice_indices[view_name],
-            slice_type=slice_type,
-            ltitle=ltitle,
-            rtitle=rtitle,
-            fname=fname
-        )
-        
-        figs[view_name] = fig
-        
-        if fname:
-            print(f"  ✓ Saved: {fname}")
-    
-    return figs
 

@@ -12,6 +12,10 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 
+from csttool.viz import geometry as _geo
+from csttool.viz import style as _style
+from csttool.viz.utils import deterministic_subsample, viz_rng
+
 
 # =============================================================================
 # TENSOR MAPS VISUALIZATION
@@ -24,6 +28,7 @@ def plot_tensor_maps(
     output_dir,
     stem,
     tenfit=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -55,7 +60,7 @@ def plot_tensor_maps(
     
     # Create figure
     n_cols = 4 if rgb is not None else 3
-    fig, axes = plt.subplots(3, n_cols, figsize=(4*n_cols, 12))
+    fig, axes = plt.subplots(3, n_cols, figsize=(4*n_cols, 12), constrained_layout=True)
     fig.suptitle(f"Tensor Maps - {stem}", fontsize=14, fontweight='bold')
     
     # Statistics for display
@@ -75,9 +80,10 @@ def plot_tensor_maps(
             axes[row, 0].set_title(f'FA\nmean={fa_brain.mean():.3f}')
         axes[row, 0].axis('off')
         
-        # MD
-        axes[row, 1].imshow(slicer(md).T, cmap='hot', origin='lower', 
-                           vmin=0, vmax=np.percentile(md_brain, 99))
+        # MD (displayed ×10⁻³ mm²/s to match the labelled scale + colorbar)
+        md_mappable = axes[row, 1].imshow(
+            slicer(md).T * 1000, cmap=_style.MD_CMAP, origin='lower',
+            vmin=0, vmax=np.percentile(md_brain * 1000, 99))
         if row == 0:
             axes[row, 1].set_title(f'MD (×10⁻³)\nmean={md_brain.mean()*1000:.2f}')
         axes[row, 1].axis('off')
@@ -101,9 +107,16 @@ def plot_tensor_maps(
         axes[row, 0].text(-0.15, 0.5, view_name, transform=axes[row, 0].transAxes,
                          fontsize=12, fontweight='bold', va='center', ha='right',
                          rotation=90)
-    
-    plt.tight_layout()
-    
+
+        # Radiological orientation + L/R markers for every column of this view.
+        if affine is not None:
+            for c in range(n_cols):
+                _geo.finalize_image_view(axes[row, c], affine, view_name.lower())
+
+    # One shared colorbar for the continuous MD column (constrained_layout makes room).
+    _style.add_scalar_colorbar(fig, md_mappable, list(axes[:, 1]),
+                               'MD (×10⁻³ mm²/s)')
+
     fig_path = viz_dir / f"{stem}_tensor_maps.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -125,6 +138,7 @@ def plot_white_matter_mask(
     output_dir,
     stem,
     fa_thresh=0.2,
+    affine=None,
     verbose=True
 ):
     """
@@ -170,6 +184,10 @@ def plot_white_matter_mask(
                             linewidths=1, linestyles='--')
         axes[1, col].set_title(f'{view_name}\nWM mask (blue) + brain (red)')
         axes[1, col].axis('off')
+
+        if affine is not None:
+            _geo.finalize_image_view(axes[0, col], affine, view_name.lower())
+            _geo.finalize_image_view(axes[1, col], affine, view_name.lower())
     
     # Add legend
     from matplotlib.patches import Patch
@@ -333,11 +351,10 @@ def plot_streamlines_2d(
             print("  ⚠️ No streamlines to visualize")
         return None
     
-    # Subsample if needed
+    # Subsample if needed (deterministic; no global RNG mutation)
     if n_streamlines > max_streamlines:
-        indices = np.random.choice(n_streamlines, max_streamlines, replace=False)
-        vis_streamlines = [streamlines[i] for i in indices]
-        n_vis = max_streamlines
+        vis_streamlines = deterministic_subsample(streamlines, max_streamlines)
+        n_vis = len(vis_streamlines)
     else:
         vis_streamlines = streamlines
         n_vis = n_streamlines
@@ -378,13 +395,16 @@ def plot_streamlines_2d(
         ax.set_title(f'{name}\nFA background')
         ax.axis('off')
         ax.set_box_aspect(1)
-    
+        _geo.finalize_image_view(ax, affine, name.lower())
+
     # Row 1: Streamlines only (world coordinates, no FA background)
     # World dimensions: 0=X, 1=Y, 2=Z
+    # Whole-brain streamlines carry no L/R meaning here -> one neutral colour.
+    _n = _style.NEUTRAL_STREAMLINE
     streamline_views = [
-        ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)', 'blue'),
-        ('Coronal (X-Z)', 0, 2, 'X (mm)', 'Z (mm)', 'green'),
-        ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)', 'red'),
+        ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)', _n),
+        ('Coronal (X-Z)', 0, 2, 'X (mm)', 'Z (mm)', _n),
+        ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)', _n),
     ]
 
     volume_bounds = _volume_world_bounds(fa.shape, affine)
@@ -412,9 +432,10 @@ def plot_streamlines_2d(
         ax.set_aspect('equal', adjustable='box')
         ax.grid(True, alpha=0.3, color='white')
         ax.set_box_aspect(1)
-    
+        _geo.finalize_world_plane(ax, d1)
+
     plt.tight_layout()
-    
+
     fig_path = viz_dir / f"{stem}_streamlines_2d.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -490,8 +511,8 @@ def plot_streamline_statistics(
     
     # Length vs points scatter
     ax3 = fig.add_subplot(gs[0, 2])
-    sample_idx = np.random.choice(n_streamlines, min(1000, n_streamlines), replace=False)
-    ax3.scatter(lengths[sample_idx], points_per_sl[sample_idx], 
+    sample_idx = np.sort(viz_rng().choice(n_streamlines, min(1000, n_streamlines), replace=False))
+    ax3.scatter(lengths[sample_idx], points_per_sl[sample_idx],
                alpha=0.3, s=10, color='purple')
     ax3.set_xlabel('Length (mm)')
     ax3.set_ylabel('Points')
@@ -509,10 +530,11 @@ def plot_streamline_statistics(
     seeds_vox = (seeds_h @ inv_affine.T)[:, :3]
     
     near_slice = np.abs(seeds_vox[:, 2] - mid_ax) < 3
-    ax4.scatter(seeds_vox[near_slice, 0], seeds_vox[near_slice, 1], 
+    ax4.scatter(seeds_vox[near_slice, 0], seeds_vox[near_slice, 1],
                s=1, alpha=0.3, color='yellow')
     ax4.set_title(f'Seed Points (axial, z≈{mid_ax})')
     ax4.axis('off')
+    _geo.finalize_image_view(ax4, affine, 'axial')
     
     # Cumulative length distribution
     ax5 = fig.add_subplot(gs[1, 1])
@@ -614,9 +636,15 @@ def create_tracking_summary(
     ax_fa.axis('off')
     
     ax_md = fig.add_subplot(gs[0, 1])
-    ax_md.imshow(md[:, :, mid_ax].T, cmap='hot', origin='lower')
-    ax_md.set_title('MD (Axial)')
+    md_slice = md[:, :, mid_ax].T * 1000  # ×10⁻³ mm²/s to match the label
+    md_vmax = np.percentile(md[brain_mask > 0] * 1000, 99) if brain_mask.any() else None
+    md_im = ax_md.imshow(md_slice, cmap=_style.MD_CMAP, origin='lower', vmin=0, vmax=md_vmax)
+    ax_md.set_title('MD (Axial, ×10⁻³)')
     ax_md.axis('off')
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    _md_cax = make_axes_locatable(ax_md).append_axes('right', size='5%', pad=0.05)
+    _md_cbar = fig.colorbar(md_im, cax=_md_cax)
+    _md_cbar.ax.tick_params(labelsize=8)
     
     ax_wm = fig.add_subplot(gs[0, 2])
     ax_wm.imshow(fa[:, :, mid_ax].T, cmap='gray', origin='lower', vmin=0, vmax=1)
@@ -624,7 +652,10 @@ def create_tracking_summary(
     ax_wm.imshow(wm_overlay, cmap='Blues', alpha=0.5, origin='lower')
     ax_wm.set_title('WM Mask (Axial)')
     ax_wm.axis('off')
-    
+
+    for _ax in (ax_fa, ax_md, ax_wm):
+        _geo.finalize_image_view(_ax, affine, 'axial')
+
     # Parameters panel
     ax_params = fig.add_subplot(gs[0, 3])
     ax_params.axis('off')
@@ -643,14 +674,15 @@ def create_tracking_summary(
     
     # Row 1: Streamlines only (no FA background)
     if n_streamlines > 0:
-        n_vis = min(3000, n_streamlines)
-        indices = np.random.choice(n_streamlines, n_vis, replace=False)
-        vis_sl = [streamlines[i] for i in indices]
+        vis_sl = deterministic_subsample(streamlines, min(3000, n_streamlines))
+        n_vis = len(vis_sl)
         
+        # Whole-brain streamlines carry no L/R meaning here -> one neutral colour.
+        _n = _style.NEUTRAL_STREAMLINE
         views_2d = [
-            ('Sagittal', 1, 2, 'blue'),
-            ('Coronal', 0, 2, 'green'),
-            ('Axial', 0, 1, 'red'),
+            ('Sagittal', 1, 2, _n),
+            ('Coronal', 0, 2, _n),
+            ('Axial', 0, 1, _n),
         ]
 
         volume_bounds = _volume_world_bounds(fa.shape, affine)
@@ -673,7 +705,8 @@ def create_tracking_summary(
             ax.set_aspect('equal', adjustable='box')
             ax.grid(True, alpha=0.3, color='white')
             ax.set_box_aspect(1)
-    
+            _geo.finalize_world_plane(ax, d1)
+
     # Length histogram
     if n_streamlines > 0:
         lengths = np.array([length(s) for s in streamlines])
@@ -748,17 +781,19 @@ def save_all_tracking_visualizations(
     """
     Generate and save all tracking visualizations.
     """
+    _style.apply_house_style()  # shared typography/spines/DPI for this stage
     if verbose:
         print("  → Generating tracking visualizations...")
 
     viz_paths = {}
 
     viz_paths['tensor_maps'] = plot_tensor_maps(
-        fa, md, brain_mask, output_dir, stem, tenfit, verbose=verbose
+        fa, md, brain_mask, output_dir, stem, tenfit, affine=affine, verbose=verbose
     )
 
     viz_paths['wm_mask_qc'] = plot_white_matter_mask(
-        fa, white_matter, brain_mask, output_dir, stem, fa_thresh, verbose=verbose
+        fa, white_matter, brain_mask, output_dir, stem, fa_thresh,
+        affine=affine, verbose=verbose
     )
 
     viz_paths['streamlines_2d'] = plot_streamlines_2d(

@@ -6,7 +6,7 @@ Visualization functions for CST metrics analysis.
 This module provides:
 - Tract profile plots (FA/MD along the tract)
 - Bilateral comparison bar charts
-- 3D streamline visualizations with scalar coloring
+- Tractogram QC slice previews
 - Multi-panel summary figures
 """
 
@@ -15,6 +15,9 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 from pathlib import Path
+
+from csttool.viz import geometry as _geo
+from csttool.viz import style as _style
 
 
 def plot_tract_profiles(
@@ -60,25 +63,30 @@ def plot_tract_profiles(
         print(f"Warning: {scalar.upper()} not available in metrics")
         return None
     
-    left_profile = np.array(left_metrics[scalar]['profile'])
-    right_profile = np.array(right_metrics[scalar]['profile'])
-    
+    # MD is stored in mm²/s (~8e-4); the axis is labelled ×10⁻³ mm²/s, so scale
+    # the profile and mean lines by 1000 to match (same convention as
+    # plot_stacked_profiles). FA is dimensionless and unscaled.
+    scale = 1000.0 if scalar == 'md' else 1.0
+
+    left_profile = np.array(left_metrics[scalar]['profile']) * scale
+    right_profile = np.array(right_metrics[scalar]['profile']) * scale
+
     n_points = len(left_profile)
     x = np.linspace(0, 100, n_points)  # Normalized position (0-100%)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     # Plot profiles
-    ax.plot(x, left_profile, 'b-', linewidth=2, label='Left CST', marker='o', markersize=4)
-    ax.plot(x, right_profile, 'r-', linewidth=2, label='Right CST', marker='s', markersize=4)
-    
+    ax.plot(x, left_profile, color=_style.LEFT, linewidth=2, label='Left CST', marker='o', markersize=4)
+    ax.plot(x, right_profile, color=_style.RIGHT, linewidth=2, label='Right CST', marker='s', markersize=4)
+
     # Add mean lines
-    left_mean = left_metrics[scalar]['mean']
-    right_mean = right_metrics[scalar]['mean']
-    ax.axhline(left_mean, color='b', linestyle='--', alpha=0.5, label=f'Left mean: {left_mean:.3f}')
-    ax.axhline(right_mean, color='r', linestyle='--', alpha=0.5, label=f'Right mean: {right_mean:.3f}')
-    
+    left_mean = left_metrics[scalar]['mean'] * scale
+    right_mean = right_metrics[scalar]['mean'] * scale
+    ax.axhline(left_mean, color=_style.LEFT, linestyle='--', alpha=0.5, label=f'Left mean: {left_mean:.3f}')
+    ax.axhline(right_mean, color=_style.RIGHT, linestyle='--', alpha=0.5, label=f'Right mean: {right_mean:.3f}')
+
     # Labels and formatting
     scalar_label = 'Fractional Anisotropy' if scalar == 'fa' else 'Mean Diffusivity (×10⁻³ mm²/s)'
     
@@ -185,8 +193,8 @@ def plot_stacked_profiles(
         n_points = len(left_profile)
         x = np.linspace(0, 100, n_points)
         
-        ax.plot(x, left_profile, 'b-', linewidth=2, label='Left CST', marker='o', markersize=3)
-        ax.plot(x, right_profile, 'r-', linewidth=2, label='Right CST', marker='s', markersize=3)
+        ax.plot(x, left_profile, color=_style.LEFT, linewidth=2, label='Left CST', marker='o', markersize=3)
+        ax.plot(x, right_profile, color=_style.RIGHT, linewidth=2, label='Right CST', marker='s', markersize=3)
         
         ax.set_ylabel(m['ylabel'], fontsize=10)
         # Auto stats for ylim might be better, but keeping fixed range as starting point logic
@@ -342,22 +350,24 @@ def plot_tractogram_qc_preview(
     
     # Plot streamlines
     if len(streamlines_left) > 0:
-        project_streamlines(streamlines_left, '#2196F3')  # Blue
+        project_streamlines(streamlines_left, _style.LEFT)  # Blue
     if len(streamlines_right) > 0:
-        project_streamlines(streamlines_right, '#F44336')  # Red
+        project_streamlines(streamlines_right, _style.RIGHT)  # Red
     
     # Add legend
     from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0], [0], color='#2196F3', linewidth=2, label='Left CST'),
-        Line2D([0], [0], color='#F44336', linewidth=2, label='Right CST')
+        Line2D([0], [0], color=_style.LEFT, linewidth=2, label='Left CST'),
+        Line2D([0], [0], color=_style.RIGHT, linewidth=2, label='Right CST')
     ]
     ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
     
     if set_title:
         ax.set_title(f'CST Tractogram ({slice_type.title()})', fontsize=10, fontweight='bold')
-    
+
     ax.axis('off')
+    # Enforce radiological orientation + L/R markers (axial/coronal carry L/R).
+    _geo.finalize_image_view(ax, affine, slice_type)
     
     plt.tight_layout()
     
@@ -457,7 +467,7 @@ def plot_bilateral_comparison(
     for ax, metric in zip(axes, metrics_to_plot):
         x_pos = [0, 1]
         values = [metric['left'], metric['right']]
-        colors = ['#2196F3', '#F44336']  # Blue for left, red for right
+        colors = [_style.LEFT, _style.RIGHT]  # Blue for left, red for right
         
         bars = ax.bar(x_pos, values, color=colors, alpha=0.7, edgecolor='black', linewidth=1.5)
         
@@ -497,81 +507,6 @@ def plot_bilateral_comparison(
     
     print(f"✓ Bilateral comparison saved: {fig_path}")
     return fig_path
-
-
-def plot_3d_streamlines(
-    streamlines_left,
-    streamlines_right,
-    fa_map,
-    affine,
-    output_dir,
-    subject_id
-):
-    """
-    Create 3D visualization of CST streamlines colored by FA.
-    
-    Parameters
-    ----------
-    streamlines_left : Streamlines
-        Left CST streamlines
-    streamlines_right : Streamlines
-        Right CST streamlines
-    fa_map : ndarray
-        3D FA map for coloring
-    affine : ndarray
-        4x4 affine transformation matrix
-    output_dir : str or Path
-        Output directory
-    subject_id : str
-        Subject identifier
-        
-    Returns
-    -------
-    fig_path : Path
-        Path to saved figure
-    """
-    
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        from dipy.viz import window, actor
-        
-        # Create renderer
-        renderer = window.Renderer()
-        renderer.SetBackground(1, 1, 1)  # White background
-        
-        # Add left CST (blue tones)
-        if len(streamlines_left) > 0:
-            renderer.add(actor.line(
-                streamlines_left,
-                colors=(0.2, 0.4, 0.8),
-                linewidth=2,
-                opacity=0.8
-            ))
-        
-        # Add right CST (red tones)
-        if len(streamlines_right) > 0:
-            renderer.add(actor.line(
-                streamlines_right,
-                colors=(0.8, 0.2, 0.2),
-                linewidth=2,
-                opacity=0.8
-            ))
-        
-        # Set camera
-        renderer.set_camera(position=(200, 200, 200), focal_point=(0, 0, 0))
-        
-        # Save figure
-        fig_path = output_dir / f"{subject_id}_3d_streamlines.png"
-        window.record(renderer, out_path=str(fig_path), size=(800, 800))
-        
-        print(f"  ✓ 3D streamlines saved: {fig_path}")
-        return fig_path
-        
-    except Exception as e:
-        print(f"  ⚠️ 3D visualization failed: {e}")
-        return None
 
 
 def create_summary_figure(
@@ -628,8 +563,8 @@ def create_summary_figure(
         right_profile = np.array(right['fa']['profile'])
         x = np.linspace(0, 100, len(left_profile))
         
-        ax1.plot(x, left_profile, 'b-', linewidth=2, label='Left', marker='o', markersize=3)
-        ax1.plot(x, right_profile, 'r-', linewidth=2, label='Right', marker='s', markersize=3)
+        ax1.plot(x, left_profile, color=_style.LEFT, linewidth=2, label='Left', marker='o', markersize=3)
+        ax1.plot(x, right_profile, color=_style.RIGHT, linewidth=2, label='Right', marker='s', markersize=3)
         ax1.set_xlabel('Normalized Position (%)')
         ax1.set_ylabel('Fractional Anisotropy')
         ax1.set_title('FA Tract Profile', fontweight='bold')
@@ -672,7 +607,7 @@ def create_summary_figure(
     ax3 = fig.add_subplot(gs[1, 0])
     ax3.bar(['Left', 'Right'], 
            [left['morphology']['n_streamlines'], right['morphology']['n_streamlines']],
-           color=['#2196F3', '#F44336'], alpha=0.7, edgecolor='black')
+           color=[_style.LEFT, _style.RIGHT], alpha=0.7, edgecolor='black')
     ax3.set_ylabel('Count')
     ax3.set_title('Streamline Count', fontweight='bold')
     ax3.grid(True, axis='y', alpha=0.3)
@@ -681,7 +616,7 @@ def create_summary_figure(
     ax4 = fig.add_subplot(gs[1, 1])
     ax4.bar(['Left', 'Right'],
            [left['morphology']['tract_volume'], right['morphology']['tract_volume']],
-           color=['#2196F3', '#F44336'], alpha=0.7, edgecolor='black')
+           color=[_style.LEFT, _style.RIGHT], alpha=0.7, edgecolor='black')
     ax4.set_ylabel('Volume (mm³)')
     ax4.set_title('Tract Volume', fontweight='bold')
     ax4.grid(True, axis='y', alpha=0.3)
@@ -691,7 +626,7 @@ def create_summary_figure(
     if 'fa' in left:
         ax5.bar(['Left', 'Right'],
                [left['fa']['mean'], right['fa']['mean']],
-               color=['#2196F3', '#F44336'], alpha=0.7, edgecolor='black')
+               color=[_style.LEFT, _style.RIGHT], alpha=0.7, edgecolor='black')
         ax5.set_ylabel('Mean FA')
         ax5.set_title('Fractional Anisotropy', fontweight='bold')
         ax5.grid(True, axis='y', alpha=0.3)
@@ -714,7 +649,7 @@ def create_summary_figure(
         metrics_names.append('MD')
         li_values.append(asym['md']['laterality_index'])
     
-    colors = ['#2196F3' if li > 0 else '#F44336' for li in li_values]
+    colors = [_style.LEFT if li > 0 else _style.RIGHT for li in li_values]
     ax6.barh(metrics_names, li_values, color=colors, alpha=0.7, edgecolor='black')
     ax6.axvline(0, color='black', linewidth=1)
     ax6.axvline(-0.1, color='gray', linestyle='--', alpha=0.5)
@@ -722,8 +657,12 @@ def create_summary_figure(
     ax6.set_xlabel('Laterality Index (LI)')
     ax6.set_title('Asymmetry Analysis', fontweight='bold')
     ax6.grid(True, axis='x', alpha=0.3)
-    ax6.text(0.12, 0.5, 'Left > Right', transform=ax6.transAxes, fontsize=9, color='blue')
-    ax6.text(-0.12, 0.5, 'Right > Left', transform=ax6.transAxes, fontsize=9, color='red', ha='right')
+    # Positive LI bars extend right (Left > Right); negative extend left
+    # (Right > Left). Label each side where its bars actually point.
+    ax6.text(0.98, 0.95, 'Left > Right', transform=ax6.transAxes, fontsize=9,
+             color=_style.LEFT, ha='right', va='top')
+    ax6.text(0.02, 0.95, 'Right > Left', transform=ax6.transAxes, fontsize=9,
+             color=_style.RIGHT, ha='left', va='top')
     
     # Overall title
     plt.suptitle(f'CST Analysis Summary - {subject_id}', fontsize=16, fontweight='bold', y=0.98)
@@ -789,8 +728,8 @@ def plot_asymmetry_radar(asymmetry, output_dir, subject_id):
     angles += angles[:1]
     
     fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(projection='polar'))
-    ax.plot(angles, values, 'o-', linewidth=2, color='#2196F3')
-    ax.fill(angles, values, alpha=0.25, color='#2196F3')
+    ax.plot(angles, values, 'o-', linewidth=2, color=_style.LEFT)
+    ax.fill(angles, values, alpha=0.25, color=_style.LEFT)
     
     # Add threshold circle
     threshold = [0.1] * (len(metrics) + 1)

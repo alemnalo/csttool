@@ -194,16 +194,7 @@
                     <img src="{{ viz.stacked_profiles }}" alt="Stacked Profiles">
                 </div>
             {% else %}
-                {% for profile in viz.profiles %}
-                <div class="profile-plot">
-                    <h4>{{ profile.title }}</h4>
-                    {% if profile.data %}
-                    <img src="{{ profile.data }}" alt="{{ profile.title }}">
-                    {% else %}
-                    <div class="profile-placeholder">[{{ profile.title }} Plot]</div>
-                    {% endif %}
-                </div>
-                {% endfor %}
+                <div class="profile-placeholder">[Along-Tract Profiles]</div>
             {% endif %}
             </div>
 

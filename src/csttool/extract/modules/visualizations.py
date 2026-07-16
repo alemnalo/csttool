@@ -11,6 +11,11 @@ matplotlib.use('Agg')  # Non-interactive backend for file saving
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+from csttool.viz import geometry as _geo
+from csttool.viz import style as _style
+from csttool.viz.utils import deterministic_subsample
+from matplotlib.colors import to_rgba
+
 
 # =============================================================================
 # SHARED HELPERS
@@ -113,6 +118,7 @@ def plot_registration_comparison(
     mni_warped,
     output_dir,
     subject_id=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -202,7 +208,13 @@ def plot_registration_comparison(
         axes[row, 0].text(-0.15, 0.5, view_name, transform=axes[row, 0].transAxes,
                          fontsize=12, fontweight='bold', va='center', ha='right',
                          rotation=90)
-    
+
+        # Radiological orientation + L/R markers for all three panels of this view.
+        if affine is not None:
+            view = view_name.lower()
+            for c in range(3):
+                _geo.finalize_image_view(axes[row, c], affine, view)
+
     fig_path = viz_dir / f"{prefix}registration_qc.png"
     plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -222,6 +234,7 @@ def plot_roi_masks(
     masks,
     output_dir,
     subject_id=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -235,21 +248,30 @@ def plot_roi_masks(
     viz_dir.mkdir(parents=True, exist_ok=True)
     
     prefix = f"{subject_id}_" if subject_id else ""
-    
-    # Get slice indices
-    mid_ax = fa.shape[2] // 2
-    mid_cor = fa.shape[1] // 2
-    mid_sag = fa.shape[0] // 2
-    
-    # Create figure
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
-    fig.suptitle(f"ROI Masks - {subject_id or 'Subject'}\nMotor Cortex (L/R) + Brainstem",
-                 fontsize=14, fontweight='bold')
-    
+
     # Get masks (keys from create_cst_roi_masks: 'motor_left', 'motor_right', 'brainstem')
     motor_left = masks.get('motor_left', np.zeros_like(fa))
     motor_right = masks.get('motor_right', np.zeros_like(fa))
     brainstem = masks.get('brainstem', np.zeros_like(fa))
+
+    # Pick, per view, the slice containing the most ROI voxels so panels are not
+    # near-empty (a mid slice often misses the ROIs entirely). Fall back to the
+    # middle slice when no ROI intersects that axis (NEW-6).
+    combined = (motor_left > 0) | (motor_right > 0) | (brainstem > 0)
+
+    def _densest(axis, fallback):
+        other = tuple(a for a in range(3) if a != axis)
+        counts = combined.sum(axis=other)
+        return int(counts.argmax()) if counts.any() else fallback
+
+    mid_sag = _densest(0, fa.shape[0] // 2)
+    mid_cor = _densest(1, fa.shape[1] // 2)
+    mid_ax = _densest(2, fa.shape[2] // 2)
+
+    # Create figure
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
+    fig.suptitle(f"ROI Masks - {subject_id or 'Subject'}\nMotor Cortex (L/R) + Brainstem",
+                 fontsize=14, fontweight='bold')
     
     views = [
         ('Axial', fa[:, :, mid_ax], motor_left[:, :, mid_ax], 
@@ -304,18 +326,16 @@ def plot_roi_masks(
             extent=padded_extent
         )
         
-        # Create colored overlays
-        # Motor cortex left (blue)
+        # Create colored overlays using the shared hemisphere/ROI palette:
+        # motor-left = Left (blue), motor-right = Right (orange), brainstem = green.
         ml_rgb = np.zeros((*padded_ml.shape, 4))  # RGBA array
-        ml_rgb[padded_ml > 0] = [0, 0, 1, 0.6]  # Blue with alpha
-        
-        # Motor cortex right (red)
+        ml_rgb[padded_ml > 0] = to_rgba(_style.MOTOR_LEFT, 0.6)
+
         mr_rgb = np.zeros((*padded_mr.shape, 4))
-        mr_rgb[padded_mr > 0] = [1, 0, 0, 0.6]  # Red with alpha
-        
-        # Brainstem (green)
+        mr_rgb[padded_mr > 0] = to_rgba(_style.MOTOR_RIGHT, 0.6)
+
         bs_rgb = np.zeros((*padded_bs.shape, 4))
-        bs_rgb[padded_bs > 0] = [0, 1, 0, 0.6]  # Green with alpha
+        bs_rgb[padded_bs > 0] = to_rgba(_style.BRAINSTEM, 0.6)
         
         # Apply overlays
         axes[1, col].imshow(ml_rgb, origin='lower', extent=padded_extent)
@@ -325,13 +345,19 @@ def plot_roi_masks(
         axes[1, col].set_title(f'{view_name}\nROI overlay')
         axes[1, col].axis('off')
         axes[1, col].set_box_aspect(1)
-    
+
+        # Enforce radiological orientation + L/R markers (axial/coronal only).
+        if affine is not None:
+            view = view_name.lower()
+            _geo.finalize_image_view(axes[0, col], affine, view)
+            _geo.finalize_image_view(axes[1, col], affine, view)
+
     # Add legend
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor='blue', alpha=0.6, label='Motor Cortex Left'),
-        Patch(facecolor='red', alpha=0.6, label='Motor Cortex Right'),
-        Patch(facecolor='green', alpha=0.6, label='Brainstem'),
+        Patch(facecolor=_style.MOTOR_LEFT, alpha=0.6, label='Motor Cortex Left'),
+        Patch(facecolor=_style.MOTOR_RIGHT, alpha=0.6, label='Motor Cortex Right'),
+        Patch(facecolor=_style.BRAINSTEM, alpha=0.6, label='Brainstem'),
     ]
     fig.legend(handles=legend_elements, loc='lower center', ncol=3, fontsize=11)
     
@@ -354,6 +380,7 @@ def plot_jacobian_map(
     fa,
     output_dir,
     subject_id=None,
+    affine=None,
     verbose=True
 ):
     """
@@ -428,6 +455,11 @@ def plot_jacobian_map(
         axes[1, col].axis('off')
         axes[1, col].set_box_aspect(1)
 
+        if affine is not None:
+            view = name.lower()
+            _geo.finalize_image_view(axes[0, col], affine, view)
+            _geo.finalize_image_view(axes[1, col], affine, view)
+
     # Colorbar
     cbar = fig.colorbar(im, ax=axes[1, :], orientation='horizontal',
                         fraction=0.05, pad=0.1)
@@ -474,10 +506,8 @@ def plot_cst_extraction(
     
     # Subsample if needed
     def subsample(streamlines, max_n):
-        if len(streamlines) <= max_n:
-            return list(streamlines)
-        indices = np.random.choice(len(streamlines), max_n, replace=False)
-        return [streamlines[i] for i in indices]
+        # Deterministic (seeded) subsample; no global RNG mutation.
+        return deterministic_subsample(streamlines, max_n)
     
     left_vis = subsample(cst_left, max_streamlines)
     right_vis = subsample(cst_right, max_streamlines)
@@ -519,7 +549,8 @@ def plot_cst_extraction(
         ax.set_title(f'{name}\nFA background')
         ax.axis('off')
         ax.set_box_aspect(1)
-    
+        _geo.finalize_image_view(ax, affine, name.lower())
+
     # Row 1: Streamlines ONLY (no FA background) on neutral background
     views_sl = [
         ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)'),   # Y vs Z
@@ -546,11 +577,11 @@ def plot_cst_extraction(
         
         # Plot left CST (blue)
         for sl in left_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.3, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.3, linewidth=0.8)
         
         # Plot right CST (red)
         for sl in right_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.3, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.3, linewidth=0.8)
         
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -561,12 +592,14 @@ def plot_cst_extraction(
         ax.set_aspect('equal', adjustable='box')
         ax.grid(True, alpha=0.3, color='white')
         ax.set_box_aspect(1)
+        # Radiological world orientation + L/R markers for X-bearing planes.
+        _geo.finalize_world_plane(ax, d1)
     
     # Add legend INSIDE the bottom-right plot (cleanest solution)
     from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0], [0], color='blue', linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
-        Line2D([0], [0], color='red', linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
+        Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
+        Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
     ]
     
     # Place legend in the bottom-right plot (axial view)
@@ -647,10 +680,8 @@ def plot_hemisphere_separation(
 
     # Subsample for visualization
     def subsample(streamlines, max_n):
-        if len(streamlines) <= max_n:
-            return list(streamlines)
-        indices = np.random.choice(len(streamlines), max_n, replace=False)
-        return [streamlines[i] for i in indices]
+        # Deterministic (seeded) subsample; no global RNG mutation.
+        return deterministic_subsample(streamlines, max_n)
 
     left_vis = subsample(cst_left, max_streamlines)
     right_vis = subsample(cst_right, max_streamlines)
@@ -676,10 +707,11 @@ def plot_hemisphere_separation(
         fontsize=14, fontweight='bold'
     )
 
-    # View configurations
+    # View configurations. Radiological display (anatomical Left on the viewer's
+    # right) is enforced below with explicit R/L markers, so the x label stays plain.
     views = [
-        ('Coronal (X-Z)', 0, 2, 'X (mm) [Left <- | -> Right]', 'Z (mm)'),
-        ('Axial (X-Y)', 0, 1, 'X (mm) [Left <- | -> Right]', 'Y (mm)'),
+        ('Coronal (X-Z)', 0, 2, 'X (mm)', 'Z (mm)'),
+        ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)'),
     ]
 
     # Compute axis limits from all streamlines
@@ -695,7 +727,7 @@ def plot_hemisphere_separation(
         ax_left = axes[row, 0]
         ax_left.set_facecolor('#f5f5f5')
         for sl in left_vis:
-            ax_left.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.4, linewidth=0.8)
+            ax_left.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.4, linewidth=0.8)
 
         # Add midline reference
         ax_left.axvline(midline_x, color='gray', linestyle='--', linewidth=1.5,
@@ -705,7 +737,7 @@ def plot_hemisphere_separation(
         ax_left.set_ylim(ylim)
         ax_left.set_xlabel(xlabel)
         ax_left.set_ylabel(ylabel)
-        ax_left.set_title(f'LEFT CST\n{view_name}' if row == 0 else '')
+        ax_left.set_title(f'LEFT CST\n{view_name}' if row == 0 else view_name)
         ax_left.set_aspect('equal', adjustable='box')
         ax_left.grid(True, alpha=0.3, color='white')
 
@@ -713,9 +745,9 @@ def plot_hemisphere_separation(
         ax_both = axes[row, 1]
         ax_both.set_facecolor('#f5f5f5')
         for sl in left_vis:
-            ax_both.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.3, linewidth=0.8)
+            ax_both.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.3, linewidth=0.8)
         for sl in right_vis:
-            ax_both.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.3, linewidth=0.8)
+            ax_both.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.3, linewidth=0.8)
 
         ax_both.axvline(midline_x, color='black', linestyle='-', linewidth=2,
                         alpha=0.8)
@@ -724,7 +756,7 @@ def plot_hemisphere_separation(
         ax_both.set_ylim(ylim)
         ax_both.set_xlabel(xlabel)
         ax_both.set_ylabel(ylabel)
-        ax_both.set_title(f'BILATERAL\n{view_name}' if row == 0 else '')
+        ax_both.set_title(f'BILATERAL\n{view_name}' if row == 0 else view_name)
         ax_both.set_aspect('equal', adjustable='box')
         ax_both.grid(True, alpha=0.3, color='white')
 
@@ -732,7 +764,7 @@ def plot_hemisphere_separation(
         ax_right = axes[row, 2]
         ax_right.set_facecolor('#f5f5f5')
         for sl in right_vis:
-            ax_right.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.4, linewidth=0.8)
+            ax_right.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.4, linewidth=0.8)
 
         ax_right.axvline(midline_x, color='gray', linestyle='--', linewidth=1.5,
                          alpha=0.7)
@@ -741,15 +773,19 @@ def plot_hemisphere_separation(
         ax_right.set_ylim(ylim)
         ax_right.set_xlabel(xlabel)
         ax_right.set_ylabel(ylabel)
-        ax_right.set_title(f'RIGHT CST\n{view_name}' if row == 0 else '')
+        ax_right.set_title(f'RIGHT CST\n{view_name}' if row == 0 else view_name)
         ax_right.set_aspect('equal', adjustable='box')
         ax_right.grid(True, alpha=0.3, color='white')
+
+        # Radiological world orientation + L/R markers (all three panels of the row).
+        for ax in (ax_left, ax_both, ax_right):
+            _geo.finalize_world_plane(ax, d1)
 
     # Add legend to middle panel
     from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0], [0], color='blue', linewidth=2, label=f'Left ({left_count:,})'),
-        Line2D([0], [0], color='red', linewidth=2, label=f'Right ({right_count:,})'),
+        Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({left_count:,})'),
+        Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({right_count:,})'),
         Line2D([0], [0], color='black', linestyle='-', linewidth=2, label='Midsagittal plane'),
     ]
     axes[0, 1].legend(handles=legend_elements, loc='upper right', fontsize=9,
@@ -779,7 +815,9 @@ def plot_hemisphere_separation(
         qc_color = '#ccffcc'  # Light green - OK
         qc_text += "\n[OK: Good hemisphere separation]"
 
-    fig.text(0.5, 0.02, qc_text, ha='center', fontsize=10,
+    # Place the QC box below the panels (negative y + tight bbox on save) so it
+    # never overlaps the bottom row (NEW-7).
+    fig.text(0.5, -0.04, qc_text, ha='center', va='top', fontsize=10,
              bbox=dict(boxstyle='round', facecolor=qc_color, alpha=0.8))
 
     # Save
@@ -824,10 +862,8 @@ def create_extraction_summary(
     
     # Subsample for visualization
     def subsample(streamlines, max_n):
-        if len(streamlines) <= max_n:
-            return list(streamlines)
-        indices = np.random.choice(len(streamlines), max_n, replace=False)
-        return [streamlines[i] for i in indices]
+        # Deterministic (seeded) subsample; no global RNG mutation.
+        return deterministic_subsample(streamlines, max_n)
     
     left_vis = subsample(cst_left, max_streamlines)
     right_vis = subsample(cst_right, max_streamlines)
@@ -890,13 +926,14 @@ def create_extraction_summary(
         ax.imshow(overlay, origin='lower', extent=padded_extent)
         ax.set_title(f'{name}: ROI Masks', fontsize=12)
         ax.axis('off')
-        
+        _geo.finalize_image_view(ax, affine, name.lower())
+
         # Add ROI legend only to the sagittal view (last column)
         if col == 2:  # Sagittal view
             from matplotlib.patches import Patch
             legend_elements = [
-                Patch(facecolor='blue', alpha=0.5, label='Motor L'),
-                Patch(facecolor='red', alpha=0.5, label='Motor R'),
+                Patch(facecolor=_style.MOTOR_LEFT, alpha=0.5, label='Motor L'),
+                Patch(facecolor=_style.MOTOR_RIGHT, alpha=0.5, label='Motor R'),
                 Patch(facecolor='green', alpha=0.5, label='Brainstem'),
             ]
             # Place legend in upper right corner
@@ -930,11 +967,11 @@ def create_extraction_summary(
         
         # Plot left CST
         for sl in left_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='blue', alpha=0.25, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.LEFT, alpha=0.25, linewidth=0.8)
         
         # Plot right CST
         for sl in right_vis:
-            ax.plot(sl[:, d1], sl[:, d2], color='red', alpha=0.25, linewidth=0.8)
+            ax.plot(sl[:, d1], sl[:, d2], color=_style.RIGHT, alpha=0.25, linewidth=0.8)
         
         ax.set_xlabel(xlabel, fontsize=11)
         ax.set_ylabel(ylabel, fontsize=11)
@@ -946,13 +983,14 @@ def create_extraction_summary(
         ax.set_aspect('equal', adjustable='box')
         ax.grid(True, alpha=0.3, color='white')
         ax.tick_params(labelsize=10)
-        
+        _geo.finalize_world_plane(ax, d1)
+
         # Add CST legend only to the sagittal view (last column)
         if col == 2:  # Sagittal view
             from matplotlib.lines import Line2D
             legend_elements = [
-                Line2D([0], [0], color='blue', linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
-                Line2D([0], [0], color='red', linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
+                Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
+                Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
             ]
             # Place legend in upper right corner
             ax.legend(handles=legend_elements, loc='upper right', fontsize=9,
@@ -1046,6 +1084,7 @@ def save_all_extraction_visualizations(
     viz_paths : dict
         Dictionary of paths to saved visualizations.
     """
+    _style.apply_house_style()  # shared typography/spines/DPI for this stage
     if verbose:
         print("\nGenerating extraction visualizations...")
 
@@ -1054,18 +1093,18 @@ def save_all_extraction_visualizations(
     # Registration QC (if MNI warped provided)
     if mni_warped is not None:
         viz_paths['registration_qc'] = plot_registration_comparison(
-            fa, mni_warped, output_dir, subject_id, verbose=verbose
+            fa, mni_warped, output_dir, subject_id, affine=affine, verbose=verbose
         )
 
     # Jacobian map (if Jacobian data provided)
     if jacobian_det is not None:
         viz_paths['jacobian_map'] = plot_jacobian_map(
-            jacobian_det, fa, output_dir, subject_id, verbose=verbose
+            jacobian_det, fa, output_dir, subject_id, affine=affine, verbose=verbose
         )
 
     # ROI masks
     viz_paths['roi_masks'] = plot_roi_masks(
-        fa, masks, output_dir, subject_id, verbose=verbose
+        fa, masks, output_dir, subject_id, affine=affine, verbose=verbose
     )
 
     # CST extraction

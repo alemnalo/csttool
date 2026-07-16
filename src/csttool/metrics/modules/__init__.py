@@ -12,7 +12,6 @@ from .bilateral_analysis import compare_bilateral_cst, compute_laterality_indice
 from .visualizations import (
     plot_tract_profiles,
     plot_bilateral_comparison,
-    plot_3d_streamlines,
     create_summary_figure
 )
 
@@ -27,6 +26,5 @@ __all__ = [
     # Visualizations
     'plot_tract_profiles',
     'plot_bilateral_comparison',
-    'plot_3d_streamlines',
     'create_summary_figure',
 ]

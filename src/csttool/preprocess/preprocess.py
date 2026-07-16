@@ -32,6 +32,7 @@ def run_preprocessing(
     target_voxel_size: tuple[float, float, float] | None = None,
     # Visualization options
     save_visualizations: bool = False,
+    title_id: str | None = None,
     verbose: bool = False,
 ) -> dict:
     """
@@ -219,8 +220,10 @@ def run_preprocessing(
     if save_visualizations:
         try:
             from .modules.visualizations import save_all_preprocessing_visualizations
-            viz_dir = output_dir / "visualizations"
-            viz_dir.mkdir(parents=True, exist_ok=True)
+            # Pass the stage directory; save_all_preprocessing_visualizations appends
+            # the single "visualizations/" subdir itself. Passing an already-"visualizations"
+            # path here doubled it (…/visualizations/visualizations/) so the BIDS reorg,
+            # which globs …/preprocessing/visualizations/*.png, never found the figures.
             save_all_preprocessing_visualizations(
                 data_original=data,  # Raw data before any processing
                 data_denoised=denoised,  # Denoised (same shape as original)
@@ -229,11 +232,13 @@ def run_preprocessing(
                 data_preprocessed=preprocessed,
                 brain_mask=brain_mask,
                 gtab=gtab,
-                output_dir=viz_dir,
+                output_dir=output_dir,
                 stem=filename,
                 denoise_method=denoise_method,
                 reg_affines=reg_affines,
                 motion_correction_applied=motion_correction_applied,
+                affine=affine,
+                title_id=title_id,
             )
             print("PREPROCESSING: QC visualizations saved")
         except Exception as e:

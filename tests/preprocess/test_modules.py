@@ -218,3 +218,47 @@ class TestSavePreprocessed:
         assert (output_dir / "test_subj.bval").exists()
         assert (output_dir / "test_subj.bvec").exists()
         assert (output_dir / "test_subj_mask.nii.gz").exists()
+
+
+class TestPreprocessingVisualizationPaths:
+    """Regression guard for NEW-1: preprocessing QC figures must land in a single
+    ``<stage>/visualizations/`` directory (never a doubled
+    ``visualizations/visualizations/``), which is exactly where the ``run`` BIDS
+    reorg globs for them. A doubled path silently discarded every preproc figure.
+    """
+
+    def test_figures_land_in_single_visualizations_dir(
+        self, tmp_path, synthetic_dwi_data, synthetic_gtab_fixture, synthetic_affine
+    ):
+        from csttool.preprocess.modules.visualizations import (
+            save_all_preprocessing_visualizations,
+        )
+
+        stage_dir = tmp_path / "preprocessing"
+        stage_dir.mkdir()
+        mask = np.zeros(synthetic_dwi_data.shape[:3], dtype=bool)
+        mask[2:8, 2:8, 2:8] = True
+
+        save_all_preprocessing_visualizations(
+            data_original=synthetic_dwi_data,
+            data_denoised=synthetic_dwi_data * 0.9,
+            data_masked=synthetic_dwi_data * 0.95,
+            data_unringed=synthetic_dwi_data * 0.94,
+            data_preprocessed=synthetic_dwi_data * 0.9,
+            brain_mask=mask,
+            gtab=synthetic_gtab_fixture,
+            output_dir=stage_dir,
+            stem="sub-x",
+            denoise_method="nlmeans",
+            affine=synthetic_affine,
+            verbose=False,
+        )
+
+        viz_dir = stage_dir / "visualizations"
+        pngs = sorted(p.name for p in viz_dir.glob("*.png"))
+        # The BIDS reorg globs exactly this directory (non-recursive).
+        assert pngs, "no preprocessing figures reached <stage>/visualizations/"
+        for name in pngs:
+            assert (viz_dir / name).stat().st_size > 1000  # non-empty
+        # The old doubled path must not exist.
+        assert not (viz_dir / "visualizations").exists()
