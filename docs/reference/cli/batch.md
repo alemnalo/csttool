@@ -111,7 +111,7 @@ See [Output formats](../output-formats.md) for details.
 | Flag | Description |
 | --- | --- |
 | `--preprocessing` / `--no-preprocessing` | Enable or skip preprocessing (default: enabled) |
-| `--denoise-method` | `patch2self` (default), `nlmeans`, or `none` |
+| `--denoise-method` | `mppca` (default), `patch2self`, `nlmeans`, or `none` |
 | `--generate-pdf` | Generate PDF report for each subject |
 
 ### Pipeline control

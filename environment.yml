@@ -11,7 +11,9 @@ dependencies:
   - matplotlib
 
   # Neuroimaging
-  - dipy
+  # Keep the bound in sync with pyproject.toml: DIPY 2.0 raises ExpiredDeprecationError on the
+  # EuDX direction-getter API that both tracking paths use.
+  - dipy>=1.9,<2
   - nibabel
   - nilearn
   - dicom2nifti

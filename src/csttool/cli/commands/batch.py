@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import List
 
+from ...defaults import DEFAULT_DENOISE_METHOD
 from ...batch.batch import BatchConfig, run_batch, SubjectSpec
 from csttool.bids.output import write_dataset_description, update_participants_tsv
 from ...batch.modules.manifest import load_manifest, StudyInfo
@@ -132,7 +133,7 @@ def cmd_batch(args: argparse.Namespace) -> None:
         timeout_minutes=args.timeout_minutes,
         keep_work=args.keep_work,
         # Pipeline options (inherit from global options then CLI)
-        denoise_method=getattr(args, 'denoise_method', global_options.get('denoise_method', 'nlmeans')),
+        denoise_method=getattr(args, 'denoise_method', global_options.get('denoise_method', DEFAULT_DENOISE_METHOD)),
         preprocessing=getattr(args, 'preprocessing', global_options.get('preprocessing', True)),
         generate_pdf=getattr(args, 'generate_pdf', global_options.get('generate_pdf', False)),
         # Additional options can be added here

@@ -45,7 +45,7 @@ csttool run \
 What each flag does, briefly:
 
 - `--bids-out` — write outputs in BIDS-Derivatives layout under `~/derivatives/csttool/sub-001/`.
-- `--denoise-method patch2self` — modern self-supervised denoising (default). Use `nlmeans` for acquisitions with <30 volumes.
+- `--denoise-method patch2self` — self-supervised denoising. The default is `mppca`, which estimates its own noise level; `patch2self` suits modern high-volume acquisitions, and `nlmeans` acquisitions with <30 volumes.
 - `--perform-motion-correction` — affine align all volumes to the first b=0.
 - `--generate-pdf` — render the HTML report to PDF (requires WeasyPrint; see [Troubleshooting](../how-to/troubleshooting.md#weasyprint-fails-to-install-or-render-pdfs) if this fails).
 

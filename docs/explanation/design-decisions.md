@@ -157,3 +157,40 @@ their labels from it. This is the single source of truth on purpose: the bins an
 were previously stated independently and drifted, so the figures annotated 0/50/100% while the
 table averaged 0-35/35-70/70-100%. Region boundaries are conventional, not validated against an
 atlas — the JHU ICBM-DTI-81 landmark validation is outstanding, so the names are nominal.
+
+---
+
+## Why MPPCA is the default denoiser
+
+All three denoisers are offered, but the default has to work without asking the user for
+information they usually do not have.
+
+- **NLMeans** needs a receiver-coil count for PIESNO sigma estimation, and an assumption about
+  whether the noise is Gaussian or Rician. On a modern multi-channel head coil with parallel
+  imaging, the *effective* coil count is not the physical one and is rarely known; the tool was
+  guessing `N=4` and assuming Gaussian noise on everyone's data.
+- **Patch2Self** needs bvals and enough directions, so it cannot be a universal default.
+- **MPPCA** estimates the noise level itself, from the eigenvalue distribution of local PCA
+  patches against the Marchenko-Pastur distribution. It needs neither a coil count nor a noise
+  model nor bvals — it exploits the redundancy of the 4D DWI directly.
+
+MPPCA also has a reproducibility advantage that fell out of this: it exposes no thread-count
+and no seed parameter, so the multithreaded-reduction non-determinism that made NLMeans
+non-reproducible cannot arise on the default path. Its output is bitwise identical across
+repeated runs.
+
+Choosing MPPCA sidesteps rather than settles the Gaussian-vs-Rician question: with no noise
+model to assume, there is nothing to get wrong. NLMeans remains available via
+`--denoise-method nlmeans`, and its coil-count and noise-distribution caveats apply to anyone
+who chooses it.
+
+**Why the default lives in one constant.** `DEFAULT_DENOISE_METHOD` in `csttool/defaults.py` is
+the single source of truth, read by the CLI parsers, the command wrappers, `run_preprocessing`
+and `denoise`. The default was previously restated in eight places; a change applied to only one
+of them left every CLI command on NLMeans while the signature, the CHANGELOG and the project
+notes all said otherwise. Defaults that are stated more than once eventually disagree.
+
+It is a standalone leaf module rather than part of `csttool.preprocess` because `denoise.py`
+needs the value and is itself imported by `csttool/preprocess/__init__.py` — a constant defined
+there could not be read back without a circular import. Having no imports of its own, it is
+safe to read from anywhere regardless of import order.
