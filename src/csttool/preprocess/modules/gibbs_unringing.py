@@ -41,7 +41,7 @@ def gibbs_unringing(
         data,
         slice_axis=slice_axis,
         n_points=n_points,
-        num_processes=-1
+        num_processes=1  # Use a single process to avoid non-determinism from parallel processing
     )
     return data_corrected
     

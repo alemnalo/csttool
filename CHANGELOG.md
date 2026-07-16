@@ -141,6 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default denoising method changed to `mppca` from `nlmeans`. Reason: `mppca` requires no
   assumptions to be made on coil count or noise distribution of DWI data.
 - `nlmeans` parameter `num_threads` changed from `-1` to `1`. Reason: single thread CPU reduces performance but ensures determinism when `nlmeans` denoising is implemented.
+- `gibbs_removal` changed so that `num_threads = 1`, analogously to above
 
 ## [0.4.0] - 2026-01-28
 
