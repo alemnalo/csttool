@@ -583,7 +583,13 @@ def main() -> None:
         default=6,
         help="Spherical harmonic order (default: 6)"
     )
-    
+    p_run.add_argument(
+        "--rng-seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible tracking and extraction (default: 42)."
+    )
+
     # Extraction options
     p_run.add_argument(
         "--dilate-brainstem",

@@ -7,6 +7,7 @@ from dipy.io.image import load_nifti
 from dipy.io import read_bvals_bvecs
 from dipy.core.gradients import gradient_table
 
+from csttool.reproducibility import RunContext
 from csttool.viz import geometry as _viz_geometry
 
 def cmd_extract(args: argparse.Namespace) -> dict | None:
@@ -276,9 +277,11 @@ def run_roi_seeded_extraction(
         save_cst_tractograms,
         save_extraction_report
     )
-    
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    ctx = RunContext(run_seed=getattr(args, 'rng_seed', 42))
+
     # Load preprocessed DWI data
     if verbose:
         print(f"    • Input: {preproc_path}")
@@ -370,6 +373,7 @@ def run_roi_seeded_extraction(
         step_size=0.5,
         min_length=getattr(args, 'min_length', 30.0),
         max_length=getattr(args, 'max_length', 200.0),
+        random_seed=ctx.rng_tracking_seed(),
         verbose=verbose
     )
     
@@ -447,6 +451,8 @@ def run_bidirectional_extraction(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    ctx = RunContext(run_seed=getattr(args, 'rng_seed', 42))
 
     if verbose:
         print(f"    • Input: {preproc_path}")
@@ -528,6 +534,7 @@ def run_bidirectional_extraction(
         step_size=0.5,
         min_length=getattr(args, 'min_length', 30.0),
         max_length=getattr(args, 'max_length', 200.0),
+        random_seed=ctx.rng_tracking_seed(),
         verbose=verbose,
     )
 

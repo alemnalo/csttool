@@ -82,11 +82,12 @@ def track_from_seeds(
     stopping_criterion,
     affine,
     step_size=0.5,
-    return_all=False
+    return_all=False,
+    random_seed=None
 ):
     """
     Perform deterministic tractography from specified seed points.
-    
+
     Parameters
     ----------
     seeds : ndarray, shape (N, 3)
@@ -101,7 +102,11 @@ def track_from_seeds(
         Step size in mm. Default is 0.5.
     return_all : bool, optional
         If True, return all streamlines including invalid ones.
-        
+    random_seed : int, optional
+        Random seed for reproducible tracking. If None, results may vary
+        between runs. Callers in the csttool pipeline should pass
+        ``ctx.rng_tracking_seed()`` rather than a literal.
+
     Returns
     -------
     streamlines : Streamlines
@@ -116,9 +121,10 @@ def track_from_seeds(
         seeds,
         affine,
         step_size=step_size,
-        return_all=return_all
+        return_all=return_all,
+        random_seed=random_seed
     )
-    
+
     streamlines = Streamlines(streamline_generator)
     return streamlines
 
@@ -215,6 +221,7 @@ def extract_cst_roi_seeded(
     sh_order=6,
     relative_peak_threshold=0.5,
     min_separation_angle=25,
+    random_seed=None,
     verbose=True
 ):
     """
@@ -261,9 +268,13 @@ def extract_cst_roi_seeded(
     min_separation_angle : int, optional
         Minimum angle between peaks in degrees. Default is 25.
         Lower values allow sharper turns during tracking.
+    random_seed : int, optional
+        Random seed for reproducible tracking. Both hemispheres are tracked
+        with the same seed, so the RNG cannot itself become a source of L/R
+        difference. If None, results vary between runs.
     verbose : bool, optional
         Print progress information.
-        
+
     Returns
     -------
     result : dict
@@ -280,7 +291,11 @@ def extract_cst_roi_seeded(
         print("=" * 60)
         print("ROI-SEEDED CST EXTRACTION")
         print("=" * 60)
-    
+        if random_seed is not None:
+            print(f"  → Random seed: {random_seed}")
+        else:
+            print("  → Random seeding disabled - results will vary between runs")
+
     # -------------------------------------------------------------------------
     # Step 1: Compute FA if not provided
     # -------------------------------------------------------------------------
@@ -349,7 +364,8 @@ def extract_cst_roi_seeded(
         peaks,
         stopping_criterion,
         affine,
-        step_size=step_size
+        step_size=step_size,
+        random_seed=random_seed
     )
     
     if verbose:
@@ -394,7 +410,8 @@ def extract_cst_roi_seeded(
         peaks,
         stopping_criterion,
         affine,
-        step_size=step_size
+        step_size=step_size,
+        random_seed=random_seed
     )
     
     if verbose:
@@ -459,8 +476,9 @@ def extract_cst_roi_seeded(
         'sh_order': validated_sh_order,
         'relative_peak_threshold': relative_peak_threshold,
         'min_separation_angle': min_separation_angle,
+        'random_seed': random_seed,
     }
-    
+
     if verbose:
         print("\n" + "=" * 60)
         print("ROI-SEEDED EXTRACTION COMPLETE")

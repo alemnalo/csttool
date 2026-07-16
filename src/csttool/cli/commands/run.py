@@ -293,6 +293,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             seed_density=getattr(args, 'seed_density', 1),
             step_size=getattr(args, 'step_size', 0.5),
             sh_order=getattr(args, 'sh_order', 6),
+            rng_seed=getattr(args, 'rng_seed', 42),
             save_visualizations=getattr(args, 'save_visualizations', False),
             show_plots=getattr(args, 'show_plots', False),
             verbose=verbose,

@@ -72,6 +72,7 @@ def extract_cst_bidirectional(
     sh_order=6,
     relative_peak_threshold=0.5,
     min_separation_angle=25,
+    random_seed=None,
     verbose=True,
 ):
     """
@@ -111,6 +112,13 @@ def extract_cst_bidirectional(
         Relative peak threshold. Default 0.5.
     min_separation_angle : int, optional
         Minimum angle between ODF peaks in degrees. Default 25.
+    random_seed : int, optional
+        Random seed for reproducible tracking, applied to all three passes
+        (forward left, forward right, reverse). The same seed is used for
+        every pass so the RNG cannot itself become a source of L/R
+        difference or of forward/reverse inflation — both of which this
+        method exists to measure. If None, results vary between runs and
+        ``artifact_index`` is not reproducible.
     verbose : bool, optional
         Print progress. Default True.
 
@@ -125,6 +133,10 @@ def extract_cst_bidirectional(
         print("=" * 60)
         print("BIDIRECTIONAL CST EXTRACTION")
         print("=" * 60)
+        if random_seed is not None:
+            print(f"  → Random seed: {random_seed}")
+        else:
+            print("  → Random seeding disabled - results will vary between runs")
 
     # ------------------------------------------------------------------
     # Step 1: FA + ODF peaks + stopping criterion
@@ -175,13 +187,15 @@ def extract_cst_bidirectional(
         print(f"    Right motor seeds: {len(right_seeds):,}")
 
     left_fwd_all = filter_by_length(
-        track_from_seeds(left_seeds, peaks, stopping_criterion, affine, step_size),
+        track_from_seeds(left_seeds, peaks, stopping_criterion, affine, step_size,
+                         random_seed=random_seed),
         min_length, max_length, verbose=verbose,
     )
     left_fwd, _ = filter_by_target_roi(left_fwd_all, brainstem_mask, affine, verbose=verbose)
 
     right_fwd_all = filter_by_length(
-        track_from_seeds(right_seeds, peaks, stopping_criterion, affine, step_size),
+        track_from_seeds(right_seeds, peaks, stopping_criterion, affine, step_size,
+                         random_seed=random_seed),
         min_length, max_length, verbose=verbose,
     )
     right_fwd, _ = filter_by_target_roi(right_fwd_all, brainstem_mask, affine, verbose=verbose)
@@ -202,7 +216,8 @@ def extract_cst_bidirectional(
         print(f"    Brainstem seeds: {len(bs_seeds):,}")
 
     bs_all = filter_by_length(
-        track_from_seeds(bs_seeds, peaks, stopping_criterion, affine, step_size),
+        track_from_seeds(bs_seeds, peaks, stopping_criterion, affine, step_size,
+                         random_seed=random_seed),
         min_length, max_length, verbose=verbose,
     )
 
@@ -326,6 +341,7 @@ def extract_cst_bidirectional(
         'sh_order': validated_sh_order,
         'relative_peak_threshold': relative_peak_threshold,
         'min_separation_angle': min_separation_angle,
+        'random_seed': random_seed,
     }
 
     if verbose:

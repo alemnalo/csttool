@@ -51,6 +51,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The RNG seed now reaches the `roi-seeded` and `bidirectional` extraction methods.**
+  `track_from_seeds` — the tracker behind both — constructed DIPY's `LocalTracking`
+  without a `random_seed` argument and did not accept one, so `--rng-seed` could not
+  reach the two methods that `run` exposes. This contradicted the project's
+  seed-everything-stochastic policy for exactly the methods it foregrounds.
+
+  `random_seed` is now a parameter of `track_from_seeds`, `extract_cst_roi_seeded` and
+  `extract_cst_bidirectional`, plumbed from the CLI via `RunContext.rng_tracking_seed()`
+  and recorded in each method's `parameters` block in the extraction report. The
+  bidirectional method applies one seed to all three passes (forward left, forward right,
+  reverse) so the RNG cannot become a source of L/R difference or forward/reverse
+  inflation — the quantities `artifact_index` exists to measure.
+
+  **Scope of the defect — latent, not active.** With the deterministic peaks direction
+  getter these methods use, DIPY's `LocalTracking` never consumes the RNG that
+  `random_seed` seeds (it is consumed only by probabilistic direction getters and by
+  `randomize_forward_direction`, which is off). Verified on DIPY 1.12.1: seeds 42, 7 and
+  `None` produce bitwise-identical bundles. **No previously reported result changes**, and
+  results produced before this fix were reproducible. The guarantee now holds by
+  construction rather than as a side effect of the direction getter's determinism.
+  Regression tests: `tests/reproducibility/test_extraction_determinism.py`.
+
+- **`csttool run` accepts `--rng-seed`** (default 42), and passes it to both the tracking
+  and extraction stages. The flag previously existed only on `csttool track`, so the seed
+  was unsettable on the only command that can run `roi-seeded` / `bidirectional`; it was
+  fixed at 42 by `cmd_track`'s fallback.
+
 - **`csttool run` no longer consumes its `--nifti` input.** The BIDS reorganizer used
   `shutil.move` unconditionally; when preprocessing was skipped (pass-through mode), the
   user-supplied DWI/bval/bvec/json files were relocated into the output tree and
