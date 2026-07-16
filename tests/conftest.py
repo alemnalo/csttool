@@ -37,6 +37,23 @@ def synthetic_tractogram(synthetic_nifti, synthetic_affine):
     return sft
 
 @pytest.fixture
+def synthetic_z_gradient_data():
+    """Returns a 10x10x10 volume ramping linearly from 0.0 to 1.0 along +Z.
+
+    Unlike synthetic_image_data (a flat cube), this varies along the tract axis, so a
+    profile computed on it changes if streamline orientation changes. A flat map cannot
+    detect a flip, which is what let AU9 go unnoticed.
+    """
+    data = np.zeros((10, 10, 10), dtype=np.float32)
+    data[:, :, :] = np.arange(10, dtype=np.float32) / 9.0
+    return data
+
+@pytest.fixture
+def synthetic_z_gradient_nifti(synthetic_z_gradient_data, synthetic_affine):
+    """Returns a Nifti1Image of the Z ramp. With an identity affine, world Z == voxel k."""
+    return nib.Nifti1Image(synthetic_z_gradient_data, synthetic_affine)
+
+@pytest.fixture
 def synthetic_bvals():
     """Returns synthetic b-values (1 b0 and 6 DWIs)."""
     return np.array([0, 1000, 1000, 1000, 1000, 1000, 1000])

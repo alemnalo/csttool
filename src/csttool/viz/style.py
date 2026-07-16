@@ -38,6 +38,11 @@ REFERENCE = "#9467bd"   # purple
 # Neutral colour for whole-brain streamline projections (carries no L/R meaning).
 NEUTRAL_STREAMLINE = "#555555"
 
+# Background shading for the along-tract anatomical region bands on profile plots.
+# Neutral and near-transparent: the bands are positional context, not data.
+REGION_BAND = "#000000"
+REGION_BAND_ALPHA = 0.05
+
 # ---------------------------------------------------------------------------
 # Colormaps
 # ---------------------------------------------------------------------------

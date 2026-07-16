@@ -15,6 +15,7 @@ from .modules.unilateral_analysis import (
     compute_morphology,
     sample_scalar_along_tract,
     compute_tract_profile,
+    orient_streamlines_inferior_to_superior,
     print_hemisphere_summary
 )
 
@@ -49,6 +50,7 @@ __all__ = [
     'compute_morphology',
     'sample_scalar_along_tract',
     'compute_tract_profile',
+    'orient_streamlines_inferior_to_superior',
     'print_hemisphere_summary',
     
     # Bilateral analysis

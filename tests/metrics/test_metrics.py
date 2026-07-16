@@ -91,16 +91,28 @@ def test_compute_localized_metrics():
 
 
 def test_compute_localized_metrics_empty():
-    """Test localized metrics with empty/short profile."""
+    """Test localized metrics with an empty or too-short profile."""
     # Empty profile
     localized = compute_localized_metrics([])
     assert localized['pontine'] == 0.0
     assert localized['plic'] == 0.0
     assert localized['precentral'] == 0.0
 
-    # Short profile (less than 20 points)
-    localized = compute_localized_metrics([0.5] * 10)
+    # Fewer than 3 points cannot fill 3 regions
+    localized = compute_localized_metrics([0.5, 0.5])
     assert localized['pontine'] == 0.0
+    assert localized['plic'] == 0.0
+    assert localized['precentral'] == 0.0
+
+
+def test_compute_localized_metrics_scales_to_profile_length():
+    """Region bounds are proportional, so n_points other than 20 is not silently zeroed."""
+    # A 10-point profile: pontine 0-35% (points 0-2), plic 35-70% (3-6), precentral 70-100% (7-9)
+    localized = compute_localized_metrics([0.4] * 3 + [0.5] * 4 + [0.6] * 3)
+
+    assert np.isclose(localized['pontine'], 0.4)
+    assert np.isclose(localized['plic'], 0.5)
+    assert np.isclose(localized['precentral'], 0.6)
 
 
 def test_analyze_cst_hemisphere_includes_localized_metrics(synthetic_tractogram, synthetic_nifti, synthetic_affine):

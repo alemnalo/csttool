@@ -10,9 +10,25 @@ This module computes:
 - Descriptive statistics
 """
 
+import warnings
+
 import numpy as np
 from dipy.tracking.streamline import length
 from dipy.tracking.utils import density_map
+
+
+# Nominal extent of each anatomical region along the tract, as a fraction of tract length
+# measured from the inferior (pontine) end. Single source of truth: `compute_localized_metrics`
+# bins the profile with these, and the profile figures place their region labels with them, so
+# the numbers and the pictures cannot drift apart.
+#
+# These boundaries are conventional, not validated against an atlas — the JHU ICBM-DTI-81
+# landmark validation is outstanding. Treat the region names as nominal.
+TRACT_REGIONS = (
+    ('pontine', 0.0, 0.35),
+    ('plic', 0.35, 0.70),
+    ('precentral', 0.70, 1.0),
+)
 
 
 def analyze_cst_hemisphere(
@@ -247,7 +263,13 @@ def compute_morphology(streamlines, affine):
 def sample_scalar_along_tract(streamlines, scalar_map, affine):
     """
     Sample scalar values at every point along all streamlines.
-    
+
+    The returned values are pooled across the whole bundle, so this is invariant to
+    streamline orientation and to point order; it deliberately does not reorient (unlike
+    `compute_tract_profile`). Summary statistics derived from it are therefore unaffected
+    by AU9. Note they remain point-weighted, so longer streamlines contribute more
+    samples - a separate concern (AU10).
+
     Parameters
     ----------
     streamlines : Streamlines
@@ -284,6 +306,93 @@ def sample_scalar_along_tract(streamlines, scalar_map, affine):
     return np.array(scalar_values)
 
 
+def _end_to_end_delta(points, axis):
+    """Mean coordinate of the last quartile minus that of the first, along `axis`."""
+    k = max(1, len(points) // 4)
+    return float(np.mean(points[-k:, axis]) - np.mean(points[:k, axis]))
+
+
+def orient_streamlines_inferior_to_superior(streamlines):
+    """
+    Flip streamlines so each runs from its inferior end to its superior end.
+
+    Tractography stores each streamline as ``[backward_from_seed][forward_from_seed]``, so a
+    bundle mixes orientations. Averaging by point index across a mixed bundle aligns one
+    streamline's pontine end with another's precentral end, biasing the tract profile and
+    every regional metric derived from it (audit finding AU9).
+
+    Consumers assume index 0 is the inferior (pontine) end: `compute_localized_metrics`
+    bins the profile by index, and the profile plots label position 0 "Pontine Level". So
+    the ordering is anchored to anatomy rather than made merely self-consistent between
+    streamlines, which would leave the whole bundle liable to being flipped as a unit.
+
+    Orientation is decided by comparing the mean Z of the first and last quartiles rather
+    than the two endpoints alone. On healthy CST data the two rules agree on every
+    streamline, but terminal points are the noisiest part of a streamline (that is where
+    the stopping criterion fired) and the cortical end hooks laterally into the precentral
+    gyrus, so the quartile mean is the more robust choice on the tortuous bundles this
+    tool targets. It costs one extra mean per streamline and degrades to the endpoint rule
+    for short streamlines.
+
+    Parameters
+    ----------
+    streamlines : sequence of ndarray
+        Streamlines in RASMM world coordinates (as returned by
+        ``load_tractogram(path, 'same')``), where +Z is superior by the NIfTI standard.
+        Because only the two ends of the same streamline are compared, the result is
+        translation-invariant and therefore unaffected by the subject not being
+        recentered (audit finding AU11).
+
+    Returns
+    -------
+    oriented : list of ndarray
+        A new list; the input streamlines are never modified in place.
+
+    Warns
+    -----
+    UserWarning
+        If the bundle does not run predominantly superior-inferior, in which case
+        "index 0 is the inferior end" is not anatomically meaningful.
+    """
+
+    if len(streamlines) == 0:
+        return []
+
+    spans = np.array([
+        np.abs(np.asarray(s)[-1] - np.asarray(s)[0])
+        for s in streamlines if len(s) >= 2
+    ])
+    if len(spans) > 0:
+        dominant = int(np.argmax(spans.mean(axis=0)))
+        if dominant != 2:
+            warnings.warn(
+                f"Bundle runs predominantly along {'XYZ'[dominant]}, not Z: it is not a "
+                "superior-inferior tract, so orienting it inferior-to-superior (and the "
+                "pontine/precentral labels that assume it) is not meaningful.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    oriented = []
+    for streamline in streamlines:
+        points = np.asarray(streamline)
+        if len(points) < 2:
+            oriented.append(points)
+            continue
+
+        # Z decides. Ties fall through to Y then X, then keep the stored order, so the
+        # result is deterministic and depends only on the streamline itself.
+        for axis in (2, 1, 0):
+            delta = _end_to_end_delta(points, axis)
+            if delta != 0.0:
+                oriented.append(points[::-1] if delta < 0 else points)
+                break
+        else:
+            oriented.append(points)
+
+    return oriented
+
+
 def compute_tract_profile(streamlines, scalar_map, affine, n_points=20):
     """
     Compute normalized tract profile (average scalar along tract).
@@ -291,27 +400,36 @@ def compute_tract_profile(streamlines, scalar_map, affine, n_points=20):
     This function samples scalar values along each streamline, normalizes
     each streamline to the same number of points, and averages across all
     streamlines to create a representative profile.
-    
+
+    Streamlines are reoriented inferior-to-superior first, so that point index i means the
+    same anatomical position in every streamline (see
+    `orient_streamlines_inferior_to_superior`). Without that step a mixed-orientation
+    bundle averages one streamline's pontine end against another's precentral end. The
+    input is not modified.
+
     Parameters
     ----------
     streamlines : Streamlines
-        Input streamlines
+        Input streamlines in RASMM world coordinates (mm)
     scalar_map : ndarray
         3D scalar map (FA or MD)
     affine : ndarray
         4x4 affine transformation matrix
     n_points : int
         Number of points in output profile (default: 20)
-        
+
     Returns
     -------
     profile : ndarray
-        Average scalar values at n_points positions along the tract
+        Average scalar values at n_points positions along the tract, ordered from the
+        inferior (pontine) end to the superior (precentral) end.
     """
-    
+
     if len(streamlines) == 0:
         return np.zeros(n_points)
-    
+
+    streamlines = orient_streamlines_inferior_to_superior(streamlines)
+
     all_profiles = []
     
     for streamline in streamlines:
@@ -388,15 +506,21 @@ def compute_localized_metrics(profile):
     """
     Compute region-specific statistics from tract profile.
 
-    Divides the 20-point tract profile into 3 anatomical regions:
-    - Pontine: points 0-6 (~0-35% of tract)
-    - PLIC: points 7-13 (~35-70% of tract)
-    - Precentral: points 14-19 (~70-100% of tract)
+    Divides the tract profile into the regions defined by `TRACT_REGIONS`: pontine 0-35% of
+    the tract, PLIC 35-70%, precentral 70-100%. Those boundaries are conventional rather than
+    validated against an atlas, so the region names are nominal.
+
+    This assumes the profile is ordered from the inferior (pontine) end to the superior
+    (precentral) end, which `compute_tract_profile` guarantees by reorienting the bundle.
+    On a profile built from a mixed-orientation bundle these bins are meaningless.
 
     Parameters
     ----------
     profile : list or ndarray
-        20-point tract profile (scalar values along tract)
+        Tract profile (scalar values along tract), as returned by
+        `compute_tract_profile`. Any length of at least 3 is supported; the region
+        boundaries scale with it, and at the default n_points=20 they fall at points
+        0-6 / 7-13 / 14-19.
 
     Returns
     -------
@@ -404,7 +528,7 @@ def compute_localized_metrics(profile):
         Dictionary with 'pontine', 'plic', 'precentral' keys,
         each containing the mean value for that region
     """
-    if profile is None or len(profile) < 20:
+    if profile is None or len(profile) < 3:  # need at least one point per region
         return {
             'pontine': 0.0,
             'plic': 0.0,
@@ -412,11 +536,11 @@ def compute_localized_metrics(profile):
         }
 
     profile_arr = np.array(profile)
+    n = len(profile_arr)
 
     return {
-        'pontine': float(np.mean(profile_arr[0:7])),      # Points 0-6
-        'plic': float(np.mean(profile_arr[7:14])),        # Points 7-13
-        'precentral': float(np.mean(profile_arr[14:20]))  # Points 14-19
+        name: float(np.mean(profile_arr[int(start * n):int(end * n)]))
+        for name, start, end in TRACT_REGIONS
     }
 
 
