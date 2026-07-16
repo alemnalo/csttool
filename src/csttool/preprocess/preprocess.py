@@ -55,9 +55,16 @@ def run_preprocessing(
     filename : str
         Base filename without extension (e.g., "sub01_dwi").
     denoise_method : str, default="nlmeans"
-        Denoising method: "nlmeans" or "patch2self".
+        Denoising method: "nlmeans", "patch2self", or "mppca".
+        - "nlmeans" uses PIESNO for sigma estimation; requires coil_count.
+        - "patch2self" requires bvals and >= 7 directions.
+        - "mppca" (Marchenko-Pastur PCA) is self-adaptive; does not
+          require coil_count or bvals — it exploits the 4D DWI redundancy
+          directly. Best choice for modern multi-channel acquisitions
+          where the effective coil count is unknown.
     coil_count : int, default=4
         Number of scanner coils (for NLMeans noise estimation).
+        Ignored when denoise_method is "patch2self" or "mppca".
     apply_gibbs_correction : bool, default=False
         Apply Gibbs ringing correction.
     apply_motion_correction : bool, default=False

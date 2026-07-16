@@ -122,7 +122,7 @@ dataset (so that `SourceDatasets: bids::` resolves correctly):
 | Flag | Description |
 | --- | --- |
 | `--preprocess` | Enable preprocessing (denoising + brain masking). Default: skipped. |
-| `--denoise-method` | `patch2self` (default) or `nlmeans` |
+| `--denoise-method` | `nlmeans` (default), `patch2self`, or `mppca` |
 | `--unring` | Enable Gibbs unringing |
 | `--perform-motion-correction` | Enable between-volume motion correction |
 | `--target-voxel-size X Y Z` | Reslice to target voxel size (mm) |

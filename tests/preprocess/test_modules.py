@@ -45,6 +45,32 @@ class TestDenoise:
         denoised = denoise(synthetic_dwi_data, denoise_method="nlmeans", brain_mask=mask)
         assert denoised.shape == synthetic_dwi_data.shape
 
+    def test_denoise_mppca(self, synthetic_dwi_data):
+        """MPPCA should return a 4D array with same shape, and differ from input."""
+        denoised = denoise(synthetic_dwi_data, denoise_method="mppca")
+        assert denoised.shape == synthetic_dwi_data.shape
+        assert not np.array_equal(denoised, synthetic_dwi_data)
+
+    def test_denoise_mppca_with_mask(self, synthetic_dwi_data):
+        """MPPCA should accept a brain mask to restrict PCA neighbourhoods."""
+        mask = np.zeros((10, 10, 10), dtype=bool)
+        mask[2:8, 2:8, 2:8] = True
+        denoised = denoise(synthetic_dwi_data, denoise_method="mppca", brain_mask=mask)
+        assert denoised.shape == synthetic_dwi_data.shape
+
+    def test_denoise_mppca_patch_radius(self, synthetic_dwi_data):
+        """MPPCA should accept a custom patch_radius parameter."""
+        # patch_radius=1 gives a 3x3x3 (27-voxel) patch — small but valid
+        denoised = denoise(
+            synthetic_dwi_data, denoise_method="mppca", patch_radius=1
+        )
+        assert denoised.shape == synthetic_dwi_data.shape
+
+    def test_denoise_patch2self_requires_bvals(self, synthetic_dwi_data):
+        """Patch2Self should raise ValueError when bvals are not provided."""
+        with pytest.raises(ValueError, match="Patch2Self requires bvals"):
+            denoise(synthetic_dwi_data, denoise_method="patch2self", bvals=None)
+
     def test_invalid_method(self, synthetic_dwi_data):
         with pytest.raises(ValueError, match="Invalid denoise method"):
             denoise(synthetic_dwi_data, denoise_method="invalid")

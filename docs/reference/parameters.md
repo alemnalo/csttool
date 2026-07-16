@@ -65,7 +65,7 @@ Denoise, unring, motion-correct and brain-mask DWI.
 | `--nifti` | path | — | DWI NIfTI input. Mutually exclusive with `--dicom`. |
 | `--dicom` | path | — | DICOM input (converted internally). |
 | `--out` | path | — | Output directory. **Required**. |
-| `--denoise-method` | `patch2self` \| `nlmeans` | `patch2self` | Denoising algorithm. |
+| `--denoise-method` | `nlmeans` \| `patch2self` \| `mppca` | `nlmeans` | Denoising algorithm. |
 | `--coil-count` | int | `4` | NLMeans noise estimation parameter. |
 | `--unring` | flag | off | Apply Kellner Gibbs-unringing. |
 | `--perform-motion-correction` | flag | off | Affine-register volumes to first b=0. |
@@ -176,6 +176,6 @@ Multi-subject orchestration.
 | `--keep-work` | flag | off | Keep intermediate work directories. |
 | `--timeout-minutes` | int | — | Per-subject timeout. |
 | `--preprocessing` / `--no-preprocessing` | flag | on | Toggle the preprocess stage. |
-| `--denoise-method` | `patch2self` \| `nlmeans` | `patch2self` | Forwarded to `preprocess`. |
+| `--denoise-method` | `nlmeans` \| `patch2self` \| `mppca` | `nlmeans` | Forwarded to `preprocess`. |
 | `--generate-pdf` | flag | off | Forwarded to `metrics`. |
 | `--verbose` / `--quiet` | flag | off | |

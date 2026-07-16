@@ -112,7 +112,7 @@ See [Output formats](../reference/output-formats.md) for a full description of e
 |------|-------------|
 | `--nifti` / `--dicom` | Input format (provide path to data) |
 | `--out` | Output directory |
-| `--denoise-method` | `patch2self` (default) or `nlmeans` |
+| `--denoise-method` | `nlmeans` (default), `patch2self`, or `mppca` |
 | `--generate-pdf` | Generate PDF report |
 | `--save-visualizations` | Save QC visualizations at each step |
 | `--subject-id` | Subject ID |

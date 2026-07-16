@@ -184,14 +184,14 @@ def main() -> None:
         "--coil-count",
         type=int,
         default=4,
-        help="Number of receiver coils for PIESNO noise estimation. Only used with --denoise-method nlmeans (ignored for patch2self)."
+        help="Number of receiver coils for PIESNO noise estimation. Only used with --denoise-method nlmeans (ignored for patch2self and mppca)."
     )
     p_preproc.add_argument(
         "--denoise-method",
         type=str,
         default="nlmeans",
-        choices=["nlmeans", "patch2self"],
-        help="Denoising method to use (nlmeans or patch2self, default: nlmeans)."
+        choices=["nlmeans", "patch2self", "mppca"],
+        help="Denoising method: nlmeans, patch2self, or mppca (default: nlmeans)."
     )
     p_preproc.add_argument(
         "--save-visualizations",
@@ -530,14 +530,14 @@ def main() -> None:
         "--coil-count",
         type=int,
         default=4,
-        help="Number of receiver coils for PIESNO. Only used with --denoise-method nlmeans (ignored for patch2self)."
+        help="Number of receiver coils for PIESNO. Only used with --denoise-method nlmeans (ignored for patch2self and mppca)."
     )
     p_run.add_argument(
         "--denoise-method",
         type=str,
         default="nlmeans",
-        choices=["nlmeans", "patch2self"],
-        help="Denoising method (nlmeans or patch2self, default: nlmeans)"
+        choices=["nlmeans", "patch2self", "mppca"],
+        help="Denoising method: nlmeans, patch2self, or mppca (default: nlmeans)"
     )
     p_run.add_argument(
         "--unring",
@@ -756,8 +756,8 @@ def main() -> None:
         "--denoise-method",
         type=str,
         default="nlmeans",
-        choices=["nlmeans", "patch2self", "none"],
-        help="Denoising method (default: nlmeans)"
+        choices=["nlmeans", "patch2self", "mppca", "none"],
+        help="Denoising method: nlmeans, patch2self, mppca, or none (default: nlmeans)"
     )
     
     preproc_group = p_batch.add_mutually_exclusive_group()
