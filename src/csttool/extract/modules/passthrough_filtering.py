@@ -54,8 +54,12 @@ def print_roi_geometry(geom):
     print(f"        Voxel count: {geom['voxel_count']:,}")
 
 
-def get_roi_hemisphere_split(mask, affine, name):
-    """Analyze ROI voxel distribution by hemisphere (left vs right of X=0)."""
+def get_roi_hemisphere_split(mask, affine, name, midline_x=0.0):
+    """Analyze ROI voxel distribution by hemisphere (left vs right of the midline).
+
+    The midline is the warped-MNI midline (``world X = midline_x``), not
+    necessarily 0 (AU11).
+    """
     if mask.sum() == 0:
         return None
 
@@ -64,8 +68,8 @@ def get_roi_hemisphere_split(mask, affine, name):
     coords_h = np.hstack([coords, ones])
     world_coords = (affine @ coords_h.T).T[:, :3]
 
-    left_count = np.sum(world_coords[:, 0] < 0)
-    right_count = np.sum(world_coords[:, 0] >= 0)
+    left_count = np.sum(world_coords[:, 0] < midline_x)
+    right_count = np.sum(world_coords[:, 0] >= midline_x)
     total_count = len(coords)
     lr_ratio = left_count / right_count if right_count > 0 else 0
 
@@ -77,6 +81,7 @@ def get_roi_hemisphere_split(mask, affine, name):
         'lr_ratio': lr_ratio,
         'left_pct': (left_count / total_count * 100) if total_count > 0 else 0,
         'right_pct': (right_count / total_count * 100) if total_count > 0 else 0,
+        'midline_x': midline_x,
     }
 
 
@@ -84,9 +89,10 @@ def print_roi_hemisphere_split(split):
     """Print ROI hemisphere split in a formatted way."""
     if split is None:
         return
-    print(f"    {split['name']} hemisphere split (X=0 midline):")
-    print(f"        Left (X<0):  {split['left_voxels']:,} voxels ({split['left_pct']:.1f}%)")
-    print(f"        Right (X>=0): {split['right_voxels']:,} voxels ({split['right_pct']:.1f}%)")
+    m = split.get('midline_x', 0.0)
+    print(f"    {split['name']} hemisphere split (midline X={m:.1f}):")
+    print(f"        Left (X<{m:.1f}):  {split['left_voxels']:,} voxels ({split['left_pct']:.1f}%)")
+    print(f"        Right (X>={m:.1f}): {split['right_voxels']:,} voxels ({split['right_pct']:.1f}%)")
     print(f"        L/R ratio:   {split['lr_ratio']:.3f}")
     if abs(split['lr_ratio'] - 1.0) > 0.05:
         bias = "left" if split['lr_ratio'] > 1.0 else "right"
@@ -94,11 +100,23 @@ def print_roi_hemisphere_split(split):
         print(f"        -> Asymmetric: {pct_diff:.1f}% more voxels on {bias}")
 
 
-def sample_peduncle_fa(fa_map, fa_affine, brainstem_mask, mask_affine, verbose=True):
+def sample_peduncle_fa(fa_map, fa_affine, brainstem_mask, mask_affine,
+                       hemisphere_mask=None, midline_x=None, verbose=True):
     """Sample FA in left vs right cerebral peduncle (superior brainstem).
 
     The cerebral peduncle is approximated as the superior 30% of the brainstem
     by Z coordinate. This is where CST fibers enter the brainstem.
+
+    The left/right split uses, in order of preference (AU11):
+
+    1. ``hemisphere_mask`` — the per-voxel warped-MNI L/R label (the anatomical
+       midline warped into subject space). This is the gold standard: each
+       brainstem voxel is assigned to the hemisphere it maps to in MNI, so the
+       split is correct regardless of where the subject midline sits in world X.
+    2. ``midline_x`` — the scalar warped-MNI midline world X. The split is
+       ``world X < midline_x`` vs ``>= midline_x``.
+    3. ``world X < 0`` — the legacy assumption (the bug AU11 fixes), used only when
+       neither of the above is supplied so old callers/tests still run.
 
     Parameters
     ----------
@@ -107,9 +125,14 @@ def sample_peduncle_fa(fa_map, fa_affine, brainstem_mask, mask_affine, verbose=T
     fa_affine : ndarray, shape (4, 4)
         Affine matrix for FA map.
     brainstem_mask : ndarray
-        Binary brainstem mask.
+        Binary brainstem mask (subject / mask_affine voxel space).
     mask_affine : ndarray, shape (4, 4)
         Affine matrix for brainstem mask (subject space).
+    hemisphere_mask : ndarray of bool, optional
+        Per-voxel left-hemisphere label from ``compute_warped_midline``, on the
+        same voxel grid as ``brainstem_mask``.
+    midline_x : float, optional
+        Scalar midline world X (from ``compute_warped_midline``).
     verbose : bool
         Print results.
 
@@ -133,10 +156,22 @@ def sample_peduncle_fa(fa_map, fa_affine, brainstem_mask, mask_affine, verbose=T
     z_threshold = np.percentile(z_coords, 70)
     superior_mask = z_coords >= z_threshold
 
-    # Split by hemisphere
-    x_coords = bs_world[:, 0]
-    left_mask = (x_coords < 0) & superior_mask
-    right_mask = (x_coords >= 0) & superior_mask
+    # Split by hemisphere (AU11): per-voxel warped-MNI label is preferred, then the
+    # scalar warped-MNI midline, then the legacy X=0 assumption.
+    if hemisphere_mask is not None:
+        # Index the 3D warped-MNI L/R label at each brainstem voxel.
+        left_hemi = hemisphere_mask[bs_coords[:, 0], bs_coords[:, 1], bs_coords[:, 2]]
+        right_hemi = ~left_hemi
+        split_source = 'warped-MNI hemisphere mask'
+    else:
+        x_coords = bs_world[:, 0]
+        m = midline_x if midline_x is not None else 0.0
+        left_hemi = x_coords < m
+        right_hemi = ~left_hemi
+        split_source = f'world X < {m:.2f} (midline)' if midline_x is not None else 'world X < 0 (legacy)'
+
+    left_mask = left_hemi & superior_mask
+    right_mask = right_hemi & superior_mask
 
     # Convert world coords to FA voxel space and sample
     inv_fa_affine = np.linalg.inv(fa_affine)
@@ -166,7 +201,7 @@ def sample_peduncle_fa(fa_map, fa_affine, brainstem_mask, mask_affine, verbose=T
     }
 
     if verbose and left_fas and right_fas:
-        print(f"\n    Cerebral Peduncle FA (superior 30% of brainstem):")
+        print(f"\n    Cerebral Peduncle FA (superior 30% of brainstem; split: {split_source}):")
         print(f"      Left:  mean FA = {result['left_mean_fa']:.3f} (n={result['left_n']})")
         print(f"      Right: mean FA = {result['right_mean_fa']:.3f} (n={result['right_n']})")
         fa_diff = result['left_mean_fa'] - result['right_mean_fa']
@@ -222,6 +257,8 @@ def extract_cst_passthrough(
     affine,
     min_length=20.0,
     max_length=200.0,
+    midline_x=0.0,
+    midline_distance=None,
     verbose=True
 ):
     """
@@ -242,6 +279,24 @@ def extract_cst_passthrough(
         Minimum streamline length in mm.
     max_length : float
         Maximum streamline length in mm.
+    midline_x : float, optional
+        Subject-space anatomical midline world X (from
+        ``compute_warped_midline``). The subject is reoriented to RAS but never
+        recentered, so the midline is not in general at world X=0; splitting the
+        hemisphere diagnostics and the midline-crossing exclusion on X=0 (the
+        legacy assumption) biases them when the subject is off-centre (AU11).
+        Defaults to 0.0 (legacy) for backward compatibility; the pipeline passes
+        the warped-MNI midline. Note this only affects *diagnostics* and the
+        commissural-exclusion filter — final L/R bundle assignment is ROI-based,
+        not plane-based, and is unaffected.
+    midline_distance : ndarray of float, optional
+        Signed distance (mm) to the warped MNI midline surface (from
+        ``compute_warped_midline``), on the same voxel grid as ``masks``. When
+        given, the midline-crossing exclusion uses the true *curved* midline rather
+        than the scalar ``midline_x`` plane — a single scalar is a poor fit because
+        the warped midline curves with SyN and a whole-brain median is biased by
+        asymmetric sub-cortical structures. Defaults to None (legacy scalar
+        plane). Same grid convention as ``affine`` (subject RAS voxel space).
     verbose : bool
         Print progress information.
         
@@ -259,6 +314,15 @@ def extract_cst_passthrough(
     brainstem = masks['brainstem']
     motor_left = masks['motor_left']
     motor_right = masks['motor_right']
+
+    # AU11: when the signed distance-to-midline volume is available, precompute an
+    # inverse-affine lookup so the midline-crossing exclusion can evaluate the true
+    # curved midline at each streamline point. Otherwise the scalar midline_x plane
+    # is used (legacy). Voxel-size is also used to keep the 8 mm tolerance in mm.
+    use_signed_midline = midline_distance is not None
+    if use_signed_midline:
+        _inv_affine = np.linalg.inv(affine)
+        _dist_shape = np.asarray(midline_distance.shape)
     
     # Length filtering
     if verbose:
@@ -275,13 +339,13 @@ def extract_cst_passthrough(
     # Analyze input tractogram hemisphere distribution (for asymmetry diagnosis)
     if verbose:
         print(f"\n    Analyzing input hemisphere distribution...")
-    left_input = sum(1 for sl in streamlines_filtered if np.mean(sl[:, 0]) < 0)
+    left_input = sum(1 for sl in streamlines_filtered if np.mean(sl[:, 0]) < midline_x)
     right_input = len(streamlines_filtered) - left_input
     lr_input = left_input / right_input if right_input > 0 else 0
     if verbose:
         print(f"    Input hemisphere distribution:")
-        print(f"        Left (centroid X<0):  {left_input:,}")
-        print(f"        Right (centroid X≥0): {right_input:,}")
+        print(f"        Left (centroid X<{midline_x:.1f}):  {left_input:,}")
+        print(f"        Right (centroid X>={midline_x:.1f}): {right_input:,}")
         print(f"        L/R Ratio: {lr_input:.3f}")
 
     # Pass-through filtering
@@ -316,7 +380,7 @@ def extract_cst_passthrough(
 
             # Track hemisphere of brainstem-passing streamlines (using centroid X)
             sl_centroid_x = np.mean(sl[:, 0])
-            if sl_centroid_x < 0:
+            if sl_centroid_x < midline_x:
                 left_bs_count += 1
             else:
                 right_bs_count += 1
@@ -324,7 +388,7 @@ def extract_cst_passthrough(
             # Record brainstem entry X for diagnostic (classification alignment check)
             entry_x = get_first_brainstem_entry(sl, brainstem, affine)
             if entry_x is not None:
-                if sl_centroid_x < 0:
+                if sl_centroid_x < midline_x:
                     left_entry_xs.append(entry_x)
                 else:
                     right_entry_xs.append(entry_x)
@@ -344,14 +408,34 @@ def extract_cst_passthrough(
                 continue
             
             # Check midline crossing with tolerance for registration imperfection
-            # This catches streamlines that grossly cross hemispheres (commissural)
-            x_coords = sl[:, 0]
-            x_min, x_max = np.min(x_coords), np.max(x_coords)
+            # This catches streamlines that grossly cross hemispheres (commissural).
+            # The midline is the warped-MNI midline (AU11): prefer the signed
+            # distance volume (the true curved surface) when available, else the
+            # scalar midline_x plane. The tolerance itself remains provisional (AU14).
             MIDLINE_TOLERANCE_MM = 8.0  # Allow minor medial excursion
-            
-            # Only exclude if streamline has substantial extent on BOTH sides
-            # i.e., it starts/ends deep in left AND goes deep into right
-            if x_min < -MIDLINE_TOLERANCE_MM and x_max > MIDLINE_TOLERANCE_MM:
+            if use_signed_midline:
+                # Map streamline points to voxels and look up the signed distance.
+                ones = np.ones((len(sl), 1))
+                voxels = np.floor((np.hstack([sl, ones]) @ _inv_affine.T)[:, :3]).astype(int)
+                in_bounds = (
+                    (voxels[:, 0] >= 0) & (voxels[:, 0] < _dist_shape[0]) &
+                    (voxels[:, 1] >= 0) & (voxels[:, 1] < _dist_shape[1]) &
+                    (voxels[:, 2] >= 0) & (voxels[:, 2] < _dist_shape[2])
+                )
+                if in_bounds.any():
+                    vv = voxels[in_bounds]
+                    dists = midline_distance[vv[:, 0], vv[:, 1], vv[:, 2]]
+                    d_min, d_max = float(np.min(dists)), float(np.max(dists))
+                else:
+                    d_min, d_max = 0.0, 0.0
+                crosses_deep = (d_min < -MIDLINE_TOLERANCE_MM and
+                                d_max > MIDLINE_TOLERANCE_MM)
+            else:
+                x_coords = sl[:, 0]
+                x_min, x_max = np.min(x_coords), np.max(x_coords)
+                crosses_deep = (x_min < midline_x - MIDLINE_TOLERANCE_MM and
+                                x_max > midline_x + MIDLINE_TOLERANCE_MM)
+            if crosses_deep:
                 midline_excluded_count += 1
                 continue
             
@@ -363,7 +447,7 @@ def extract_cst_passthrough(
             # Streamline failed brainstem check - record inferior extent for diagnostic
             min_z = np.min(sl[:, 2])
             sl_centroid_x = np.mean(sl[:, 0])
-            if sl_centroid_x < 0:
+            if sl_centroid_x < midline_x:
                 left_fail_min_zs.append(min_z)
             else:
                 right_fail_min_zs.append(min_z)
@@ -438,7 +522,7 @@ def extract_cst_passthrough(
         print_roi_geometry(bs_geom)
 
         # Brainstem hemisphere split analysis
-        bs_split = get_roi_hemisphere_split(brainstem, affine, "brainstem")
+        bs_split = get_roi_hemisphere_split(brainstem, affine, "brainstem", midline_x=midline_x)
         print_roi_hemisphere_split(bs_split)
 
         # Brainstem entry point distribution (classification alignment diagnostic)
@@ -448,12 +532,12 @@ def extract_cst_passthrough(
             print(f"\n    Brainstem entry point distribution:")
             print(f"      Left-classified streamlines (n={len(left_entry_xs_arr):,}):")
             print(f"        Entry X mean: {np.mean(left_entry_xs_arr):.1f} mm")
-            left_correct = np.sum(left_entry_xs_arr < 0)
-            print(f"        Enter left side (X<0): {left_correct:,} ({left_correct / len(left_entry_xs_arr) * 100:.1f}%)")
+            left_correct = np.sum(left_entry_xs_arr < midline_x)
+            print(f"        Enter left side (X<{midline_x:.1f}): {left_correct:,} ({left_correct / len(left_entry_xs_arr) * 100:.1f}%)")
             print(f"      Right-classified streamlines (n={len(right_entry_xs_arr):,}):")
             print(f"        Entry X mean: {np.mean(right_entry_xs_arr):.1f} mm")
-            right_correct = np.sum(right_entry_xs_arr >= 0)
-            print(f"        Enter right side (X>=0): {right_correct:,} ({right_correct / len(right_entry_xs_arr) * 100:.1f}%)")
+            right_correct = np.sum(right_entry_xs_arr >= midline_x)
+            print(f"        Enter right side (X>={midline_x:.1f}): {right_correct:,} ({right_correct / len(right_entry_xs_arr) * 100:.1f}%)")
             # Summary interpretation
             left_pct = left_correct / len(left_entry_xs_arr) * 100
             right_pct = right_correct / len(right_entry_xs_arr) * 100

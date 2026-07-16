@@ -148,7 +148,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Streamlines are now reoriented before along-tract profiling.** `compute_tract_profile`
+- **Hemisphere splits now use the warped MNI midline, not world X=0 (AU11); the
+  Jacobian hemisphere stats now use the full affine and a per-mm gradient (AU19).**
+  `register_mni_to_subject` reorients the subject to RAS but never recentres it, so
+  the anatomical midline sits at world X = M, not necessarily 0. Four sites split on
+  X=0: the streamline midline-crossing exclusion, `sample_peduncle_fa`, the Jacobian
+  hemisphere split, and the atlas-warp centroid QC. Bundle L/R assignment is ROI-based
+  (which motor cortex a streamline traverses), so the bundles were never wrong — but
+  the *diagnostics* were, and `sample_peduncle_fa` fed the "lower left peduncle FA"
+  finding behind [[07 Decisions]] D3.
+
+  **Fix — one source of truth.** `compute_warped_midline` (new) warps the MNI X=0
+  plane (a whole-brain left mask, `X_mni < 0`) into subject space and returns three
+  views of the same surface: a per-voxel `hemisphere_mask` (the anatomical L/R label,
+  used by `sample_peduncle_fa` and the Jacobian split), a signed `midline_distance`
+  volume (mm; used by the streamline midline-crossing exclusion, since a single
+  scalar plane is a poor fit — the warped midline curves with SyN and a whole-brain
+  median is biased by asymmetric sub-cortical structures), and a scalar `midline_x`
+  (for the centroid sign QC). `register_mni_to_subject` computes it once and threads
+  it through `warp_atlas_to_subject` → `extract_cst_passthrough` / `sample_peduncle_fa`.
+  The `MIDLINE_TOLERANCE_MM = 8.0` exclusion threshold itself is unchanged (still
+  provisional — AU14).
+
+  **AU19, two defects.** (1) `compute_jacobian_hemisphere_stats` took `np.gradient`
+  per **voxel index**; the SyN forward field is in **mm** (world units) on
+  dipy 1.9–1.12.1 — verified empirically from `DiffeomorphicMap._warp_forward`, not
+  assumed — so the gradient must be per mm. The per-voxel-index code scaled the
+  Jacobian spread by the voxel size (≈2× on 2 mm isotropic data). (2) The hemisphere
+  split used the axis-aligned `affine[0,0]*i + affine[0,3]`, dropping the
+  `affine[0,1]*j` and `affine[0,2]*k` terms; these are non-zero even after RAS
+  reorientation (scanner shear survives), so the full affine is now used (and the
+  per-voxel mask is preferred when available).
+
+  **Impact — measured on both real subjects (post-fix, DIPY 1.12.1).**
+
+  *The premise "M ≠ 0" is **not** confirmed by the gold-standard estimate.* The
+  warped MNI midline lands at world X ≈ 0 for both subjects (cortical L/R boundary:
+  −0.6 mm healthy, −0.3 mm ALS). The proxies that suggested otherwise — the
+  FA>0.15 brain centroid and the brainstem centroid — are unreliable: the brainstem
+  is anatomically right-shifted in the ALS subject (centroid +4.9 mm vs warped
+  midline −0.3 mm), which is anatomy, not a recentering failure. **M ≈ 0 globally does
+  not make a flat X=0 *peduncle* split correct**, however: the cerebral peduncles are
+  only ~10–15 mm wide and sit against an anatomically asymmetric brainstem, so a flat
+  cut at the global midline mislabels peduncle voxels that the per-voxel warped-MNI
+  mask labels correctly — which is exactly why the peduncle FA moves (below) even
+  though the midline's median X is near 0.
+
+  | Peduncle FA (superior 30% brainstem, dilated) | Left | Right | L−R |
+  |---|---|---|---|
+  | healthy, X=0 split (the bug) | 0.240 | 0.262 | −0.022 |
+  | healthy, warped-MNI mask (fix) | 0.250 | 0.248 | +0.002 |
+  | ALS, X=0 split (the bug) | 0.201 | 0.207 | −0.006 |
+  | ALS, warped-MNI mask (fix) | 0.206 | 0.205 | +0.001 |
+
+  The X=0 split manufactures the "lower-left ~8%" asymmetry on the healthy control
+  (the same magnitude and direction as D3's sub-1280 finding, 0.285 vs 0.310); the
+  warped-MNI midline makes it symmetric. The ALS (thesis) subject is symmetric under
+  every split. **D3's "lower-left peduncle FA is a data property" conclusion is
+  revised** — see [[07 Decisions]] D3 and `docs/explanation/design-decisions.md`.
+  (D3's actual subject, sub-1280, is no longer on disk, so its exact 0.285/0.310
+  cannot be re-derived; the healthy control reproduces the identical artifact pattern.)
+
+  | Jacobian (per hemisphere) | L mean±std | R mean±std |
+  |---|---|---|
+  | reported (buggy, per-voxel-index) | 1.000±0.388 | 0.999±0.330 |
+  | healthy (fix, per-mm + mask) | 0.996±0.204 | 1.005±0.190 |
+  | ALS (fix, per-mm + mask) | 1.001±0.192 | 0.998±0.195 |
+
+  The std roughly halves (the voxel-size factor); the L/R symmetry the Jacobian was
+  quoted as evidence for survives. **Bundle assignment and final CST counts are
+  unaffected** (ROI-based); only the diagnostics move. Regression tests:
+  `tests/extract/test_midline.py` (off-centre fixtures — a centred brain cannot detect
+  a midline bug).
+
+ `compute_tract_profile`
   resampled each streamline in its **stored point order** and averaged across the bundle by
   point index. Tractography stores each streamline as `[backward_from_seed][forward_from_seed]`,
   so a bundle mixes orientations: averaging index *i* aligned one streamline's pontine end

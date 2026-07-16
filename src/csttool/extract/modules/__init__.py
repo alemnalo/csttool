@@ -9,6 +9,7 @@ from .registration import (
     compute_affine_registration,
     compute_syn_registration,
     compute_jacobian_hemisphere_stats,
+    compute_warped_midline,
     register_mni_to_subject,
     save_registration_report,
 )
@@ -29,6 +30,7 @@ __all__ = [
     'compute_affine_registration',
     'compute_syn_registration',
     'compute_jacobian_hemisphere_stats',
+    'compute_warped_midline',
     'plot_registration_comparison',
     'plot_cst_extraction',
     'plot_hemisphere_separation',

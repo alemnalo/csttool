@@ -390,7 +390,176 @@ def compute_syn_registration(
     return mapping
 
 
-def compute_jacobian_hemisphere_stats(mapping, subject_affine, verbose=True):
+def _jacobian_determinant(forward_field, voxel_size):
+    """Jacobian determinant of the SyN forward deformation field.
+
+    The forward field returned by ``DiffeomorphicMap.get_forward_field()`` lives on
+    the subject (static/codomain) grid and is expressed in **world (mm) units** —
+    verified empirically on dipy 1.9–1.12.1 (the deformation is added to a world
+    coordinate before the world-to-grid transform is applied; see
+    ``DiffeomorphicMap._warp_forward``). The Jacobian is therefore
+    ``J = I + d(displacement_mm) / d(world_mm)``, which means the spatial gradient
+    must be taken **per mm**, not per voxel index as the original code did. Taking
+    it per voxel index scales the off-diagonal spread by the voxel size (≈2× here,
+    2 mm isotropic data), which is why the reported ``L 1.000±0.388 / R 0.999±0.330``
+    was miscalibrated by roughly a factor of two.
+
+    Parameters
+    ----------
+    forward_field : ndarray, shape (X, Y, Z, 3)
+        Displacement field in mm, on the subject grid.
+    voxel_size : sequence of 3 floats
+        Voxel size along each axis (mm), used as the ``np.gradient`` spacing.
+    """
+    spacing = list(voxel_size)
+    du_dx = np.gradient(forward_field[..., 0], spacing[0], axis=0)
+    du_dy = np.gradient(forward_field[..., 0], spacing[1], axis=1)
+    du_dz = np.gradient(forward_field[..., 0], spacing[2], axis=2)
+
+    dv_dx = np.gradient(forward_field[..., 1], spacing[0], axis=0)
+    dv_dy = np.gradient(forward_field[..., 1], spacing[1], axis=1)
+    dv_dz = np.gradient(forward_field[..., 1], spacing[2], axis=2)
+
+    dw_dx = np.gradient(forward_field[..., 2], spacing[0], axis=0)
+    dw_dy = np.gradient(forward_field[..., 2], spacing[1], axis=1)
+    dw_dz = np.gradient(forward_field[..., 2], spacing[2], axis=2)
+
+    # J = I + grad(displacement)
+    return (
+        (1 + du_dx) * ((1 + dv_dy) * (1 + dw_dz) - dv_dz * dw_dy) -
+        du_dy * (dv_dx * (1 + dw_dz) - dv_dz * dw_dx) +
+        du_dz * (dv_dx * dw_dy - (1 + dv_dy) * dw_dx)
+    )
+
+
+def compute_warped_midline(mapping, subject_affine, mni_affine, mni_shape,
+                            subject_data=None, verbose=True):
+    """Estimate the subject-space anatomical midline from the warped MNI midline.
+
+    The MNI152 template is symmetric about world X = 0, so the MNI X = 0 plane is the
+    anatomical midline. Warping it into subject space gives the *true* subject
+    midline — which, because ``register_mni_to_subject`` reorients to RAS but never
+    recenters, does **not** in general coincide with world X = 0 in subject space.
+    This is the single source of truth for every hemisphere split in the pipeline
+    (AU11): the four sites that previously assumed X = 0 — midline exclusion,
+    ``sample_peduncle_fa``, the Jacobian hemisphere split, and the atlas-warp QC —
+    all consume the values returned here rather than hard-coding 0.
+
+    A whole-brain left-hemisphere mask (``X_mni < 0``) is warped to the subject grid
+    with nearest-neighbour interpolation. The resulting boolean volume is the
+    per-voxel L/R label and is the primary output: it is what ``sample_peduncle_fa``
+    and the Jacobian split use, and it needs no scalar approximation. A **signed
+    distance-to-midline volume** (``midline_distance``; mm, positive on the right,
+    negative on the left, 0 at the warped MNI midline surface) is also returned so
+    that the one site operating on continuous streamline points — the
+    midline-crossing exclusion in ``extract_cst_passthrough`` — can use the true
+    curved midline rather than a single scalar plane, which the warped midline is
+    not (it curves with SyN, and a whole-brain median is biased by asymmetric
+    sub-cortical structures). A scalar ``midline_x`` (median world X of the warped
+    midline surface, over a central slab to avoid noisy extreme slices) is kept as a
+    coarse summary for the atlas-warp centroid QC check, which only needs the sign
+    of each motor centroid relative to the midline and is insensitive to a few mm.
+
+    Parameters
+    ----------
+    mapping : DiffeomorphicMap
+        Registration mapping (MNI → subject) from ``register_mni_to_subject``.
+    subject_affine : ndarray, shape (4, 4)
+        Subject image affine (RAS, as used internally for registration).
+    mni_affine : ndarray, shape (4, 4)
+        MNI template affine.
+    mni_shape : tuple of int
+        MNI template grid shape.
+    subject_data : ndarray, optional
+        Subject image (e.g. the RAS FA map) used to restrict the midline-surface
+        boundary to in-brain voxels. Without this, ``~hemisphere_mask`` includes
+        background, so ``left`` voxels touching the brain *edge* (not the right
+        hemisphere) contaminate the boundary and drag the median off the true
+        midline. When given, only boundary voxels inside the brain
+        (``subject_data > 0``) are used for the scalar.
+    verbose : bool
+        Print the estimated midline offset.
+
+    Returns
+    -------
+    hemisphere_mask : ndarray of bool, shape = subject_shape
+        True for voxels that map to the MNI left hemisphere (``X_mni < 0``). This is
+        the per-voxel warped-MNI midline — the anatomical L/R label in subject space.
+    midline_x : float
+        Scalar world-X of the warped MNI midline (median of the central-slab
+        boundary). A coarse summary for the atlas-warp centroid QC; the
+        streamline-point exclusion should prefer ``midline_distance`` and the
+        voxel sites ``hemisphere_mask``.
+    midline_distance : ndarray of float, shape = subject_shape
+        Signed distance (mm) to the warped MNI midline surface: negative inside the
+        left hemisphere, positive inside the right, ~0 at the midline. Zero outside
+        the brain (where ``subject_data`` is given and <= 0). Use this for
+        continuous-point hemisphere decisions.
+    """
+    from scipy.ndimage import binary_dilation, distance_transform_edt
+
+    # Whole-brain MNI left-hemisphere mask: world X_mni < 0, on the MNI grid.
+    i, j, k = np.meshgrid(np.arange(mni_shape[0]), np.arange(mni_shape[1]),
+                          np.arange(mni_shape[2]), indexing='ij')
+    x_mni = (mni_affine[0, 0] * i + mni_affine[0, 1] * j +
+             mni_affine[0, 2] * k + mni_affine[0, 3])
+    mni_left = (x_mni < 0).astype(np.int16)
+
+    # Warp MNI -> subject (static) grid. mapping.transform maps the moving (MNI)
+    # image onto the subject grid; image_world2grid must be inv(mni_affine) so the
+    # input is interpreted in MNI world coordinates.
+    warped_left = mapping.transform(
+        mni_left, interpolation='nearest',
+        image_world2grid=np.linalg.inv(mni_affine),
+    )
+    hemisphere_mask = np.round(warped_left).astype(np.int16) > 0
+
+    # Scalar midline: median world X of the warped midline surface. The surface is
+    # the set of left voxels touching a right voxel; ``~hemisphere_mask`` also
+    # contains background, so a naive dilation picks up the brain *edge* as well as
+    # the midline and biases the median. Restrict to in-brain voxels
+    # (``subject_data > 0`` when given) so only the left/right interface remains,
+    # then to a central Y/Z slab (15th–85th percentile) so extreme slices — where
+    # SyN is least constrained and the midline is least planar — do not drag the
+    # median off the true midline.
+    if subject_data is not None:
+        brain = subject_data > 0
+    else:
+        brain = np.ones_like(hemisphere_mask, dtype=bool)
+    right_in_brain = (~hemisphere_mask) & brain
+    boundary = binary_dilation(right_in_brain, iterations=1) & hemisphere_mask & brain
+    if boundary.sum() == 0:
+        midline_x = 0.0
+    else:
+        coords = np.argwhere(boundary)
+        ones = np.ones((len(coords), 1))
+        world = (subject_affine @ np.hstack([coords, ones]).T).T[:, :3]
+        y_lo, y_hi = np.percentile(world[:, 1], [15, 85])
+        z_lo, z_hi = np.percentile(world[:, 2], [15, 85])
+        slab = (world[:, 1] >= y_lo) & (world[:, 1] <= y_hi) & \
+               (world[:, 2] >= z_lo) & (world[:, 2] <= z_hi)
+        midline_x = float(np.median(world[slab if slab.any() else slice(None), 0]))
+
+    if verbose:
+        print(f"    • Warped MNI midline (subject space): X = {midline_x:+.2f} mm "
+              f"(left voxels: {int(hemisphere_mask.sum()):,} / "
+              f"{hemisphere_mask.size:,})")
+
+    # Signed distance to the warped midline surface (mm), for continuous-point
+    # hemisphere decisions (the streamline midline-crossing exclusion). Unsigned
+    # Euclidean distance to the boundary, signed by hemisphere and zeroed outside
+    # the brain so out-of-brain streamline points neither trigger nor suppress the
+    # exclusion.
+    voxel_size = np.sqrt(np.sum(subject_affine[:3, :3] ** 2, axis=0))
+    dist_to_boundary = distance_transform_edt(~boundary, sampling=voxel_size)
+    midline_distance = np.where(hemisphere_mask, -dist_to_boundary, dist_to_boundary)
+    midline_distance[~brain] = 0.0
+
+    return hemisphere_mask, midline_x, midline_distance
+
+
+def compute_jacobian_hemisphere_stats(mapping, subject_affine, hemisphere_mask=None,
+                                       midline_x=None, verbose=True):
     """
     Compute Jacobian determinant statistics per hemisphere.
 
@@ -408,6 +577,12 @@ def compute_jacobian_hemisphere_stats(mapping, subject_affine, verbose=True):
         The SyN registration mapping.
     subject_affine : ndarray
         4x4 affine matrix of the subject image.
+    hemisphere_mask : ndarray of bool, optional
+        Per-voxel left-hemisphere label from ``compute_warped_midline`` (the
+        preferred AU11 split). If given, overrides ``midline_x``.
+    midline_x : float, optional
+        Scalar midline world X (from ``compute_warped_midline``). Used only when
+        ``hemisphere_mask`` is None; the split is then ``world X < midline_x``.
     verbose : bool
         Print statistics.
 
@@ -418,39 +593,29 @@ def compute_jacobian_hemisphere_stats(mapping, subject_affine, verbose=True):
     jacobian_det : ndarray
         3D array of Jacobian determinant values.
     """
-    # Get the forward deformation field
+    # Get the forward deformation field (in mm, on the subject grid — see
+    # ``_jacobian_determinant`` for the units and the per-mm rationale).
     forward_field = mapping.get_forward_field()
+    voxel_size = np.sqrt(np.sum(subject_affine[:3, :3] ** 2, axis=0))
+    jacobian_det = _jacobian_determinant(forward_field, voxel_size)
 
-    # Compute Jacobian determinant at each voxel
-    # forward_field shape: (X, Y, Z, 3) - displacement in each direction
-    du_dx = np.gradient(forward_field[..., 0], axis=0)
-    du_dy = np.gradient(forward_field[..., 0], axis=1)
-    du_dz = np.gradient(forward_field[..., 0], axis=2)
-
-    dv_dx = np.gradient(forward_field[..., 1], axis=0)
-    dv_dy = np.gradient(forward_field[..., 1], axis=1)
-    dv_dz = np.gradient(forward_field[..., 1], axis=2)
-
-    dw_dx = np.gradient(forward_field[..., 2], axis=0)
-    dw_dy = np.gradient(forward_field[..., 2], axis=1)
-    dw_dz = np.gradient(forward_field[..., 2], axis=2)
-
-    # Jacobian matrix at each voxel (add identity for deformation -> transformation)
-    # J = I + grad(displacement)
-    jacobian_det = (
-        (1 + du_dx) * ((1 + dv_dy) * (1 + dw_dz) - dv_dz * dw_dy) -
-        du_dy * (dv_dx * (1 + dw_dz) - dv_dz * dw_dx) +
-        du_dz * (dv_dx * dw_dy - (1 + dv_dy) * dw_dx)
-    )
-
-    # Split by hemisphere using world X coordinate
-    shape = jacobian_det.shape
-    i, j, k = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]),
-                          np.arange(shape[2]), indexing='ij')
-    x_world = subject_affine[0, 0] * i + subject_affine[0, 3]
-
-    left_mask = x_world < 0
-    right_mask = x_world >= 0
+    # Hemisphere split. The per-voxel warped-MNI mask is the anatomical L/R label
+    # (AU11); the scalar fallback uses the FULL affine (no axis-aligned
+    # approximation — the off-diagonal terms are non-zero even after RAS
+    # reorientation, so dropping affine[0,1]*j and affine[0,2]*k mislabels voxels
+    # near the volume corners).
+    if hemisphere_mask is not None:
+        left_mask = hemisphere_mask
+        right_mask = ~hemisphere_mask
+    else:
+        shape = jacobian_det.shape
+        i, j, k = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]),
+                              np.arange(shape[2]), indexing='ij')
+        x_world = (subject_affine[0, 0] * i + subject_affine[0, 1] * j +
+                   subject_affine[0, 2] * k + subject_affine[0, 3])
+        m = midline_x if midline_x is not None else 0.0
+        left_mask = x_world < m
+        right_mask = ~left_mask
 
     left_jacobian = jacobian_det[left_mask]
     right_jacobian = jacobian_det[right_mask]
@@ -694,8 +859,18 @@ def register_mni_to_subject(
     # Compute hemisphere-specific registration quality metrics
     if verbose:
         print("    • Computing registration quality metrics...")
+
+    # Establish the anatomical midline in subject space (AU11). The MNI X=0 plane
+    # is warped into subject space; this is the single source of truth for every
+    # hemisphere split in the pipeline. The subject is reoriented to RAS but never
+    # recentered, so the midline does not in general coincide with world X=0.
+    hemisphere_mask, midline_x, midline_distance = compute_warped_midline(
+        mapping, subject_affine, mni_affine, mni_data.shape,
+        subject_data=subject_data, verbose=verbose
+    )
+
     jacobian_stats, jacobian_det = compute_jacobian_hemisphere_stats(
-        mapping, subject_affine, verbose=verbose
+        mapping, subject_affine, hemisphere_mask=hemisphere_mask, verbose=verbose
     )
 
     # -------------------------------------------------------------------------
@@ -722,7 +897,11 @@ def register_mni_to_subject(
         'reorientation_transform': reorientation_transform,  # Transform from orig -> RAS
         # Registration quality diagnostics
         'jacobian_stats': jacobian_stats,
-        'jacobian_det': jacobian_det
+        'jacobian_det': jacobian_det,
+        # AU11 midline (single source of truth for hemisphere splits)
+        'hemisphere_mask': hemisphere_mask,
+        'midline_x': midline_x,
+        'midline_distance': midline_distance,
     }
     
     # Save warped template
