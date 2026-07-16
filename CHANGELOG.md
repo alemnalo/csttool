@@ -51,6 +51,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Streamlines are now reoriented before along-tract profiling.** `compute_tract_profile`
+  resampled each streamline in its **stored point order** and averaged across the bundle by
+  point index. Tractography stores each streamline as `[backward_from_seed][forward_from_seed]`,
+  so a bundle mixes orientations: averaging index *i* aligned one streamline's pontine end
+  with another's precentral end. AFQ/Yeh-style bundle profiles reorient to a reference
+  direction first; csttool did not.
+
+  Three consumers already assumed index 0 was the inferior (pontine) end and none verified
+  it: `compute_localized_metrics`'s region bins, and the `'Pontine Level'` label the profile
+  plots draw at position 0.
+
+  **Fix.** `orient_streamlines_inferior_to_superior` (new, exported from `csttool.metrics`)
+  flips each streamline so it runs from its inferior to its superior end, and
+  `compute_tract_profile` applies it before sampling. Orientation is decided by comparing the
+  mean Z of the first and last quartiles — more robust than the two endpoints alone, which are
+  the noisiest part of a streamline. Ties fall through to Y, then X, then keep the stored
+  order, so the choice is deterministic and depends only on the streamline itself. The rule is
+  anchored to anatomy rather than to a bundle centroid, because index 0 = pontine is hardcoded
+  downstream: a merely self-consistent bundle could be flipped as a unit and silently swap the
+  pontine and precentral labels. Streamlines arrive in RASMM world coordinates, where +Z is
+  superior by the NIfTI standard; only the two ends of the same streamline are compared, so
+  the result is translation-invariant and unaffected by the subject not being recentered. A
+  bundle that does not run predominantly superior-inferior now warns, since the labels are
+  meaningless for one that doesn't.
+
+  **Scope of the defect — active, and it moves reported numbers.** Measured on in-vivo CST
+  data: **~20% of streamlines ran superior→inferior** (L 79.5% / R 82.4% inferior→superior),
+  so bundles were genuinely mixed rather than coherent by luck. The contamination compressed
+  the two ends of the profile toward each other, so correcting it *steepens* the true
+  pontine→PLIC→precentral gradient:
+
+  | Region | Left | Right |
+  |---|---|---|
+  | pontine | +4.1% | +4.7% |
+  | PLIC | −0.4% | −0.6% |
+  | precentral | −4.4% | −5.8% |
+
+  The middle barely moves because the mixing is symmetric there. Regional FA laterality
+  indices shift by 1.20× (pontine), 1.01× (PLIC) and 2.76× (precentral), all remaining inside
+  the 0.05 "symmetric" band.
+
+  **Headline `mean`/`std`/`median` FA/MD/RD/AD and every morphology metric are unchanged
+  (measured delta exactly 0.0).** `sample_scalar_along_tract` pools every point of every
+  streamline, so it is invariant to orientation and point order. Any report's regional values
+  and profile figures change; its global table does not.
+
+- **Region bins no longer silently return zeros for profiles other than 20 points long.**
+  `compute_localized_metrics` hardcoded `profile[0:7]/[7:14]/[14:20]` and returned all-zeros
+  for any other length, even though `n_points` is a caller-settable parameter of
+  `compute_tract_profile`. The split is now proportional to the profile length. At the default
+  `n_points=20` the bounds are identical to before, so no reported number changes from this.
+
 - **The RNG seed now reaches the `roi-seeded` and `bidirectional` extraction methods.**
   `track_from_seeds` — the tracker behind both — constructed DIPY's `LocalTracking`
   without a `random_seed` argument and did not accept one, so `--rng-seed` could not

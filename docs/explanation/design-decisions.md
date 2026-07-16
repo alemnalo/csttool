@@ -93,3 +93,59 @@ and has been validated on 167 TractoInferno subjects with 98.8% success rate.
 Bidirectional is superior for single-subject bilateral symmetry analysis but is
 approximately 3× slower (four tracking passes) and assumes symmetric anatomy — an
 assumption that is invalid in stroke, tumour, or resection cases.
+
+---
+
+## Why the tract profile is reoriented inferior→superior
+
+An along-tract profile averages a scalar across the bundle by point index, so point index
+*i* must mean the same anatomical position in every streamline. Tractography does not
+provide that: each streamline is stored `[backward_from_seed][forward_from_seed]`, so a
+bundle mixes orientations. On in-vivo CST data about 20% of streamlines run
+superior→inferior, which is enough to visibly bias the result — averaging index 0 pools
+pontine samples from most streamlines with precentral samples from the rest, compressing
+the two ends of the profile toward each other. `compute_tract_profile` therefore reorients
+each streamline inferior→superior before sampling.
+
+**Why an anatomical rule rather than a bundle centroid.** DIPY offers `orient_by_streamline`,
+which orients a bundle relative to a reference such as its centroid. That makes streamlines
+agree with *each other*, which is all that profile *invariance* requires — but it does not
+fix which end comes first. `compute_localized_metrics` bins the profile by index and the
+profile plots label position 0 "Pontine Level", so index 0 must be the inferior end
+specifically. A centroid-relative rule would leave the whole bundle liable to being flipped
+as a unit, silently swapping the pontine and precentral labels. The rule has to be tied to
+anatomy.
+
+**Why the Z axis, and not `orient_by_rois`.** DIPY's `orient_by_rois` is the textbook
+choice, but it is unavailable where the work happens: `csttool metrics` receives only
+tractograms and scalar maps, while the brainstem and motor ROI masks are built in a
+different pipeline stage (`extract/modules/create_roi_masks.py`). Using them would mean
+adding required inputs to the command. The Z axis is a sound substitute for a
+supero-inferior tract: streamlines are in RASMM world coordinates, where +Z is superior by
+the NIfTI standard, regardless of how the image's voxel axes are stored.
+
+A useful property of comparing the two ends of a streamline is that it is
+**translation-invariant**. The related concern that the subject is reoriented to RAS but
+never recentered — so the world midline sits at X = M ≠ 0 — breaks anything that splits on
+an absolute plane, but it cannot affect a within-streamline difference.
+
+**Why quartile means rather than the two endpoints.** Orientation is decided from the mean Z
+of the first and last quartiles. On healthy CST data the two rules agree on every streamline,
+so this buys nothing today. It is insurance for the tortuous bundles the tool targets:
+terminal points are the noisiest part of a streamline — that is where the stopping criterion
+fired — and the CST's cortical end hooks laterally into the precentral gyrus. The quartile
+mean averages that hook away for one extra mean per streamline and degrades to the endpoint
+rule for short streamlines.
+
+**Why non-vertical bundles warn rather than fail.** The Z rule is only meaningful for a
+supero-inferior tract. `compute_tract_profile` is public API and a caller may legitimately
+profile some other bundle, so a bundle whose dominant extent is not Z emits a warning rather
+than an error. The dominant axis is chosen with `argmax`, which avoids inventing a threshold
+constant.
+
+**Why there is no RAS check.** The obvious guard — comparing `nib.aff2axcodes(affine)` to
+`('R','A','S')` — would be wrong. That inspects the *voxel* axis order, which is irrelevant
+here: world coordinates are RAS+ by definition, so the rule holds for validly-stored LAS or
+LPS data too, and the check would reject them spuriously. The real precondition is that the
+points are world coordinates rather than voxel indices, and that is already enforced
+structurally, since the profiler applies the inverse affine to whatever it is given.
