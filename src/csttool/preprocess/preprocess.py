@@ -24,7 +24,7 @@ def run_preprocessing(
     filename: str,
     *,
     # Denoising options
-    denoise_method: str = "nlmeans",
+    denoise_method: str = "mppca",  # MPPCA to default to avoid requiring coil count or bvals
     coil_count: int = 4,
     # Optional steps
     apply_gibbs_correction: bool = False,

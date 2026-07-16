@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MPPCA** denoising added
 - **BIDS-native output layout** — `csttool run` now writes a BIDS derivatives tree by
   default, with no extra flags required. All outputs are moved (not copied) into the
   subject directory; stage working directories are removed unconditionally afterwards.
@@ -110,6 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output contract is stable across all flag combinations
 - Reports (HTML, PDF) and tabular outputs (metrics JSON, CSV) routed to `reports/`,
   distinct from QC images in `figures/`
+- Default denoising method changed to `mppca` from `nlmeans`. Reason: `mppca` requires no
+  assumptions to be made on coil count or noise distribution of DWI data.
+- `nlmeans` parameter `num_threads` changed from `-1` to `1`. Reason: single thread CPU reduces performance but ensures determinism when `nlmeans` denoising is implemented.
 
 ## [0.4.0] - 2026-01-28
 
