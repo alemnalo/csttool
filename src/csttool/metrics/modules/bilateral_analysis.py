@@ -98,7 +98,11 @@ def compute_laterality_indices(left_metrics, right_metrics):
         right_morph['mean_length']
     )
     
-    # Microstructural asymmetry (global)
+    # Microstructural asymmetry (global).
+    # The headline mean is per-streamline (length-unbiased, AU10), so the global LI is
+    # computed on the same population the report tabulates - not the point-weighted
+    # mean that longer streamlines dominate. The regional LIs below use the
+    # profile-derived values, which are per-streamline-normalised by construction.
     if 'fa' in left_metrics and 'fa' in right_metrics:
         asymmetry['fa'] = compute_li(
             left_metrics['fa']['mean'],

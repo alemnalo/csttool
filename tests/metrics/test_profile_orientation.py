@@ -133,7 +133,17 @@ def test_localized_metrics_pontine_is_inferior_end(
 
 
 def test_headline_mean_unchanged_by_reversal(synthetic_z_gradient_data, synthetic_affine):
-    """Headline mean/std/median are order-invariant, so AU9's fix cannot move them (AU9 != AU10)."""
+    """Headline mean/std/median are order-invariant, so AU9's reorientation cannot move them.
+
+    AU10 changed the headline from the point pool to the per-streamline mean (one vote per
+    streamline). That stays order-invariant in exact arithmetic - reversing a streamline
+    does not change the set of points it samples, so its mean is unchanged - but the
+    per-streamline computation sums each streamline's points *before* averaging across
+    streamlines, so floating-point summation order can shift the result by ~1e-7. The
+    assertion is tolerance-based rather than bit-exact; any *real* order-dependence (the
+    AU9 defect moved the profile by ~4%) is orders of magnitude larger. The preserved
+    point-pool summary stays bit-exact under reversal, which is asserted alongside.
+    """
     forward = _vertical_bundle()
     fa_fwd = analyze_cst_hemisphere(
         streamlines=forward, fa_map=synthetic_z_gradient_data,
@@ -145,7 +155,12 @@ def test_headline_mean_unchanged_by_reversal(synthetic_z_gradient_data, syntheti
     )['fa']
 
     for key in ('mean', 'std', 'median'):
-        assert fa_mixed[key] == fa_fwd[key], f"headline {key} is order-dependent"
+        assert np.isclose(fa_mixed[key], fa_fwd[key], atol=1e-6), (
+            f"headline {key} is order-dependent: {fa_fwd[key]} vs {fa_mixed[key]}"
+        )
+    # The point-pool summary is a single flat sum, so it stays bit-exact under reversal.
+    for key in ('mean_point_weighted', 'std_point_weighted'):
+        assert fa_mixed[key] == fa_fwd[key], f"point-pool {key} is order-dependent"
 
 
 def test_input_streamlines_not_mutated(synthetic_z_gradient_data, synthetic_affine):

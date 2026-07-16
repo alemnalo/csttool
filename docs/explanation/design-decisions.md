@@ -194,3 +194,57 @@ It is a standalone leaf module rather than part of `csttool.preprocess` because 
 needs the value and is itself imported by `csttool/preprocess/__init__.py` — a constant defined
 there could not be read back without a circular import. Having no imports of its own, it is
 safe to read from anywhere regardless of import order.
+
+---
+
+## Why the headline mean is per-streamline, not point-weighted
+
+Two summaries of a scalar along a bundle coexist, and they measure different things.
+`sample_scalar_along_tract` pools every in-bounds point of every streamline into one flat
+array, so a streamline with twice as many points casts twice as many votes — the result is
+**point-weighted** (length-biased). `compute_tract_profile` normalises each streamline to a
+fixed arc length first, so each streamline casts one vote. The report's global table and the
+laterality indices used the point-weighted mean while the *displayed* profile used the
+per-streamline one, so the headline and the picture could disagree, and the LI could shift
+with bundle geometry (audit finding AU10).
+
+The headline is now the **per-streamline mean**: each streamline contributes one value — the
+mean of its sampled points — regardless of how many points it has. This is length-unbiased,
+and it is the same population the displayed profile normalises over.
+
+**Why `std` moved with it.** A mean does not travel alone. Reporting `0.498 ± 0.238` where
+the mean is per-streamline but the SD is the scatter of every voxel would be incoherent: the
+centre and the spread would describe different populations. So the whole headline block
+(`mean`/`std`/`median`/`min`/`max`/`n_streamlines`) describes the per-streamline population.
+`std` is the between-streamline SD of streamline means — the variability *of streamlines*,
+not of the tissue — and is therefore much smaller than the old voxel scatter. Every report's
+"±" changes meaning; this is deliberate, because the old "±" paired a per-streamline-style
+mean (it was not) with a point-pool spread. `min`/`max` bound the same per-streamline
+distribution.
+
+**Why the point-pool summary is kept, not removed.** It is a different and legitimate
+quantity (the scatter of all sampled voxels is a tissue-heterogeneity measure), and removing
+it would hide the bias rather than name it. It lives under `*_point_weighted` keys and
+`n_samples`, is exposed in the CSVs as `*_mean_point_weighted`, and is never used as the
+headline. This is the same instinct as AU5/AU24 — label constructed numbers rather than
+delete them.
+
+**Why per-streamline and not the profile-derived mean.** The mean of the profile array is
+also one-vote-per-streamline in spirit, but it is a *different population*: `compute_tract_profile`
+resamples each streamline to a fixed arc length and drops streamlines with fewer than five
+valid points. Deriving the headline from it would couple the headline to the profile's
+resampling choices and to its short-streamline cutoff. The per-streamline mean is the pure
+"one vote per streamline" definition, independent of the profile, and is what the LIs and the
+global table should rest on. On in-vivo data the two differ by ~0.01 FA (0.4984 vs 0.4853 on
+the healthy control) for exactly this reason.
+
+**Why the bias is small.** Streamline length only spans ~146–322 points (mean ~227) and the
+correlation between length and a streamline's mean FA is weak (−0.20 to +0.29, and it flips
+sign between hemispheres and subjects). Longer streamlines do pull the point-weighted mean
+in the direction their own mean FA points — confirmed, the point-weighted mean sits below the
+per-streamline mean on both sides of the healthy control — but the effect is ~0.2–0.4% on the
+mean and ~6% relative on the LI. All three definitions stay inside the 0.05 "symmetric" band
+on both subjects examined, so the thesis's "FA symmetric, count asymmetric" conclusion
+survives. AU10 is a correctness/coherence fix, not a results-changing one.
+
+---
