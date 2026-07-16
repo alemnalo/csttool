@@ -14,7 +14,14 @@ dependencies = [
     "numpy",
     "scipy",
     "cython",
-    "dipy",
+    # Upper bound is load-bearing, not cautious: DIPY deprecated passing
+    # EuDXDirectionGetter-based objects (PeaksAndMetrics) as LocalTracking's direction_getter
+    # in 1.12.0, and raises ExpiredDeprecationError from 2.0.0. Both the whole-brain and the
+    # extraction tracking paths do exactly that, so an unpinned rebuild breaks tracking
+    # outright. Lifting this bound means migrating to dipy.tracking.tracker.eudx_tracking.
+    # Lower bound: estimate_directions passes CsaOdfModel(sh_order_max=...), which is the
+    # post-1.9 parameter name. Developed and tested against 1.12.1.
+    "dipy>=1.9,<2",
     "matplotlib",
     "nibabel",
     "dicom2nifti",

@@ -8,6 +8,7 @@ from datetime import datetime
 from time import time
 
 from csttool import __version__
+from csttool.defaults import DEFAULT_DENOISE_METHOD
 from ..utils import extract_stem_from_filename, save_pipeline_report
 from csttool.bids.output import (
     write_dataset_description,
@@ -219,7 +220,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 out=preproc_out,
                 subject_id=subject_id,
                 coil_count=getattr(args, 'coil_count', 4),
-                denoise_method=getattr(args, 'denoise_method', 'nlmeans'),
+                denoise_method=getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
                 show_plots=getattr(args, 'show_plots', False),
                 save_visualizations=getattr(args, 'save_visualizations', False),
                 unring=getattr(args, 'unring', False),
@@ -249,7 +250,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         # Record metadata for report
         pipeline_metadata['preprocessing'] = {
             'status': 'Executed',
-            'method': getattr(args, 'denoise_method', 'nlmeans'),
+            'method': getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
             'unring': getattr(args, 'unring', False),
             'motion_correction': getattr(args, 'perform_motion_correction', False)
         }

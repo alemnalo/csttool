@@ -1,6 +1,7 @@
 
 import argparse
 from pathlib import Path
+from ...defaults import DEFAULT_DENOISE_METHOD
 from ..utils import resolve_nifti
 
 def cmd_preprocess(args: argparse.Namespace) -> dict | None:
@@ -25,7 +26,7 @@ def cmd_preprocess(args: argparse.Namespace) -> dict | None:
         output_dir=args.out,
         filename=stem,
         coil_count=args.coil_count,
-        denoise_method=getattr(args, 'denoise_method', 'nlmeans'),
+        denoise_method=getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
         apply_gibbs_correction=getattr(args, 'unring', False),
         apply_motion_correction=getattr(args, 'perform_motion_correction', False),
         target_voxel_size=tuple(args.target_voxel_size) if args.target_voxel_size else None,

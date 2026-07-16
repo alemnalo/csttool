@@ -12,12 +12,14 @@ from dipy.denoise.noise_estimate import piesno
 from dipy.denoise.nlmeans import nlmeans
 from dipy.denoise.patch2self import patch2self
 
+from ...defaults import DEFAULT_DENOISE_METHOD
+
 
 def denoise(
     data: np.ndarray,
     bvals: np.ndarray = None,
     brain_mask: np.ndarray = None,
-    denoise_method: str = "nlmeans",
+    denoise_method: str = DEFAULT_DENOISE_METHOD,
     N: int = 4,
     patch_radius: int = 2,
 ):

@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 from .. import __version__
+from ..defaults import DEFAULT_DENOISE_METHOD
 from .utils import add_io_arguments
 from .commands.check import cmd_check
 from .commands.doctor import cmd_doctor
@@ -189,9 +190,9 @@ def main() -> None:
     p_preproc.add_argument(
         "--denoise-method",
         type=str,
-        default="nlmeans",
+        default=DEFAULT_DENOISE_METHOD,
         choices=["nlmeans", "patch2self", "mppca"],
-        help="Denoising method: nlmeans, patch2self, or mppca (default: nlmeans)."
+        help=f"Denoising method: nlmeans, patch2self, or mppca (default: {DEFAULT_DENOISE_METHOD})."
     )
     p_preproc.add_argument(
         "--save-visualizations",
@@ -535,9 +536,9 @@ def main() -> None:
     p_run.add_argument(
         "--denoise-method",
         type=str,
-        default="nlmeans",
+        default=DEFAULT_DENOISE_METHOD,
         choices=["nlmeans", "patch2self", "mppca"],
-        help="Denoising method: nlmeans, patch2self, or mppca (default: nlmeans)"
+        help=f"Denoising method: nlmeans, patch2self, or mppca (default: {DEFAULT_DENOISE_METHOD})"
     )
     p_run.add_argument(
         "--unring",
@@ -761,9 +762,9 @@ def main() -> None:
     p_batch.add_argument(
         "--denoise-method",
         type=str,
-        default="nlmeans",
+        default=DEFAULT_DENOISE_METHOD,
         choices=["nlmeans", "patch2self", "mppca", "none"],
-        help="Denoising method: nlmeans, patch2self, mppca, or none (default: nlmeans)"
+        help=f"Denoising method: nlmeans, patch2self, mppca, or none (default: {DEFAULT_DENOISE_METHOD})"
     )
     
     preproc_group = p_batch.add_mutually_exclusive_group()

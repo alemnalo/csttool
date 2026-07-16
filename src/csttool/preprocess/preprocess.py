@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..defaults import DEFAULT_DENOISE_METHOD
 from .modules.load_dataset import load_dataset
 from .modules.denoise import denoise
 from .modules.gibbs_unringing import gibbs_unringing
@@ -24,7 +25,7 @@ def run_preprocessing(
     filename: str,
     *,
     # Denoising options
-    denoise_method: str = "mppca",  # MPPCA to default to avoid requiring coil count or bvals
+    denoise_method: str = DEFAULT_DENOISE_METHOD,
     coil_count: int = 4,
     # Optional steps
     apply_gibbs_correction: bool = False,
@@ -55,7 +56,7 @@ def run_preprocessing(
         Output directory for preprocessed files.
     filename : str
         Base filename without extension (e.g., "sub01_dwi").
-    denoise_method : str, default="nlmeans"
+    denoise_method : str, default="mppca"
         Denoising method: "nlmeans", "patch2self", or "mppca".
         - "nlmeans" uses PIESNO for sigma estimation; requires coil_count.
         - "patch2self" requires bvals and >= 7 directions.

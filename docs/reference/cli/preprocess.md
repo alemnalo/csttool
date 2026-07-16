@@ -25,8 +25,8 @@ csttool preprocess \
 | `--nifti` | path | — | Input 4D NIfTI DWI file. Mutually exclusive with `--dicom`. |
 | `--dicom` | path | — | Input DICOM directory; converted internally. |
 | `--out` | path | — | Output directory (created on demand). **Required**. |
-| `--denoise-method` | `patch2self` \| `nlmeans` | `patch2self` | Denoising algorithm. Use `nlmeans` for low-volume acquisitions where Patch2Self produces over-smoothing. |
-| `--coil-count` | int | `4` | Number of receiver coils, used by NLMeans noise estimation. |
+| `--denoise-method` | `mppca` \| `patch2self` \| `nlmeans` | `mppca` | Denoising algorithm. MPPCA estimates its own noise level and needs no extra information. Use `patch2self` for modern high-volume acquisitions, or `nlmeans` for low-volume acquisitions where Patch2Self over-smooths. |
+| `--coil-count` | int | `4` | Number of receiver coils, used by NLMeans noise estimation. Ignored by `mppca` and `patch2self`. |
 | `--unring` | flag | off | Apply Kellner Gibbs-unringing to attenuate ringing near sharp tissue boundaries. |
 | `--perform-motion-correction` | flag | off | Affine-register all volumes to the first b=0 volume. |
 | `--target-voxel-size` | 3×float | — | Reslice to the given isotropic voxel size in mm (e.g. `2 2 2`). |
@@ -36,8 +36,9 @@ csttool preprocess \
 ### Pipeline Steps
 
 1.  **Denoising**:
-    -   **Patch2Self** (Default): Self-supervised learning method that uses information from other volumes to denoise the current volume. Highly recommended for modern acquisitions.
-    -   **NLMeans**: Non-local means denoising (classic approach).
+    -   **MPPCA** (Default): Marchenko-Pastur PCA. Estimates the noise level itself from the eigenvalue distribution of local PCA patches, so it needs neither a receiver-coil count nor an assumption about the noise distribution. Deterministic across runs.
+    -   **Patch2Self**: Self-supervised method that denoises each volume using information from the others. Requires bvals and enough directions; well suited to modern high-volume acquisitions.
+    -   **NLMeans**: Non-local means denoising (classic approach). Requires `--coil-count` for PIESNO noise estimation and assumes Gaussian noise; both are guesses on most modern multi-channel data, which is why it is no longer the default.
 2.  **Gibbs Unringing** (Optional):
     -   Corrects for Gibbs ringing artifacts near sharp contrast boundaries (e.g., skull/cortex).
 3.  **Motion Correction** (Optional):

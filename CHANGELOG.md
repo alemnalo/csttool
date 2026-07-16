@@ -49,6 +49,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/csttool/cli/commands/extract.py` — guard + `run_bidirectional_extraction`
   - `src/csttool/cli/commands/run.py` — routing branch added
 
+### Changed
+
+- **The default denoising method is now `mppca`, on every command.** MPPCA estimates its own
+  noise level from the eigenvalue distribution of local PCA patches, so it requires neither a
+  receiver-coil count nor an assumption about the noise distribution, and unlike `patch2self`
+  it does not need bvals.
+
+  This supersedes the previous entry claiming the same thing. **That claim was false**: the
+  flip had been applied only to `run_preprocessing`'s signature default, while all three CLI
+  parsers still passed an explicit `default="nlmeans"` that overrode it. No CLI run ever used
+  MPPCA. The entry was also filed under the already-released 0.5.0; it has been moved here and
+  corrected.
+
+  The default is now defined once, in `csttool/defaults.py` as `DEFAULT_DENOISE_METHOD`, and
+  read by the CLI parsers, the command wrappers, `run_preprocessing` and `denoise`. It was
+  previously restated in eight places, which is why a one-line change looked complete and was
+  not. `tests/test_cli_denoise_default.py` asserts the value each command actually resolves,
+  rather than the library signature that looked right while the tool did the opposite.
+
+  **What this retires.** `rician=False` (AU2) and the PIESNO coil count `N` (AU25) exist only
+  in the `nlmeans` branch of `denoise()`, so both now leave the default path. They still apply
+  if `--denoise-method nlmeans` is chosen explicitly. MPPCA also exposes no thread-count or
+  seed parameter, so the multithreading non-determinism behind AU1/AU7 cannot arise on the
+  default path; MPPCA output is bitwise identical across repeated runs.
+
+  **Users who need the old behaviour** should pass `--denoise-method nlmeans` explicitly.
+  Denoised output, and every metric downstream of it, will change for anyone relying on the
+  default.
+
+- **`nlmeans` now runs single-threaded** (`num_threads` `-1` → `1`). Multithreaded reduction
+  order varies between runs, so the previous setting made denoising non-deterministic — the
+  bug behind audit finding AU1. Single-threaded is slower but reproducible.
+
+- **`gibbs_removal` now runs single-threaded** (`num_processes` `-1` → `1`), the same defect
+  class as above (AU7), latent behind `--unring`.
+
+  (These two entries were previously filed under the released 0.5.0; they describe 2026-07-16
+  work and have been moved here.)
+
+- **`dipy` is now pinned to `>=1.9,<2`** in `pyproject.toml` and `environment.yml`. It was
+  entirely unpinned, so an environment rebuild could silently install a version that breaks
+  tracking outright.
+
+  The upper bound is load-bearing rather than cautious. DIPY deprecated passing
+  `EuDXDirectionGetter`-based objects (`PeaksAndMetrics`) as `LocalTracking`'s
+  `direction_getter` in 1.12.0 and raises `ExpiredDeprecationError` from 2.0.0. Both the
+  whole-brain and the extraction tracking paths do exactly that, so DIPY 2.0 would break them.
+  Lifting the bound means migrating to `dipy.tracking.tracker.eudx_tracking`.
+
+  The lower bound reflects `estimate_directions` passing `CsaOdfModel(sh_order_max=...)`, the
+  post-1.9 parameter name. Developed and tested against 1.12.1.
+
 ### Fixed
 
 - **Streamlines are now reoriented before along-tract profiling.** `compute_tract_profile`
@@ -208,10 +260,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output contract is stable across all flag combinations
 - Reports (HTML, PDF) and tabular outputs (metrics JSON, CSV) routed to `reports/`,
   distinct from QC images in `figures/`
-- Default denoising method changed to `mppca` from `nlmeans`. Reason: `mppca` requires no
-  assumptions to be made on coil count or noise distribution of DWI data.
-- `nlmeans` parameter `num_threads` changed from `-1` to `1`. Reason: single thread CPU reduces performance but ensures determinism when `nlmeans` denoising is implemented.
-- `gibbs_removal` changed so that `num_threads = 1`, analogously to above
 
 ## [0.4.0] - 2026-01-28
 
