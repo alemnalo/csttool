@@ -269,16 +269,23 @@ sites above are diagnostics and filters, and they *were* biased — most consequ
 **Why the warped MNI midline, not a centroid proxy.** The MNI152 template is symmetric about
 world X = 0, so the MNI X = 0 plane *is* the anatomical midline. Warping it into subject
 space gives the true subject midline. The cheaper proxies — the FA>0.15 brain centroid, or
-the brainstem centroid — are not midline estimates: the brain is not perfectly symmetric and
-the brainstem is anatomically right-shifted in at least one subject (centroid +4.9 mm while
-the warped midline sits at −0.3 mm). On the two subjects examined, the warped MNI midline
-lands within ~0.6 mm of world X = 0, so the X = 0 assumption happened to be nearly right for
-*them* — but that is luck, not a guarantee, and the code never checked. M ≈ 0 globally
-does not make a flat X = 0 *peduncle* split correct either: the cerebral peduncles are
-only ~10–15 mm wide and sit against an anatomically asymmetric brainstem, so a flat cut
-at the global midline mislabels peduncle voxels that the per-voxel mask labels correctly
-— which is why the peduncle FA moves under the fix even though the midline's median X is
-near 0.
+the brainstem centroid — are not midline estimates: the brain is not perfectly symmetric, and
+the brainstem is anatomically right-shifted in at least one subject (centroid +4.9 mm, against
+a local warped midline of +2.9 mm there), so it overstates the offset.
+
+On the two subjects examined, the warped midline is genuinely off-centre: its median world X is
+−3.58 mm (healthy control) and +0.84 mm (ALS), and the healthy control's midline sits ~4 mm left
+of X = 0 at every level (brainstem −4.75 mm, mid −3.91 mm, cortex −3.68 mm). The subject is
+reoriented to RAS but never recentered, so X = 0 is simply not the midline.
+
+**And the midline is not a plane at all.** It curves with the non-linear warp: the ALS subject's
+runs from +2.94 mm at the brainstem to −2.91 mm at the cortex — a ~6 mm range. No single X value
+is correct at both ends, which is the reason the per-voxel `hemisphere_mask` is the primary
+output rather than a scalar.
+
+Both effects land on a structure with no room for them: the cerebral peduncles are only
+~10–15 mm wide, so a cut several mm off the true midline mislabels a large fraction of their
+voxels. Judge a midline error against the structure being split, not against the head.
 
 **Why one source of truth, in three views.** `compute_warped_midline` warps a whole-brain
 MNI left-hemisphere mask (`X_mni < 0`) into subject space and returns three representations of

@@ -182,17 +182,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **Impact — measured on both real subjects (post-fix, DIPY 1.12.1).**
 
-  *The premise "M ≠ 0" is **not** confirmed by the gold-standard estimate.* The
-  warped MNI midline lands at world X ≈ 0 for both subjects (cortical L/R boundary:
-  −0.6 mm healthy, −0.3 mm ALS). The proxies that suggested otherwise — the
-  FA>0.15 brain centroid and the brainstem centroid — are unreliable: the brainstem
-  is anatomically right-shifted in the ALS subject (centroid +4.9 mm vs warped
-  midline −0.3 mm), which is anatomy, not a recentering failure. **M ≈ 0 globally does
-  not make a flat X=0 *peduncle* split correct**, however: the cerebral peduncles are
-  only ~10–15 mm wide and sit against an anatomically asymmetric brainstem, so a flat
-  cut at the global midline mislabels peduncle voxels that the per-voxel warped-MNI
-  mask labels correctly — which is exactly why the peduncle FA moves (below) even
-  though the midline's median X is near 0.
+  *The premise "M ≠ 0" is confirmed.* The warped MNI midline does **not** land at
+  world X = 0: `compute_warped_midline` returns a median world X of −3.58 mm
+  (healthy control) and +0.84 mm (ALS). Measuring the warped L/R boundary directly by
+  Z band, the healthy control's midline sits ~4 mm left of X = 0 at every level
+  (brainstem −4.75 mm, mid −3.91 mm, cortex −3.68 mm). The subject is reoriented to
+  RAS but never recentered, exactly as the finding says.
+
+  *The midline is also not a plane.* It curves with the non-linear warp: the ALS
+  subject's midline runs from +2.94 mm at the brainstem to −2.91 mm at the cortex, a
+  ~6 mm range. **No single X value can be correct at both ends**, which is why the
+  per-voxel `hemisphere_mask` — not a scalar plane — is the primary output.
+
+  Both effects land on a structure that cannot absorb them: the cerebral peduncles are
+  only ~10–15 mm wide, so a cut several mm off the true midline mislabels a large
+  fraction of them. That is why the peduncle FA moves (below).
 
   | Peduncle FA (superior 30% brainstem, dilated) | Left | Right | L−R |
   |---|---|---|---|
