@@ -127,7 +127,9 @@ the NIfTI standard, regardless of how the image's voxel axes are stored.
 A useful property of comparing the two ends of a streamline is that it is
 **translation-invariant**. The related concern that the subject is reoriented to RAS but
 never recentered — so the world midline sits at X = M ≠ 0 — breaks anything that splits on
-an absolute plane, but it cannot affect a within-streamline difference.
+an absolute plane, but it cannot affect a within-streamline difference. The absolute-plane
+splits elsewhere in the pipeline now use the warped MNI midline (see
+[Why the hemisphere midline is the warped MNI midline, not world X=0](#why-the-hemisphere-midline-is-the-warped-mni-midline-not-world-x0)).
 
 **Why quartile means rather than the two endpoints.** Orientation is decided from the mean Z
 of the first and last quartiles. On healthy CST data the two rules agree on every streamline,
@@ -248,3 +250,66 @@ on both subjects examined, so the thesis's "FA symmetric, count asymmetric" conc
 survives. AU10 is a correctness/coherence fix, not a results-changing one.
 
 ---
+
+## Why the hemisphere midline is the warped MNI midline, not world X=0
+
+Several diagnostics split the brain into left and right hemispheres: the streamline
+midline-crossing (commissural) exclusion in `extract_cst_passthrough`, the cerebral-peduncle
+FA sample (`sample_peduncle_fa`), the SyN-Jacobian hemisphere statistics, and the atlas-warp
+centroid QC. All of them used to split on world X = 0. That is wrong whenever the subject is
+not centred at the world origin — and `register_mni_to_subject` reorients the subject to RAS
+but never recentres it, so the anatomical midline sits at world X = M, not 0 in general.
+
+**Why this is a *diagnostic* problem, not a bundle problem.** Final left/right bundle
+assignment is ROI-based: a streamline belongs to the left CST if it traverses the left motor
+cortex, regardless of where the midline is. So the bundles were never misassigned. The four
+sites above are diagnostics and filters, and they *were* biased — most consequentially
+`sample_peduncle_fa`, whose "lower left peduncle FA" output underpinned [[07 Decisions]] D3.
+
+**Why the warped MNI midline, not a centroid proxy.** The MNI152 template is symmetric about
+world X = 0, so the MNI X = 0 plane *is* the anatomical midline. Warping it into subject
+space gives the true subject midline. The cheaper proxies — the FA>0.15 brain centroid, or
+the brainstem centroid — are not midline estimates: the brain is not perfectly symmetric and
+the brainstem is anatomically right-shifted in at least one subject (centroid +4.9 mm while
+the warped midline sits at −0.3 mm). On the two subjects examined, the warped MNI midline
+lands within ~0.6 mm of world X = 0, so the X = 0 assumption happened to be nearly right for
+*them* — but that is luck, not a guarantee, and the code never checked. M ≈ 0 globally
+does not make a flat X = 0 *peduncle* split correct either: the cerebral peduncles are
+only ~10–15 mm wide and sit against an anatomically asymmetric brainstem, so a flat cut
+at the global midline mislabels peduncle voxels that the per-voxel mask labels correctly
+— which is why the peduncle FA moves under the fix even though the midline's median X is
+near 0.
+
+**Why one source of truth, in three views.** `compute_warped_midline` warps a whole-brain
+MNI left-hemisphere mask (`X_mni < 0`) into subject space and returns three representations of
+the same surface, because the consumers need different things:
+
+- a per-voxel `hemisphere_mask` (the anatomical L/R label) for the voxel-based sites —
+  `sample_peduncle_fa` and the Jacobian split. This is the gold standard: each voxel is
+  assigned to the hemisphere it maps to in MNI, with no scalar approximation.
+- a signed `midline_distance` volume (mm) for the one site that operates on continuous
+  streamline *points* — the midline-crossing exclusion. A single scalar plane is a poor fit
+  here: the warped midline curves with SyN, and a whole-brain median is biased by asymmetric
+  sub-cortical structures (it sat at −3.6 mm for one subject while the cortical midline sat
+  at −0.6 mm — using the scalar would have *regressed* that subject).
+- a scalar `midline_x` (median world X of the central-slab midline surface) for the atlas-warp
+  centroid QC, which only needs the *sign* of each motor centroid relative to the midline and
+  is insensitive to a few mm.
+
+**Why the Jacobian gradient is per mm (AU19).** The SyN forward field returned by
+`DiffeomorphicMap.get_forward_field()` is in world (mm) units on dipy 1.9–1.12.1 — verified
+empirically from `_warp_forward`, where the displacement is added to a world coordinate before
+the world-to-grid transform is applied. The Jacobian is `J = I + d(displacement_mm)/d(world_mm)`,
+so `np.gradient` must take the voxel size as spacing. The original code took it per voxel
+index, scaling the spread by the voxel size (≈2× on 2 mm isotropic data) — which is why the
+reported `L 1.000±0.388 / R 0.999±0.330` was miscalibrated. The hemisphere split also dropped
+the off-diagonal affine terms; the full affine is now used (and the per-voxel mask is
+preferred when available).
+
+**What moved and what did not.** Bundle assignment and final CST counts are unchanged
+(ROI-based). On the two real subjects the peduncle FA asymmetry largely vanishes under the
+correct midline (the X = 0 split manufactured an ~8% "lower-left" asymmetry on the healthy
+control that the warped-MNI mask makes symmetric), and the Jacobian std roughly halves while
+the L/R symmetry it was quoted as evidence for survives. See the CHANGELOG `[Unreleased]`
+entry for the measured table, and [[07 Decisions]] D3 for the consequence to the
+"lower-left peduncle FA is a data property" claim.

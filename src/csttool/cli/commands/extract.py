@@ -176,6 +176,8 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
                 affine=warped['subject_affine'],  # Use affine that matches the ROI masks
                 min_length=args.min_length,
                 max_length=args.max_length,
+                midline_x=warped.get('midline_x', 0.0),
+                midline_distance=warped.get('midline_distance'),
                 verbose=verbose
             )
             # Peduncle FA diagnostic (to check for tracking quality asymmetry)
@@ -185,6 +187,8 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
                     fa_affine=fa_affine,
                     brainstem_mask=masks['brainstem'],
                     mask_affine=warped['subject_affine'],
+                    hemisphere_mask=warped.get('hemisphere_mask'),
+                    midline_x=warped.get('midline_x'),
                     verbose=True
                 )
         else:  # "endpoint"

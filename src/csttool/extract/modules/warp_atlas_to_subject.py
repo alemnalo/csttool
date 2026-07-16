@@ -327,6 +327,7 @@ def warp_atlas_to_subject(
     mni_shape=None,
     mni_affine=None,
     interpolation='nearest',
+    midline_x=0.0,
     verbose=True
 ):
     """
@@ -355,6 +356,10 @@ def warp_atlas_to_subject(
         4x4 affine of MNI template used for registration.
     interpolation : str, optional
         Interpolation method. Must be 'nearest' for label maps.
+    midline_x : float, optional
+        Subject-space midline world X (from ``compute_warped_midline``). Used by
+        the motor-ROI centroid QC check (AU11). Defaults to 0.0 (backward
+        compatible) but the pipeline always passes the warped-MNI value.
     verbose : bool, optional
         Print progress information.
         
@@ -425,15 +430,17 @@ def warp_atlas_to_subject(
             left_world = subject_affine @ np.append(left_centroid, 1)
             right_world = subject_affine @ np.append(right_centroid, 1)
 
+            # AU11: the anatomical midline is world X = midline_x (the warped MNI
+            # midline), not necessarily 0. Compare centroids against that plane.
             print("    • Motor ROI Diagnostics:")
             print(f"    ├─ Left centroid (world):  X={left_world[0]:.1f}, Y={left_world[1]:.1f}, Z={left_world[2]:.1f}")
             print(f"    └─ Right centroid (world): X={right_world[0]:.1f}, Y={right_world[1]:.1f}, Z={right_world[2]:.1f}")
 
             # Check for obvious issues
-            if left_world[0] > 0:
-                print(f"    ⚠️ Left motor centroid has positive X (should be negative)")
-            if right_world[0] < 0:
-                print(f"    ⚠️ Right motor centroid has negative X (should be positive)")
+            if left_world[0] > midline_x:
+                print(f"    ⚠️ Left motor centroid is right of the midline (X={left_world[0]:.1f} > {midline_x:.1f})")
+            if right_world[0] < midline_x:
+                print(f"    ⚠️ Right motor centroid is left of the midline (X={right_world[0]:.1f} < {midline_x:.1f})")
 
             z_diff = abs(left_world[2] - right_world[2])
             if z_diff > 10:
@@ -497,7 +504,12 @@ def warp_harvard_oxford_to_subject(
     subject_affine = registration_result['subject_affine']  # RAS affine (for warping)
     mni_shape = registration_result.get('mni_shape')
     mni_affine = registration_result.get('mni_affine')
-    
+
+    # AU11 midline (single source of truth for hemisphere splits)
+    midline_x = registration_result.get('midline_x', 0.0)
+    hemisphere_mask = registration_result.get('hemisphere_mask')
+    midline_distance = registration_result.get('midline_distance')
+
     # Original orientation info (for saving outputs)
     original_subject_affine = registration_result.get('original_subject_affine', subject_affine)
     was_reoriented = registration_result.get('was_reoriented', False)
@@ -520,6 +532,7 @@ def warp_harvard_oxford_to_subject(
         subject_affine=subject_affine,
         mni_shape=mni_shape,
         mni_affine=mni_affine,
+        midline_x=midline_x,
         verbose=verbose
     )
     
@@ -538,6 +551,7 @@ def warp_harvard_oxford_to_subject(
         subject_affine=subject_affine,
         mni_shape=mni_shape,
         mni_affine=mni_affine,
+        midline_x=midline_x,
         verbose=verbose
     )
     
@@ -551,7 +565,11 @@ def warp_harvard_oxford_to_subject(
         'original_subject_affine': original_subject_affine,  # Original affine (for saving)
         'was_reoriented': was_reoriented,
         'reorientation_transform': reorientation_transform,
-        'roi_config': CST_ROI_CONFIG
+        'roi_config': CST_ROI_CONFIG,
+        # AU11 midline (passed through for downstream hemisphere splits)
+        'midline_x': midline_x,
+        'hemisphere_mask': hemisphere_mask,
+        'midline_distance': midline_distance,
     }
     
     # Save warped atlases
