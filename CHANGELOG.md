@@ -97,6 +97,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streamline, so it is invariant to orientation and point order. Any report's regional values
   and profile figures change; its global table does not.
 
+- **Profile figures now label the anatomical regions the report actually tabulates.** The
+  profile plots drew `'Pontine Level'`, `'PLIC'` and `'Precentral Gyrus'` at 0 / 50 / 100% of
+  tract position, annotating the axis ticks. Read as point landmarks that is defensible — the
+  tract does start at the pons and end at the precentral gyrus — and each label did fall
+  inside the region it named. But the regional table uses those same three names for bin
+  averages over 0-35 / 35-70 / 70-100%, so the figure and the table used one vocabulary for
+  two different things, with two of the three labels sitting at the extreme edge of their
+  range.
+
+  Region extents now come from a single `TRACT_REGIONS` definition that
+  `compute_localized_metrics` bins with and the figures label from, so the numbers and the
+  pictures cannot drift apart. Labels sit at the centre of each region, the bands are shaded,
+  and the x-ticks mark the region boundaries rather than 0/50/100.
+
+  This is a legibility change: no metric value moves, and no label previously pointed at the
+  wrong region. Note the region boundaries themselves remain conventional rather than
+  validated against an atlas.
+
 - **Region bins no longer silently return zeros for profiles other than 20 points long.**
   `compute_localized_metrics` hardcoded `profile[0:7]/[7:14]/[14:20]` and returned all-zeros
   for any other length, even though `n_points` is a caller-settable parameter of

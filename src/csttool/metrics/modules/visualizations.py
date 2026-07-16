@@ -18,6 +18,45 @@ from pathlib import Path
 
 from csttool.viz import geometry as _geo
 from csttool.viz import style as _style
+from csttool.metrics.modules.unilateral_analysis import TRACT_REGIONS
+
+
+# Display names for the regions defined in TRACT_REGIONS. The extents themselves are not
+# duplicated here: labels are positioned from TRACT_REGIONS so they always sit over the
+# stretch of tract whose value the report tabulates.
+_REGION_DISPLAY_NAMES = {
+    'pontine': 'Pontine Level',
+    'plic': 'PLIC',
+    'precentral': 'Precentral Gyrus',
+}
+
+
+def _shade_tract_regions(ax):
+    """Shade alternate anatomical region bands behind a profile, and tick the boundaries."""
+    for i, (_, start, end) in enumerate(TRACT_REGIONS):
+        if i % 2:  # alternate, so the boundaries read without extra gridlines
+            ax.axvspan(start * 100.0, end * 100.0, color=_style.REGION_BAND,
+                       alpha=_style.REGION_BAND_ALPHA, linewidth=0, zorder=0)
+
+    bounds = [0.0] + [end * 100.0 for _, _, end in TRACT_REGIONS]
+    ax.set_xticks(bounds)
+    ax.set_xticklabels([f'{b:g}%' for b in bounds])
+
+
+def _label_tract_regions(ax, y=-0.12, wrap=False):
+    """
+    Label each anatomical region at the centre of its extent.
+
+    Regions are ranges, not points. The labels previously sat at 0/50/100%, but the regions
+    they name span 0-35/35-70/70-100%, so only 'PLIC' was anywhere near the stretch of tract
+    whose value the report tabulates. Positions come from TRACT_REGIONS, so the figure and
+    `compute_localized_metrics` cannot disagree.
+    """
+    trans = ax.get_xaxis_transform()
+    for name, start, end in TRACT_REGIONS:
+        label = _REGION_DISPLAY_NAMES[name]
+        ax.text((start + end) * 50.0, y, label.replace(' ', '\n') if wrap else label,
+                transform=trans, ha='center', fontsize=9, style='italic')
 
 
 def plot_tract_profiles(
@@ -92,15 +131,8 @@ def plot_tract_profiles(
     
     # Set x-axis with anatomical labels
     if anatomical_labels:
-        ax.set_xticks([0, 50, 100])
-        ax.set_xticklabels(['0%', '50%', '100%'])
-        # Add anatomical labels as secondary text
-        ax.text(0, -0.12, 'Pontine Level', transform=ax.get_xaxis_transform(), 
-                ha='center', fontsize=9, style='italic')
-        ax.text(50, -0.12, 'PLIC', transform=ax.get_xaxis_transform(), 
-                ha='center', fontsize=9, style='italic')
-        ax.text(100, -0.12, 'Precentral Gyrus', transform=ax.get_xaxis_transform(), 
-                ha='center', fontsize=9, style='italic')
+        _shade_tract_regions(ax)
+        _label_tract_regions(ax, y=-0.12)
         ax.set_xlabel('Normalized Tract Position', fontsize=12)
     else:
         ax.set_xlabel('Normalized Tract Position (%)', fontsize=12)
@@ -210,27 +242,18 @@ def plot_stacked_profiles(
                  ax.set_ylim(m['ylim'])
                  
         ax.text(0.5, 0.9, m['title'], transform=ax.transAxes, fontsize=10, fontweight='bold', ha='center')
-        
+
+        # Bands go behind every panel; only the bottom one carries the labels.
+        _shade_tract_regions(ax)
+
         ax.grid(True, alpha=0.3)
         
         # Only add legend to first plot
         if i == 0:
             ax.legend(loc='upper right', fontsize=9, framealpha=0.9)
     
-    # Shared X-axis formatting (only on bottom plot)
-    axes[-1].set_xticks([0, 50, 100])
-    axes[-1].set_xticklabels(['0%', '50%', '100%'])
-    
-    # Add anatomical annotations
-    # Create transform for the bottom axis
-    trans = axes[-1].get_xaxis_transform()
-    
-    axes[-1].text(0, -0.3, 'Pontine\nLevel', transform=trans, 
-            ha='center', fontsize=9, style='italic')
-    axes[-1].text(50, -0.3, 'PLIC', transform=trans, 
-            ha='center', fontsize=9, style='italic')
-    axes[-1].text(100, -0.3, 'Precentral\nGyrus', transform=trans, 
-            ha='center', fontsize=9, style='italic')
+    # Shared X-axis: labels go on the bottom plot only (shading is applied to every panel above)
+    _label_tract_regions(axes[-1], y=-0.3, wrap=True)
             
     plt.tight_layout()
     # Increase bottom margin to prevent x-axis overlap

@@ -17,6 +17,20 @@ from dipy.tracking.streamline import length
 from dipy.tracking.utils import density_map
 
 
+# Nominal extent of each anatomical region along the tract, as a fraction of tract length
+# measured from the inferior (pontine) end. Single source of truth: `compute_localized_metrics`
+# bins the profile with these, and the profile figures place their region labels with them, so
+# the numbers and the pictures cannot drift apart.
+#
+# These boundaries are conventional, not validated against an atlas — the JHU ICBM-DTI-81
+# landmark validation is outstanding. Treat the region names as nominal.
+TRACT_REGIONS = (
+    ('pontine', 0.0, 0.35),
+    ('plic', 0.35, 0.70),
+    ('precentral', 0.70, 1.0),
+)
+
+
 def analyze_cst_hemisphere(
     streamlines,
     fa_map=None,
@@ -492,10 +506,9 @@ def compute_localized_metrics(profile):
     """
     Compute region-specific statistics from tract profile.
 
-    Divides the tract profile into 3 anatomical regions by relative position:
-    - Pontine: 0-35% of the tract
-    - PLIC: 35-70%
-    - Precentral: 70-100%
+    Divides the tract profile into the regions defined by `TRACT_REGIONS`: pontine 0-35% of
+    the tract, PLIC 35-70%, precentral 70-100%. Those boundaries are conventional rather than
+    validated against an atlas, so the region names are nominal.
 
     This assumes the profile is ordered from the inferior (pontine) end to the superior
     (precentral) end, which `compute_tract_profile` guarantees by reorienting the bundle.
@@ -524,12 +537,10 @@ def compute_localized_metrics(profile):
 
     profile_arr = np.array(profile)
     n = len(profile_arr)
-    lo, hi = int(0.35 * n), int(0.70 * n)
 
     return {
-        'pontine': float(np.mean(profile_arr[:lo])),
-        'plic': float(np.mean(profile_arr[lo:hi])),
-        'precentral': float(np.mean(profile_arr[hi:]))
+        name: float(np.mean(profile_arr[int(start * n):int(end * n)]))
+        for name, start, end in TRACT_REGIONS
     }
 
 

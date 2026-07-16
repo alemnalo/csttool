@@ -149,3 +149,11 @@ here: world coordinates are RAS+ by definition, so the rule holds for validly-st
 LPS data too, and the check would reject them spuriously. The real precondition is that the
 points are world coordinates rather than voxel indices, and that is already enforced
 structurally, since the profiler applies the inverse affine to whatever it is given.
+
+**Why the region extents live in one constant.** `TRACT_REGIONS` in
+`metrics/modules/unilateral_analysis.py` defines each region's extent as a fraction of tract
+length. `compute_localized_metrics` bins the profile with it and the profile figures place
+their labels from it. This is the single source of truth on purpose: the bins and the labels
+were previously stated independently and drifted, so the figures annotated 0/50/100% while the
+table averaged 0-35/35-70/70-100%. Region boundaries are conventional, not validated against an
+atlas — the JHU ICBM-DTI-81 landmark validation is outstanding, so the names are nominal.
