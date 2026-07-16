@@ -14,6 +14,7 @@ from .modules.unilateral_analysis import (
     analyze_cst_hemisphere,
     compute_morphology,
     sample_scalar_along_tract,
+    sample_scalar_per_streamline,
     compute_tract_profile,
     orient_streamlines_inferior_to_superior,
     print_hemisphere_summary
@@ -49,6 +50,7 @@ __all__ = [
     'analyze_cst_hemisphere',
     'compute_morphology',
     'sample_scalar_along_tract',
+    'sample_scalar_per_streamline',
     'compute_tract_profile',
     'orient_streamlines_inferior_to_superior',
     'print_hemisphere_summary',

@@ -26,7 +26,10 @@ for scalar in _SCALARS:
     METRICS_HEADERS.extend([
         f"left_{scalar}_mean", f"left_{scalar}_std",
         f"right_{scalar}_mean", f"right_{scalar}_std",
-        f"{scalar}_laterality_index"
+        f"{scalar}_laterality_index",
+        # Length-biased counterpart of the headline mean, for bias auditing (AU10):
+        f"left_{scalar}_mean_point_weighted",
+        f"right_{scalar}_mean_point_weighted",
     ])
     for region in _REGIONS:
         METRICS_HEADERS.extend([
@@ -108,6 +111,8 @@ def write_batch_metrics_csv(results: List[Any], output_dir: Path):
                                         f'right_{scalar}_mean': right[scalar]['mean'],
                                         f'right_{scalar}_std': right[scalar]['std'],
                                         f'{scalar}_laterality_index': asym[scalar]['laterality_index'],
+                                        f'left_{scalar}_mean_point_weighted': left[scalar].get('mean_point_weighted'),
+                                        f'right_{scalar}_mean_point_weighted': right[scalar].get('mean_point_weighted'),
                                     })
                                     
                                     # Localized Metrics

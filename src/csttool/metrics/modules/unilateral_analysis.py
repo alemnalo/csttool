@@ -65,10 +65,11 @@ def analyze_cst_hemisphere(
     metrics : dict
         Comprehensive metrics dictionary containing:
         - morphology: streamline count, length stats, volume
-        - fa: mean, std, median, profile, all sampled values
-        - md: mean, std, median, profile, all sampled values
-        - rd: mean, std, median, profile, all sampled values
-        - ad: mean, std, median, profile, all sampled values
+        - fa/md/rd/ad: per-scalar block with a length-unbiased headline
+          (mean/std/median/min/max/n_streamlines, one vote per streamline), a preserved
+          point-pool summary (mean_point_weighted … n_samples), and the along-tract
+          profile with regional means (pontine/plic/precentral). See
+          `_compute_scalar_metrics`.
         - hemisphere: identification string
     """
     
@@ -79,110 +80,85 @@ def analyze_cst_hemisphere(
         'morphology': compute_morphology(streamlines, affine)
     }
     
-    # Microstructural analysis requires affine
-    if fa_map is not None and affine is not None:
-        fa_values = sample_scalar_along_tract(streamlines, fa_map, affine)
-        if len(fa_values) > 0:
-            fa_profile = compute_tract_profile(streamlines, fa_map, affine, n_points=20)
-            fa_localized = compute_localized_metrics(fa_profile)
-            metrics['fa'] = {
-                'mean': float(np.mean(fa_values)),
-                'std': float(np.std(fa_values)),
-                'median': float(np.median(fa_values)),
-                'min': float(np.min(fa_values)),
-                'max': float(np.max(fa_values)),
-                'profile': fa_profile,
-                'n_samples': len(fa_values),
-                'pontine': fa_localized['pontine'],
-                'plic': fa_localized['plic'],
-                'precentral': fa_localized['precentral']
-            }
-            print(f"  FA: {metrics['fa']['mean']:.3f} ± {metrics['fa']['std']:.3f}")
-        else:
-            # Handle empty case
-            metrics['fa'] = {
-                'mean': 0.0, 'std': 0.0, 'median': 0.0, 'min': 0.0, 'max': 0.0,
-                'profile': [], 'n_samples': 0,
-                'pontine': 0.0, 'plic': 0.0, 'precentral': 0.0
-            }
-    
-    if md_map is not None and affine is not None:
-        md_values = sample_scalar_along_tract(streamlines, md_map, affine)
-        if len(md_values) > 0:
-            md_profile = compute_tract_profile(streamlines, md_map, affine, n_points=20)
-            md_localized = compute_localized_metrics(md_profile)
-            metrics['md'] = {
-                'mean': float(np.mean(md_values)),
-                'std': float(np.std(md_values)),
-                'median': float(np.median(md_values)),
-                'min': float(np.min(md_values)),
-                'max': float(np.max(md_values)),
-                'profile': md_profile,
-                'n_samples': len(md_values),
-                'pontine': md_localized['pontine'],
-                'plic': md_localized['plic'],
-                'precentral': md_localized['precentral']
-            }
-            print(f"  MD: {metrics['md']['mean']:.3e} ± {metrics['md']['std']:.3e}")
-        else:
-            # Handle empty case
-            metrics['md'] = {
-                'mean': 0.0, 'std': 0.0, 'median': 0.0, 'min': 0.0, 'max': 0.0,
-                'profile': [], 'n_samples': 0,
-                'pontine': 0.0, 'plic': 0.0, 'precentral': 0.0
-            }
-    
-    if rd_map is not None and affine is not None:
-        rd_values = sample_scalar_along_tract(streamlines, rd_map, affine)
-        if len(rd_values) > 0:
-            rd_profile = compute_tract_profile(streamlines, rd_map, affine, n_points=20)
-            rd_localized = compute_localized_metrics(rd_profile)
-            metrics['rd'] = {
-                'mean': float(np.mean(rd_values)),
-                'std': float(np.std(rd_values)),
-                'median': float(np.median(rd_values)),
-                'min': float(np.min(rd_values)),
-                'max': float(np.max(rd_values)),
-                'profile': rd_profile,
-                'n_samples': len(rd_values),
-                'pontine': rd_localized['pontine'],
-                'plic': rd_localized['plic'],
-                'precentral': rd_localized['precentral']
-            }
-            print(f"  RD: {metrics['rd']['mean']:.3e} ± {metrics['rd']['std']:.3e}")
-        else:
-            metrics['rd'] = {
-                'mean': 0.0, 'std': 0.0, 'median': 0.0, 'min': 0.0, 'max': 0.0,
-                'profile': [], 'n_samples': 0,
-                'pontine': 0.0, 'plic': 0.0, 'precentral': 0.0
-            }
-    
-    if ad_map is not None and affine is not None:
-        ad_values = sample_scalar_along_tract(streamlines, ad_map, affine)
-        if len(ad_values) > 0:
-            ad_profile = compute_tract_profile(streamlines, ad_map, affine, n_points=20)
-            ad_localized = compute_localized_metrics(ad_profile)
-            metrics['ad'] = {
-                'mean': float(np.mean(ad_values)),
-                'std': float(np.std(ad_values)),
-                'median': float(np.median(ad_values)),
-                'min': float(np.min(ad_values)),
-                'max': float(np.max(ad_values)),
-                'profile': ad_profile,
-                'n_samples': len(ad_values),
-                'pontine': ad_localized['pontine'],
-                'plic': ad_localized['plic'],
-                'precentral': ad_localized['precentral']
-            }
-            print(f"  AD: {metrics['ad']['mean']:.3e} ± {metrics['ad']['std']:.3e}")
-        else:
-            metrics['ad'] = {
-                'mean': 0.0, 'std': 0.0, 'median': 0.0, 'min': 0.0, 'max': 0.0,
-                'profile': [], 'n_samples': 0,
-                'pontine': 0.0, 'plic': 0.0, 'precentral': 0.0
-            }
+    # Microstructural analysis requires affine. The per-scalar block is identical across
+    # scalars, so it is built once in `_compute_scalar_metrics` — the single source of
+    # truth for the headline / point-pool / profile key set (previously this block was
+    # copied verbatim per scalar, so any key change was 4x).
+    _scalar_inputs = [
+        ('fa', fa_map, False),
+        ('md', md_map, True),
+        ('rd', rd_map, True),
+        ('ad', ad_map, True),
+    ]
+    for _name, _map, _is_diffusivity in _scalar_inputs:
+        if _map is not None and affine is not None:
+            metrics[_name] = _compute_scalar_metrics(streamlines, _map, affine)
+            if metrics[_name]['n_streamlines'] > 0:
+                _fmt = '.3e' if _is_diffusivity else '.3f'
+                print(f"  {_name.upper()}: {metrics[_name]['mean']:{_fmt}} "
+                      f"± {metrics[_name]['std']:{_fmt}}")
     
     return metrics
+
+
+def _scalar_summary(values):
+    """Descriptive stats of a 1-D array, or zeros if empty."""
+    if len(values) == 0:
+        return {k: 0.0 for k in ('mean', 'std', 'median', 'min', 'max')}
+    return {
+        'mean': float(np.mean(values)),
+        'std': float(np.std(values)),
+        'median': float(np.median(values)),
+        'min': float(np.min(values)),
+        'max': float(np.max(values)),
+    }
+
+
+def _compute_scalar_metrics(streamlines, scalar_map, affine):
+    """Build the per-scalar metric block emitted by `analyze_cst_hemisphere`.
+
+    Two summaries coexist, both honestly named so the headline and its preserved
+    length-biased counterpart cannot be confused (audit finding AU10):
+
+    - **Headline** (``mean``/``std``/``median``/``min``/``max``/``n_streamlines``):
+      per-streamline. Each streamline contributes one value — the mean of its sampled
+      points — so the summary is length-unbiased. The report's global table and the global
+      laterality indices consume this. ``std`` is the between-streamline SD of streamline
+      means (the spread of the quantity whose mean is reported), not the point-pool
+      scatter; ``min``/``max`` bound the same per-streamline distribution.
+    - **Point-pool** (``mean_point_weighted`` … ``n_samples``): every sampled point,
+      length-biased (longer streamlines vote more). Preserved for QC and bias auditing
+      per the AU5/AU24 instinct of labelling constructed numbers rather than removing
+      them; not used as the headline.
+    - **Profile** (``profile``/``pontine``/``plic``/``precentral``): per-streamline-
+      normalised along-tract curve, arc-length resampled; unchanged.
+
+    The headline uses the per-streamline mean rather than the profile-derived mean because
+    the profile resamples to a fixed arc length and drops streamlines with fewer than five
+    valid points — a different population. See `docs/explanation/design-decisions.md`.
+    """
+    point_values = sample_scalar_along_tract(streamlines, scalar_map, affine)
+    streamline_means = sample_scalar_per_streamline(streamlines, scalar_map, affine)
+    profile = compute_tract_profile(streamlines, scalar_map, affine, n_points=20)
+    localized = compute_localized_metrics(profile)
+
+    headline = _scalar_summary(streamline_means)
+    point_pool = _scalar_summary(point_values)
+
+    return {
+        **headline,
+        'n_streamlines': int(len(streamline_means)),
+        'mean_point_weighted': point_pool['mean'],
+        'std_point_weighted': point_pool['std'],
+        'median_point_weighted': point_pool['median'],
+        'min_point_weighted': point_pool['min'],
+        'max_point_weighted': point_pool['max'],
+        'n_samples': int(len(point_values)),
+        'profile': profile,
+        'pontine': localized['pontine'],
+        'plic': localized['plic'],
+        'precentral': localized['precentral'],
+    }
 
 
 def compute_morphology(streamlines, affine):
@@ -260,15 +236,39 @@ def compute_morphology(streamlines, affine):
     return morphology
 
 
-def sample_scalar_along_tract(streamlines, scalar_map, affine):
-    """
-    Sample scalar values at every point along all streamlines.
+def _sample_streamline_values(streamline, scalar_map, affine):
+    """In-bounds scalar values at each point of a single streamline.
 
-    The returned values are pooled across the whole bundle, so this is invariant to
-    streamline orientation and to point order; it deliberately does not reorient (unlike
-    `compute_tract_profile`). Summary statistics derived from it are therefore unaffected
-    by AU9. Note they remain point-weighted, so longer streamlines contribute more
-    samples - a separate concern (AU10).
+    Shared by `sample_scalar_along_tract`, `sample_scalar_per_streamline` and
+    `compute_tract_profile` so the world→voxel lookup, bounds check and
+    nearest-neighbour sampling are defined once. Values from out-of-bounds points are
+    dropped.
+    """
+    values = []
+    for point in streamline:
+        voxel_coord = world_to_voxel(point, affine)
+        if (0 <= voxel_coord[0] < scalar_map.shape[0] and
+                0 <= voxel_coord[1] < scalar_map.shape[1] and
+                0 <= voxel_coord[2] < scalar_map.shape[2]):
+            values.append(scalar_map[voxel_coord[0], voxel_coord[1], voxel_coord[2]])
+    return values
+
+
+def sample_scalar_along_tract(streamlines, scalar_map, affine):
+    """Sample scalar values at every point along all streamlines (point pool).
+
+    Every in-bounds point of every streamline is pooled into one flat array, so this is
+    invariant to streamline orientation and to point order; it deliberately does not
+    reorient (unlike `compute_tract_profile`). Summary statistics derived from it are
+    therefore unaffected by AU9.
+
+    The pool is **point-weighted**: a streamline with twice as many points casts twice
+    as many votes. When streamline length is correlated with the scalar (it is, weakly,
+    on in-vivo CST data) this biases the mean. `sample_scalar_per_streamline` is the
+    length-unbiased counterpart (one vote per streamline); the report's headline mean and
+    the global laterality indices use that one, not this. This function is retained for
+    QC, for the reproducibility stability tests, and as the basis of the preserved
+    ``mean_point_weighted`` summary.
 
     Parameters
     ----------
@@ -278,32 +278,56 @@ def sample_scalar_along_tract(streamlines, scalar_map, affine):
         3D scalar map (e.g., FA or MD)
     affine : ndarray
         4x4 affine transformation matrix
-        
+
     Returns
     -------
     scalar_values : ndarray
         Array of all sampled scalar values (flattened across all streamlines)
     """
-    
     if len(streamlines) == 0:
         return np.array([])
-    
-    scalar_values = []
-    
+
+    all_values = []
     for streamline in streamlines:
-        for point in streamline:
-            # Convert world coordinates to voxel coordinates
-            voxel_coord = world_to_voxel(point, affine)
-            
-            # Check bounds
-            if (0 <= voxel_coord[0] < scalar_map.shape[0] and
-                0 <= voxel_coord[1] < scalar_map.shape[1] and
-                0 <= voxel_coord[2] < scalar_map.shape[2]):
-                
-                scalar_value = scalar_map[voxel_coord[0], voxel_coord[1], voxel_coord[2]]
-                scalar_values.append(scalar_value)
-    
-    return np.array(scalar_values)
+        all_values.extend(_sample_streamline_values(streamline, scalar_map, affine))
+    return np.array(all_values)
+
+
+def sample_scalar_per_streamline(streamlines, scalar_map, affine):
+    """Mean scalar per streamline (one value per streamline, length-unbiased).
+
+    Each streamline that has at least one in-bounds point contributes exactly one value —
+    the mean of its sampled points — regardless of how many points it has. Summary
+    statistics derived from the returned array are therefore **not** weighted by
+    streamline length, unlike `sample_scalar_along_tract`. This is the population the
+    report's headline ``mean``/``std``/``median``/``min``/``max`` and the global
+    laterality indices describe (audit finding AU10).
+
+    A streamline's point-mean is order-invariant, so this is unaffected by AU9 as well.
+
+    Parameters
+    ----------
+    streamlines : Streamlines
+        Input streamlines in world coordinates (mm)
+    scalar_map : ndarray
+        3D scalar map (e.g., FA or MD)
+    affine : ndarray
+        4x4 affine transformation matrix
+
+    Returns
+    -------
+    streamline_means : ndarray
+        Mean scalar value for each streamline with at least one in-bounds point.
+    """
+    if len(streamlines) == 0:
+        return np.array([])
+
+    means = []
+    for streamline in streamlines:
+        vals = _sample_streamline_values(streamline, scalar_map, affine)
+        if len(vals) > 0:
+            means.append(float(np.mean(vals)))
+    return np.array(means)
 
 
 def _end_to_end_delta(points, axis):
@@ -435,19 +459,10 @@ def compute_tract_profile(streamlines, scalar_map, affine, n_points=20):
     for streamline in streamlines:
         if len(streamline) < 2:
             continue
-        
-        # Sample scalar values at each point
-        streamline_scalars = []
-        for point in streamline:
-            voxel_coord = world_to_voxel(point, affine)
-            
-            if (0 <= voxel_coord[0] < scalar_map.shape[0] and
-                0 <= voxel_coord[1] < scalar_map.shape[1] and
-                0 <= voxel_coord[2] < scalar_map.shape[2]):
-                
-                scalar_value = scalar_map[voxel_coord[0], voxel_coord[1], voxel_coord[2]]
-                streamline_scalars.append(scalar_value)
-        
+
+        # Sample scalar values at each point (shared per-point lookup)
+        streamline_scalars = _sample_streamline_values(streamline, scalar_map, affine)
+
         if len(streamline_scalars) < 5:  # Need minimum points
             continue
         
@@ -568,15 +583,19 @@ def print_hemisphere_summary(metrics):
     if 'fa' in metrics:
         fa = metrics['fa']
         print(f"\nFractional Anisotropy:")
-        print(f"  Mean: {fa['mean']:.3f} ± {fa['std']:.3f}")
+        print(f"  Mean: {fa['mean']:.3f} ± {fa['std']:.3f} "
+              f"(per-streamline, n={fa['n_streamlines']})")
         print(f"  Range: [{fa['min']:.3f}, {fa['max']:.3f}]")
-        print(f"  Samples: {fa['n_samples']}")
+        print(f"  Point-weighted: {fa['mean_point_weighted']:.3f} ± "
+              f"{fa['std_point_weighted']:.3f} (n={fa['n_samples']} samples)")
     
     if 'md' in metrics:
         md = metrics['md']
         print(f"\nMean Diffusivity:")
-        print(f"  Mean: {md['mean']:.3e} ± {md['std']:.3e}")
+        print(f"  Mean: {md['mean']:.3e} ± {md['std']:.3e} "
+              f"(per-streamline, n={md['n_streamlines']})")
         print(f"  Range: [{md['min']:.3e}, {md['max']:.3e}]")
-        print(f"  Samples: {md['n_samples']}")
+        print(f"  Point-weighted: {md['mean_point_weighted']:.3e} ± "
+              f"{md['std_point_weighted']:.3e} (n={md['n_samples']} samples)")
     
     print(f"{'='*60}\n")

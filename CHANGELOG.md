@@ -101,6 +101,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The lower bound reflects `estimate_directions` passing `CsaOdfModel(sh_order_max=...)`, the
   post-1.9 parameter name. Developed and tested against 1.12.1.
 
+- **The headline FA/MD/RD/AD mean is now per-streamline (one vote per streamline), not
+  point-weighted.** `sample_scalar_along_tract` pools every point of every streamline, so
+  longer streamlines cast more votes; the report's global table and the laterality indices
+  used that length-biased mean, while the displayed tract profile used the
+  per-streamline-normalised summary. The two could disagree, and the LI could shift with
+  bundle geometry (audit finding AU10). The thesis's "FA symmetric, count asymmetric"
+  conclusion rests on this mean.
+
+  **What changed.** Each scalar block (`fa`/`md`/`rd`/`ad`) now carries two honestly-named
+  summaries:
+  - *Headline* (`mean`/`std`/`median`/`min`/`max`/`n_streamlines`): per-streamline. Each
+    streamline contributes one value (its point-mean), so the summary is length-unbiased.
+    `std` is the between-streamline SD of streamline means — the spread of the quantity
+    whose mean is reported — not the point-pool scatter, so every report's "±" now means
+    between-streamline variability (much smaller than the old voxel scatter). `min`/`max`
+    bound the same per-streamline distribution. The global LIs and the report's global
+    table consume this.
+  - *Point-pool* (`mean_point_weighted` … `n_samples`): every sampled point, length-biased.
+    Preserved for QC and bias auditing per the AU5/AU24 instinct of labelling constructed
+    numbers rather than removing them; not used as the headline.
+
+  The headline uses the per-streamline mean rather than the profile-derived mean: the
+  profile resamples to a fixed arc length and drops streamlines with fewer than five valid
+  points — a different population. The four repeated per-scalar blocks in
+  `analyze_cst_hemisphere` are now built by one `_compute_scalar_metrics` helper (single
+  source of truth for the key set), and `sample_scalar_per_streamline` is the new public,
+  length-unbiased counterpart to `sample_scalar_along_tract`. The single-subject and batch
+  CSVs gained `*_mean_point_weighted` columns so the bias is visible in the output.
+
+  **Impact — measured, not inferred, on both subjects** (post-AU9 code, DIPY 1.12.1).
+  Length spans only ~146–322 points (mean ~227) and corr(length, streamline-mean-FA) is
+  weak (−0.20 to +0.29), so the bias is real and signed as theory predicts but small:
+
+  | Subject | Side | point-weighted (old headline) | per-streamline (new headline) |
+  |---|---|---|---|
+  | healthy control | L / R | 0.4975 / 0.4785 | 0.4984 / 0.4804 |
+  | ALS patient | L / R | 0.4149 / 0.4133 | 0.4130 / 0.4134 |
+
+  The FA-LI moves +0.01944 → +0.01833 (healthy) and +0.00194 → −0.00059 (ALS) — all three
+  definitions stay well inside the 0.05 "symmetric" band, so the "FA symmetric" conclusion
+  survives on both. AU10 is therefore a correctness/coherence fix, not a results-changing
+  one (unlike AU9 on the regional values). The thesis subject moves *less* than the healthy
+  control did. **Re-deriving the thesis global FA/MD/RD/AD table and the LI figures from the
+  new headline is a separate follow-up**, deliberately out of scope of this code fix.
+
 ### Fixed
 
 - **Streamlines are now reoriented before along-tract profiling.** `compute_tract_profile`

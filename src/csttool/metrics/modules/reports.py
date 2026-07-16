@@ -161,6 +161,9 @@ def save_csv_summary(comparison, output_dir, subject_id):
             'right_fa_mean': right['fa']['mean'],
             'right_fa_std': right['fa']['std'],
             'fa_laterality_index': asym['fa']['laterality_index'],
+            # Length-biased counterpart, preserved for bias auditing (AU10):
+            'left_fa_mean_point_weighted': left['fa'].get('mean_point_weighted', 0.0),
+            'right_fa_mean_point_weighted': right['fa'].get('mean_point_weighted', 0.0),
         })
     
     # Add MD if available
@@ -171,6 +174,8 @@ def save_csv_summary(comparison, output_dir, subject_id):
             'right_md_mean': right['md']['mean'],
             'right_md_std': right['md']['std'],
             'md_laterality_index': asym['md']['laterality_index'],
+            'left_md_mean_point_weighted': left['md'].get('mean_point_weighted', 0.0),
+            'right_md_mean_point_weighted': right['md'].get('mean_point_weighted', 0.0),
         })
     
     # Add RD if available
@@ -181,6 +186,8 @@ def save_csv_summary(comparison, output_dir, subject_id):
             'right_rd_mean': right['rd']['mean'],
             'right_rd_std': right['rd']['std'],
             'rd_laterality_index': asym['rd']['laterality_index'],
+            'left_rd_mean_point_weighted': left['rd'].get('mean_point_weighted', 0.0),
+            'right_rd_mean_point_weighted': right['rd'].get('mean_point_weighted', 0.0),
         })
     
     # Add AD if available
@@ -191,6 +198,8 @@ def save_csv_summary(comparison, output_dir, subject_id):
             'right_ad_mean': right['ad']['mean'],
             'right_ad_std': right['ad']['std'],
             'ad_laterality_index': asym['ad']['laterality_index'],
+            'left_ad_mean_point_weighted': left['ad'].get('mean_point_weighted', 0.0),
+            'right_ad_mean_point_weighted': right['ad'].get('mean_point_weighted', 0.0),
         })
 
     # Add localized metrics (pontine, plic, precentral) for each scalar
