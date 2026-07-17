@@ -118,6 +118,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `midline_x` is used as a fallback. Both are already carried by the `warped` dict.
   (AU12)
 
+- **Removed `assess_clinical_significance` and `compute_effect_size`** from the public
+  API. Both were dead code (never called from any pipeline path) but were exported in
+  `metrics.__all__`. `compute_effect_size` fabricated a pooled standard deviation by
+  assuming a 10% coefficient of variation, then divided a single-subject L−R difference
+  by it and called the result "Cohen's d" — with N=1 per side no effect size is defined.
+  The interpretation strings from `assess_clinical_significance` did reach the JSON
+  report via `save_json_report`, so downstream JSON consumers may notice their absence.
+  (AU15)
+
 - **`dipy` is now pinned to `>=1.9,<2`** in `pyproject.toml` and `environment.yml`. It was
   entirely unpinned, so an environment rebuild could silently install a version that breaks
   tracking outright.

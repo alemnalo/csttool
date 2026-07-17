@@ -25,7 +25,6 @@ from .modules.bilateral_analysis import (
     compute_laterality_indices,
     compute_li,
     print_bilateral_summary,
-    assess_clinical_significance
 )
 
 from .modules.visualizations import (
@@ -60,7 +59,6 @@ __all__ = [
     'compute_laterality_indices',
     'compute_li',
     'print_bilateral_summary',
-    'assess_clinical_significance',
     
     # Visualizations
     'plot_tract_profiles',
