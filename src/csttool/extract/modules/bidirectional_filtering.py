@@ -74,6 +74,8 @@ def extract_cst_bidirectional(
     min_separation_angle=25,
     random_seed=None,
     verbose=True,
+    npeaks=1,
+    fit_method='WLS',
 ):
     """
     Extract bilateral CST using bidirectional seeding with intersection.
@@ -121,6 +123,12 @@ def extract_cst_bidirectional(
         ``artifact_index`` is not reproducible.
     verbose : bool, optional
         Print progress. Default True.
+    npeaks : int, optional
+        Number of ODF peaks extracted per voxel. Default 1 (single
+        principal direction, consistent with whole-brain tracking).
+    fit_method : str, optional
+        DTI fit method passed to TensorModel. Default 'WLS' (consistent
+        with the pinned default in fit_tensors).
 
     Returns
     -------
@@ -144,7 +152,7 @@ def extract_cst_bidirectional(
     if fa_map is None:
         if verbose:
             print("\n[Step 1/6] Computing FA map...")
-        tensor_model = TensorModel(gtab)
+        tensor_model = TensorModel(gtab, fit_method=fit_method)
         tensor_fit = tensor_model.fit(data, mask=brain_mask)
         fa_map = np.clip(tensor_fit.fa, 0, 1)
     else:
@@ -164,6 +172,7 @@ def extract_cst_bidirectional(
         relative_peak_threshold=relative_peak_threshold,
         min_separation_angle=min_separation_angle,
         mask=wm_mask,
+        npeaks=npeaks,
     )
 
     if verbose:
@@ -342,6 +351,8 @@ def extract_cst_bidirectional(
         'relative_peak_threshold': relative_peak_threshold,
         'min_separation_angle': min_separation_angle,
         'random_seed': random_seed,
+        'npeaks': npeaks,
+        'fit_method': fit_method,
     }
 
     if verbose:

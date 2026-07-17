@@ -378,6 +378,8 @@ def run_roi_seeded_extraction(
         min_length=getattr(args, 'min_length', 30.0),
         max_length=getattr(args, 'max_length', 200.0),
         random_seed=ctx.rng_tracking_seed(),
+        npeaks=getattr(args, 'npeaks', 1),
+        fit_method=getattr(args, 'fit_method', 'WLS'),
         verbose=verbose
     )
     
@@ -539,6 +541,8 @@ def run_bidirectional_extraction(
         min_length=getattr(args, 'min_length', 30.0),
         max_length=getattr(args, 'max_length', 200.0),
         random_seed=ctx.rng_tracking_seed(),
+        npeaks=getattr(args, 'npeaks', 1),
+        fit_method=getattr(args, 'fit_method', 'WLS'),
         verbose=verbose,
     )
 

@@ -77,6 +77,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             gtab,
             brain_mask,
             fa_thresh=args.fa_thr,
+            fit_method=getattr(args, 'fit_method', 'WLS'),
             visualize=getattr(args, 'show_plots', False),
             verbose=verbose
         )
@@ -151,6 +152,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         'min_separation_angle': 45,  # Peak extraction: minimum angle between detected peaks
         'random_seed': ctx.run_seed,
         'use_brain_mask_stop': use_brain_mask_stop,
+        'fit_method': getattr(args, 'fit_method', 'WLS'),
     }
 
     try:

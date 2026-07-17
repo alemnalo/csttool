@@ -22,7 +22,8 @@ def test_fit_tensors(synthetic_image_data, synthetic_gtab):
         data, 
         synthetic_gtab, 
         mask, 
-        fa_thresh=0.1, 
+        fa_thresh=0.1,
+        fit_method='OLS',
         visualize=False,
         verbose=False
     )

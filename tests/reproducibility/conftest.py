@@ -49,7 +49,7 @@ def synthetic_dwi_data(tmp_path):
     gtab = gradient_table(bvals, bvecs)
 
     # Fit tensor model to get FA
-    tenmodel = TensorModel(gtab)
+    tenmodel = TensorModel(gtab, fit_method='WLS')
     tenfit = tenmodel.fit(data)
     fa = tenfit.fa
 
@@ -84,7 +84,7 @@ def repeated_run_tractograms(tmp_path_factory):
     brain_mask = (data[..., 0] > 0).astype(bool)
 
     # Fit tensors once
-    tenfit, fa, md, rd, ad, white_matter = fit_tensors(data, gtab, brain_mask)
+    tenfit, fa, md, rd, ad, white_matter = fit_tensors(data, gtab, brain_mask, fit_method='WLS')
 
     # Estimate directions once
     csapeaks = estimate_directions(
@@ -152,7 +152,7 @@ def tractogram_artifact(tmp_path, synthetic_dwi_data):
     brain_mask = (dwi["data"][..., 0] > 0).astype(bool)
 
     # Fit tensors
-    tenfit, fa, md, rd, ad, white_matter = fit_tensors(dwi["data"], dwi["gtab"], brain_mask)
+    tenfit, fa, md, rd, ad, white_matter = fit_tensors(dwi["data"], dwi["gtab"], brain_mask, fit_method='WLS')
 
     # Estimate directions
     csapeaks = estimate_directions(

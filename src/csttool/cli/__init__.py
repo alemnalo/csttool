@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 
 from .. import __version__
-from ..defaults import DEFAULT_DENOISE_METHOD
+from ..defaults import DEFAULT_DENOISE_METHOD, DEFAULT_FIT_METHOD, DEFAULT_NPEAKS
 from .utils import add_io_arguments
 from .commands.check import cmd_check
 from .commands.doctor import cmd_doctor
@@ -266,6 +266,13 @@ def main() -> None:
         type=int,
         default=6,
         help="Maximum spherical harmonic order for CSA ODF model (default 6).",
+    )
+    p_track.add_argument(
+        "--fit-method",
+        type=str,
+        default=DEFAULT_FIT_METHOD,
+        choices=["OLS", "WLS", "NLLS", "RT"],
+        help=f"DTI tensor fit method: OLS, WLS, NLLS, or RT (default: {DEFAULT_FIT_METHOD})."
     )
     p_track.add_argument(
         "--show-plots",
@@ -583,6 +590,19 @@ def main() -> None:
         type=int,
         default=6,
         help="Spherical harmonic order (default: 6)"
+    )
+    p_run.add_argument(
+        "--fit-method",
+        type=str,
+        default=DEFAULT_FIT_METHOD,
+        choices=["OLS", "WLS", "NLLS", "RT"],
+        help=f"DTI tensor fit method: OLS, WLS, NLLS, or RT (default: {DEFAULT_FIT_METHOD})."
+    )
+    p_run.add_argument(
+        "--npeaks",
+        type=int,
+        default=DEFAULT_NPEAKS,
+        help=f"Number of ODF peaks per voxel for roi-seeded/bidirectional tracking (default: {DEFAULT_NPEAKS})."
     )
     p_run.add_argument(
         "--rng-seed",

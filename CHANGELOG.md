@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--fit-method`** on `csttool track` and `csttool run` — exposes the DTI tensor fit
+  method (`OLS`, `WLS`, `NLLS`, `RT`) as an explicit parameter, pinned to `WLS` by
+  default. Previously `fit_tensors.py` and the extraction modules relied on DIPY's
+  version-dependent default. The parameter sweep can now include fit method, which
+  is a first-order determinant of FA/MD bias at low SNR. (AU13)
+
+- **`--npeaks`** on `csttool run` — pins the number of ODF peaks extracted per voxel
+  in the roi-seeded and bidirectional tracking paths, defaulting to `1` (single
+  principal direction, matching the whole-brain `estimate_directions` default).
+  Previously these paths inherited DIPY's version-dependent default. (AU17)
+
 - **`--extraction-method bidirectional`** on `csttool run` — two-pass seeding with
   per-side count-bounded intersection and a forward/reverse artifact diagnostic.
 
@@ -87,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   (These two entries were previously filed under the released 0.5.0; they describe 2026-07-16
   work and have been moved here.)
+
+- **Tensor `fit_method` and ODF `npeaks` are now explicit, pinned parameters** in every
+  code path that creates a `TensorModel` or calls `peaks_from_model`. Previously these
+  inherited DIPY's version-dependent defaults, which could change between DIPY releases
+  and silently shift FA/MD values and tracking behaviour. The defaults (`fit_method='WLS'`,
+  `npeaks=1`) match the current DIPY 1.9+ behaviour and preserve backward compatibility
+  with all previously reported numbers. See `--fit-method` and `--npeaks` under Added.
+  (AU13, AU17)
 
 - **`dipy` is now pinned to `>=1.9,<2`** in `pyproject.toml` and `environment.yml`. It was
   entirely unpinned, so an environment rebuild could silently install a version that breaks

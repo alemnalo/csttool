@@ -223,7 +223,8 @@ def extract_cst_roi_seeded(
     min_separation_angle=25,
     random_seed=None,
     verbose=True,
-    npeaks=1
+    npeaks=1,
+    fit_method='WLS'
 ):
     """
     Extract bilateral CST using ROI-seeded tractography.
@@ -277,6 +278,9 @@ def extract_cst_roi_seeded(
         Print progress information.
     npeaks : int, optional
         Number of peaks to extract per voxel. Default is 1.
+    fit_method : str, optional
+        DTI fit method passed to TensorModel when fa_map is not provided.
+        Default 'WLS' (consistent with the pinned default in fit_tensors).
 
     Returns
     -------
@@ -305,7 +309,7 @@ def extract_cst_roi_seeded(
     if fa_map is None:
         if verbose:
             print("\n[Step 1/5] Computing FA map...")
-        tensor_model = TensorModel(gtab)
+        tensor_model = TensorModel(gtab, fit_method=fit_method)
         tensor_fit = tensor_model.fit(data, mask=brain_mask)
         fa_map = tensor_fit.fa
         fa_map = np.clip(fa_map, 0, 1)
@@ -481,6 +485,8 @@ def extract_cst_roi_seeded(
         'relative_peak_threshold': relative_peak_threshold,
         'min_separation_angle': min_separation_angle,
         'random_seed': random_seed,
+        'npeaks': npeaks,
+        'fit_method': fit_method,
     }
 
     if verbose:
