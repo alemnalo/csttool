@@ -415,6 +415,7 @@ def save_extraction_report(
     """
     import json
     from datetime import datetime
+    from csttool.reproducibility import get_provenance_dict
     
     output_dir = Path(output_dir)
     log_dir = output_dir / "logs"
@@ -425,6 +426,7 @@ def save_extraction_report(
     report = {
         'processing_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'subject_id': subject_id,
+        'provenance': get_provenance_dict(),
         'statistics': cst_result['stats'],
         'output_files': {
             'cst_left': str(output_paths.get('cst_left')) if output_paths.get('cst_left') else None,

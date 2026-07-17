@@ -5,6 +5,8 @@ from pathlib import Path
 from dipy.io.streamline import load_tractogram
 from dipy.io.image import load_nifti
 
+from csttool.reproducibility import get_provenance_dict
+
 from csttool.metrics import (
     analyze_cst_hemisphere,
     compare_bilateral_cst,
@@ -212,6 +214,9 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
     # Add preprocessing info if available
     if 'preprocessing' in pipeline_metadata:
         metadata['processing']['preprocessing'] = pipeline_metadata['preprocessing']
+
+    # Add full provenance (git, deps, platform, hardware, thread env, command line)
+    metadata['provenance'] = get_provenance_dict()
     
     # Add ROI approach (static for now - atlas-based)
     metadata['processing']['roi_approach'] = 'Atlas-to-Subject (Harvard-Oxford)'
