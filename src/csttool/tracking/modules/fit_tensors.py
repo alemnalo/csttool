@@ -1,4 +1,4 @@
-def fit_tensors(data, gtab, brain_mask, fa_thresh=0.2, visualize=False, verbose=False):
+def fit_tensors(data, gtab, brain_mask, fa_thresh=0.2, visualize=False, verbose=False, fit_method='WLS'):
     """Fit diffusion tensor model and compute scalar maps (FA, MD, RD, AD) plus white matter mask.
     
     Args:
@@ -8,7 +8,7 @@ def fit_tensors(data, gtab, brain_mask, fa_thresh=0.2, visualize=False, verbose=
         fa_thresh (float): FA threshold for white matter mask (default 0.2).
         visualize (bool): Show QC plots.
         verbose (bool): Print processing details.
-        
+        fit_method (str): Fitting method for the tensor model (default 'WLS').
     Returns:
         tuple: (tenfit, fa, md, rd, ad, white_matter)
             - tenfit: Fitted TensorModel object
@@ -27,7 +27,7 @@ def fit_tensors(data, gtab, brain_mask, fa_thresh=0.2, visualize=False, verbose=
     if verbose:
         print("  → Fitting tensor model...")
 
-    tenmodel = TensorModel(gtab)
+    tenmodel = TensorModel(gtab, fit_method=fit_method)
     tenfit = tenmodel.fit(data, mask=brain_mask)
 
     # Compute scalar maps with NaN handling
