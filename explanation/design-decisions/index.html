@@ -1,0 +1,2605 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Automated assessment of the corticospinal tract using diffusion MRI">
+      
+      
+        <meta name="author" content="Alem Nalo">
+      
+      
+      
+        <link rel="prev" href="../cst-anatomy/">
+      
+      
+        <link rel="next" href="../limitations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Design Decisions - csttool Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#design-decisions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="csttool Documentation" class="md-header__button md-logo" aria-label="csttool Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            csttool Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Design Decisions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/alemnalo/csttool" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    alemnalo/csttool
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/first-analysis/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-to/multiple-subjects/" class="md-tabs__link">
+          
+  
+  
+  How-To Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/cli/overview/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../diffusion-mri/" class="md-tabs__link">
+          
+  
+  
+  Explanation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../contributing/development-setup/" class="md-tabs__link">
+          
+  
+  
+  Contributing
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="csttool Documentation" class="md-nav__button md-logo" aria-label="csttool Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    csttool Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/alemnalo/csttool" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    alemnalo/csttool
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/data-requirements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Requirements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your First CST Analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/batch-processing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch Processing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-To Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-To Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/multiple-subjects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multiple Subjects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/data-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Commands
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CLI Commands
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/check/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    check
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/check_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    check-dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    import
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/preprocess/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    preprocess
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/track/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    track
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/extract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/validate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    validate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    batch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/fetch-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fetch-data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/preprocess/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Preprocessing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/extract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extraction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/output-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/parameters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parameters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diffusion-mri/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diffusion MRI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tractography/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tractography
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cst-anatomy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CST Anatomy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design Decisions
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#extraction-methods-why-four-options-exist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extraction methods: why four options exist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bidirectional-seeding-why-not-just-use-passthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bidirectional seeding: why not just use passthrough?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-bidirectional-is-run-only-not-available-in-csttool-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why bidirectional is run-only, not available in csttool extract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-odf-parameters-differ-between-passthrough-and-roi-seeded-bidirectional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why ODF parameters differ between passthrough and roi-seeded / bidirectional
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-extraction-method-passthrough-is-the-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why --extraction-method passthrough is the default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-tract-profile-is-reoriented-inferiorsuperior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the tract profile is reoriented inferior→superior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-mppca-is-the-default-denoiser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why MPPCA is the default denoiser
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-headline-mean-is-per-streamline-not-point-weighted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the headline mean is per-streamline, not point-weighted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-hemisphere-midline-is-the-warped-mni-midline-not-world-x0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the hemisphere midline is the warped MNI midline, not world X=0
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/development-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/code-style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#extraction-methods-why-four-options-exist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extraction methods: why four options exist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bidirectional-seeding-why-not-just-use-passthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bidirectional seeding: why not just use passthrough?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-bidirectional-is-run-only-not-available-in-csttool-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why bidirectional is run-only, not available in csttool extract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-odf-parameters-differ-between-passthrough-and-roi-seeded-bidirectional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why ODF parameters differ between passthrough and roi-seeded / bidirectional
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-extraction-method-passthrough-is-the-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why --extraction-method passthrough is the default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-tract-profile-is-reoriented-inferiorsuperior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the tract profile is reoriented inferior→superior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-mppca-is-the-default-denoiser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why MPPCA is the default denoiser
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-headline-mean-is-per-streamline-not-point-weighted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the headline mean is per-streamline, not point-weighted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-hemisphere-midline-is-the-warped-mni-midline-not-world-x0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the hemisphere midline is the warped MNI midline, not world X=0
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="design-decisions">Design Decisions<a class="headerlink" href="#design-decisions" title="Permanent link">&para;</a></h1>
+<p>This page explains the reasoning behind non-obvious choices in csttool's architecture
+and algorithms.</p>
+<hr />
+<h2 id="extraction-methods-why-four-options-exist">Extraction methods: why four options exist<a class="headerlink" href="#extraction-methods-why-four-options-exist" title="Permanent link">&para;</a></h2>
+<p>csttool offers four extraction methods, each trading off sensitivity, specificity, and
+computational cost differently.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Input needed</th>
+<th>L/R symmetric</th>
+<th>Speed</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>passthrough</code></td>
+<td>Tractogram</td>
+<td>Moderate (</td>
+<td>LI</td>
+<td>≈ 0.1)</td>
+</tr>
+<tr>
+<td><code>endpoint</code></td>
+<td>Tractogram</td>
+<td>Moderate</td>
+<td>Fast</td>
+<td>Strict anatomical criterion</td>
+</tr>
+<tr>
+<td><code>roi-seeded</code></td>
+<td>Raw DWI</td>
+<td>Poor (</td>
+<td>LI</td>
+<td>≈ 0.35)</td>
+</tr>
+<tr>
+<td><code>bidirectional</code></td>
+<td>Raw DWI</td>
+<td>Excellent (</td>
+<td>LI</td>
+<td>≈ 0.002)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="bidirectional-seeding-why-not-just-use-passthrough">Bidirectional seeding: why not just use passthrough?<a class="headerlink" href="#bidirectional-seeding-why-not-just-use-passthrough" title="Permanent link">&para;</a></h2>
+<p>Passthrough filters a whole-brain tractogram for streamlines that traverse both the
+brainstem and the motor cortex ROI. It is fast and works well for cohorts, but it
+produces a modest streamline count asymmetry (|LI| ≈ 0.1 on typical data) because the
+atlas-warped motor cortex ROI lands at a slightly different position relative to the
+GM/WM boundary on each hemisphere.</p>
+<p>A four-phase systematic audit on in-vivo 3T data confirmed:</p>
+<ol>
+<li>The data quality is symmetric (no L/R signal imbalance across 71 DWI volumes)</li>
+<li>Registration quality is symmetric (Jacobian determinant: L 1.000 ± 0.388, R 0.999 ± 0.330)</li>
+<li>Motor ROI sizes and FA microstructure are symmetric (1,149 vs 1,135 FA &gt; 0.2 voxels)</li>
+<li>The underlying tract is symmetric — brainstem-seeded reverse tracking produces R/L = 0.987</li>
+</ol>
+<p>The asymmetry is direction-dependent: passthrough gives R &gt; L (LI = −0.128) while
+roi-seeded gives L &gt; R (LI = +0.347). An asymmetry that reverses sign with seeding
+direction is the hallmark of a cortical interface placement artifact, not anatomy.</p>
+<p><strong>Bidirectional seeding</strong> eliminates this by:
+- Running a forward pass (motor → brainstem) and a reverse pass (brainstem → motor)
+- Retaining only forward streamlines whose count is bounded by the reverse count per side
+- Enforcing the same bilateral target count (minimum across all four pass counts)
+- Selecting from each forward bundle the streamlines with highest spatial overlap with
+  the reverse density map</p>
+<p>Result: LI = +0.002 — matches the brainstem-seeded ground truth (LI = +0.007).</p>
+<p>Full technical write-up: <a href="../fixes/bidirectional_seeding.md">Bidirectional seeding — motivation and validation</a></p>
+<hr />
+<h2 id="why-bidirectional-is-run-only-not-available-in-csttool-extract">Why <code>bidirectional</code> is <code>run</code>-only, not available in <code>csttool extract</code><a class="headerlink" href="#why-bidirectional-is-run-only-not-available-in-csttool-extract" title="Permanent link">&para;</a></h2>
+<p><code>csttool extract</code> takes a pre-computed whole-brain tractogram as input. Bidirectional
+seeding requires re-running tractography from two separate seed regions (motor cortex and
+brainstem), which demands the raw DWI data. This is the same constraint as <code>roi-seeded</code>,
+which has always been <code>run</code>-only.</p>
+<p>Making it work with a pre-computed tractogram would require a different algorithm — for
+example, filtering the existing tractogram by both endpoint regions and applying a
+spatial overlap criterion. This is a valid future direction but would produce different
+(and likely less accurate) results than the full bidirectional tracking approach.</p>
+<hr />
+<h2 id="why-odf-parameters-differ-between-passthrough-and-roi-seeded-bidirectional">Why ODF parameters differ between passthrough and roi-seeded / bidirectional<a class="headerlink" href="#why-odf-parameters-differ-between-passthrough-and-roi-seeded-bidirectional" title="Permanent link">&para;</a></h2>
+<p>The whole-brain tracking step (used by passthrough) uses stricter ODF parameters
+(<code>relative_peak_threshold = 0.8</code>, <code>min_separation_angle = 45°</code>, <code>npeaks = 1</code>) to produce
+a compact, high-quality whole-brain tractogram with minimal false connections.</p>
+<p>The ROI-seeded and bidirectional methods use more permissive parameters
+(<code>relative_peak_threshold = 0.5</code>, <code>min_separation_angle = 25°</code>) inherited from the
+<code>roi_seeded_tracking</code> module. More permissive parameters allow the tracker to follow
+complex crossing regions near the motor cortex and brainstem, which increases yield from
+dense focal seeding.</p>
+<p>This is an intentional asymmetry: whole-brain seeding needs conservative filtering to
+keep tractogram size manageable; ROI seeding benefits from more flexibility because false
+connections are later filtered by the ROI traversal criterion.</p>
+<hr />
+<h2 id="why-extraction-method-passthrough-is-the-default">Why <code>--extraction-method passthrough</code> is the default<a class="headerlink" href="#why-extraction-method-passthrough-is-the-default" title="Permanent link">&para;</a></h2>
+<p>Passthrough is the best balance of sensitivity, speed, and robustness for the common
+case (cohort studies, first-time users). It works with a pre-computed tractogram (no
+re-tracking needed), handles moderate motion and registration imperfection gracefully,
+and has been validated on 167 TractoInferno subjects with 98.8% success rate.</p>
+<p>Bidirectional is superior for single-subject bilateral symmetry analysis but is
+approximately 3× slower (four tracking passes) and assumes symmetric anatomy — an
+assumption that is invalid in stroke, tumour, or resection cases.</p>
+<hr />
+<h2 id="why-the-tract-profile-is-reoriented-inferiorsuperior">Why the tract profile is reoriented inferior→superior<a class="headerlink" href="#why-the-tract-profile-is-reoriented-inferiorsuperior" title="Permanent link">&para;</a></h2>
+<p>An along-tract profile averages a scalar across the bundle by point index, so point index
+<em>i</em> must mean the same anatomical position in every streamline. Tractography does not
+provide that: each streamline is stored <code>[backward_from_seed][forward_from_seed]</code>, so a
+bundle mixes orientations. On in-vivo CST data about 20% of streamlines run
+superior→inferior, which is enough to visibly bias the result — averaging index 0 pools
+pontine samples from most streamlines with precentral samples from the rest, compressing
+the two ends of the profile toward each other. <code>compute_tract_profile</code> therefore reorients
+each streamline inferior→superior before sampling.</p>
+<p><strong>Why an anatomical rule rather than a bundle centroid.</strong> DIPY offers <code>orient_by_streamline</code>,
+which orients a bundle relative to a reference such as its centroid. That makes streamlines
+agree with <em>each other</em>, which is all that profile <em>invariance</em> requires — but it does not
+fix which end comes first. <code>compute_localized_metrics</code> bins the profile by index and the
+profile plots label position 0 "Pontine Level", so index 0 must be the inferior end
+specifically. A centroid-relative rule would leave the whole bundle liable to being flipped
+as a unit, silently swapping the pontine and precentral labels. The rule has to be tied to
+anatomy.</p>
+<p><strong>Why the Z axis, and not <code>orient_by_rois</code>.</strong> DIPY's <code>orient_by_rois</code> is the textbook
+choice, but it is unavailable where the work happens: <code>csttool metrics</code> receives only
+tractograms and scalar maps, while the brainstem and motor ROI masks are built in a
+different pipeline stage (<code>extract/modules/create_roi_masks.py</code>). Using them would mean
+adding required inputs to the command. The Z axis is a sound substitute for a
+supero-inferior tract: streamlines are in RASMM world coordinates, where +Z is superior by
+the NIfTI standard, regardless of how the image's voxel axes are stored.</p>
+<p>A useful property of comparing the two ends of a streamline is that it is
+<strong>translation-invariant</strong>. The related concern that the subject is reoriented to RAS but
+never recentered — so the world midline sits at X = M ≠ 0 — breaks anything that splits on
+an absolute plane, but it cannot affect a within-streamline difference. The absolute-plane
+splits elsewhere in the pipeline now use the warped MNI midline (see
+<a href="#why-the-hemisphere-midline-is-the-warped-mni-midline-not-world-x0">Why the hemisphere midline is the warped MNI midline, not world X=0</a>).</p>
+<p><strong>Why quartile means rather than the two endpoints.</strong> Orientation is decided from the mean Z
+of the first and last quartiles. On healthy CST data the two rules agree on every streamline,
+so this buys nothing today. It is insurance for the tortuous bundles the tool targets:
+terminal points are the noisiest part of a streamline — that is where the stopping criterion
+fired — and the CST's cortical end hooks laterally into the precentral gyrus. The quartile
+mean averages that hook away for one extra mean per streamline and degrades to the endpoint
+rule for short streamlines.</p>
+<p><strong>Why non-vertical bundles warn rather than fail.</strong> The Z rule is only meaningful for a
+supero-inferior tract. <code>compute_tract_profile</code> is public API and a caller may legitimately
+profile some other bundle, so a bundle whose dominant extent is not Z emits a warning rather
+than an error. The dominant axis is chosen with <code>argmax</code>, which avoids inventing a threshold
+constant.</p>
+<p><strong>Why there is no RAS check.</strong> The obvious guard — comparing <code>nib.aff2axcodes(affine)</code> to
+<code>('R','A','S')</code> — would be wrong. That inspects the <em>voxel</em> axis order, which is irrelevant
+here: world coordinates are RAS+ by definition, so the rule holds for validly-stored LAS or
+LPS data too, and the check would reject them spuriously. The real precondition is that the
+points are world coordinates rather than voxel indices, and that is already enforced
+structurally, since the profiler applies the inverse affine to whatever it is given.</p>
+<p><strong>Why the region extents live in one constant.</strong> <code>TRACT_REGIONS</code> in
+<code>metrics/modules/unilateral_analysis.py</code> defines each region's extent as a fraction of tract
+length. <code>compute_localized_metrics</code> bins the profile with it and the profile figures place
+their labels from it. This is the single source of truth on purpose: the bins and the labels
+were previously stated independently and drifted, so the figures annotated 0/50/100% while the
+table averaged 0-35/35-70/70-100%. Region boundaries are conventional, not validated against an
+atlas — the JHU ICBM-DTI-81 landmark validation is outstanding, so the names are nominal.</p>
+<hr />
+<h2 id="why-mppca-is-the-default-denoiser">Why MPPCA is the default denoiser<a class="headerlink" href="#why-mppca-is-the-default-denoiser" title="Permanent link">&para;</a></h2>
+<p>All three denoisers are offered, but the default has to work without asking the user for
+information they usually do not have.</p>
+<ul>
+<li><strong>NLMeans</strong> needs a receiver-coil count for PIESNO sigma estimation, and an assumption about
+  whether the noise is Gaussian or Rician. On a modern multi-channel head coil with parallel
+  imaging, the <em>effective</em> coil count is not the physical one and is rarely known; the tool was
+  guessing <code>N=4</code> and assuming Gaussian noise on everyone's data.</li>
+<li><strong>Patch2Self</strong> needs bvals and enough directions, so it cannot be a universal default.</li>
+<li><strong>MPPCA</strong> estimates the noise level itself, from the eigenvalue distribution of local PCA
+  patches against the Marchenko-Pastur distribution. It needs neither a coil count nor a noise
+  model nor bvals — it exploits the redundancy of the 4D DWI directly.</li>
+</ul>
+<p>MPPCA also has a reproducibility advantage that fell out of this: it exposes no thread-count
+and no seed parameter, so the multithreaded-reduction non-determinism that made NLMeans
+non-reproducible cannot arise on the default path. Its output is bitwise identical across
+repeated runs.</p>
+<p>Choosing MPPCA sidesteps rather than settles the Gaussian-vs-Rician question: with no noise
+model to assume, there is nothing to get wrong. NLMeans remains available via
+<code>--denoise-method nlmeans</code>, and its coil-count and noise-distribution caveats apply to anyone
+who chooses it.</p>
+<p><strong>Why the default lives in one constant.</strong> <code>DEFAULT_DENOISE_METHOD</code> in <code>csttool/defaults.py</code> is
+the single source of truth, read by the CLI parsers, the command wrappers, <code>run_preprocessing</code>
+and <code>denoise</code>. The default was previously restated in eight places; a change applied to only one
+of them left every CLI command on NLMeans while the signature, the CHANGELOG and the project
+notes all said otherwise. Defaults that are stated more than once eventually disagree.</p>
+<p>It is a standalone leaf module rather than part of <code>csttool.preprocess</code> because <code>denoise.py</code>
+needs the value and is itself imported by <code>csttool/preprocess/__init__.py</code> — a constant defined
+there could not be read back without a circular import. Having no imports of its own, it is
+safe to read from anywhere regardless of import order.</p>
+<hr />
+<h2 id="why-the-headline-mean-is-per-streamline-not-point-weighted">Why the headline mean is per-streamline, not point-weighted<a class="headerlink" href="#why-the-headline-mean-is-per-streamline-not-point-weighted" title="Permanent link">&para;</a></h2>
+<p>Two summaries of a scalar along a bundle coexist, and they measure different things.
+<code>sample_scalar_along_tract</code> pools every in-bounds point of every streamline into one flat
+array, so a streamline with twice as many points casts twice as many votes — the result is
+<strong>point-weighted</strong> (length-biased). <code>compute_tract_profile</code> normalises each streamline to a
+fixed arc length first, so each streamline casts one vote. The report's global table and the
+laterality indices used the point-weighted mean while the <em>displayed</em> profile used the
+per-streamline one, so the headline and the picture could disagree, and the LI could shift
+with bundle geometry (audit finding AU10).</p>
+<p>The headline is now the <strong>per-streamline mean</strong>: each streamline contributes one value — the
+mean of its sampled points — regardless of how many points it has. This is length-unbiased,
+and it is the same population the displayed profile normalises over.</p>
+<p><strong>Why <code>std</code> moved with it.</strong> A mean does not travel alone. Reporting <code>0.498 ± 0.238</code> where
+the mean is per-streamline but the SD is the scatter of every voxel would be incoherent: the
+centre and the spread would describe different populations. So the whole headline block
+(<code>mean</code>/<code>std</code>/<code>median</code>/<code>min</code>/<code>max</code>/<code>n_streamlines</code>) describes the per-streamline population.
+<code>std</code> is the between-streamline SD of streamline means — the variability <em>of streamlines</em>,
+not of the tissue — and is therefore much smaller than the old voxel scatter. Every report's
+"±" changes meaning; this is deliberate, because the old "±" paired a per-streamline-style
+mean (it was not) with a point-pool spread. <code>min</code>/<code>max</code> bound the same per-streamline
+distribution.</p>
+<p><strong>Why the point-pool summary is kept, not removed.</strong> It is a different and legitimate
+quantity (the scatter of all sampled voxels is a tissue-heterogeneity measure), and removing
+it would hide the bias rather than name it. It lives under <code>*_point_weighted</code> keys and
+<code>n_samples</code>, is exposed in the CSVs as <code>*_mean_point_weighted</code>, and is never used as the
+headline. This is the same instinct as AU5/AU24 — label constructed numbers rather than
+delete them.</p>
+<p><strong>Why per-streamline and not the profile-derived mean.</strong> The mean of the profile array is
+also one-vote-per-streamline in spirit, but it is a <em>different population</em>: <code>compute_tract_profile</code>
+resamples each streamline to a fixed arc length and drops streamlines with fewer than five
+valid points. Deriving the headline from it would couple the headline to the profile's
+resampling choices and to its short-streamline cutoff. The per-streamline mean is the pure
+"one vote per streamline" definition, independent of the profile, and is what the LIs and the
+global table should rest on. On in-vivo data the two differ by ~0.01 FA (0.4984 vs 0.4853 on
+the healthy control) for exactly this reason.</p>
+<p><strong>Why the bias is small.</strong> Streamline length only spans ~146–322 points (mean ~227) and the
+correlation between length and a streamline's mean FA is weak (−0.20 to +0.29, and it flips
+sign between hemispheres and subjects). Longer streamlines do pull the point-weighted mean
+in the direction their own mean FA points — confirmed, the point-weighted mean sits below the
+per-streamline mean on both sides of the healthy control — but the effect is ~0.2–0.4% on the
+mean and ~6% relative on the LI. All three definitions stay inside the 0.05 "symmetric" band
+on both subjects examined, so the thesis's "FA symmetric, count asymmetric" conclusion
+survives. AU10 is a correctness/coherence fix, not a results-changing one.</p>
+<hr />
+<h2 id="why-the-hemisphere-midline-is-the-warped-mni-midline-not-world-x0">Why the hemisphere midline is the warped MNI midline, not world X=0<a class="headerlink" href="#why-the-hemisphere-midline-is-the-warped-mni-midline-not-world-x0" title="Permanent link">&para;</a></h2>
+<p>Several diagnostics split the brain into left and right hemispheres: the streamline
+midline-crossing (commissural) exclusion in <code>extract_cst_passthrough</code>, the cerebral-peduncle
+FA sample (<code>sample_peduncle_fa</code>), the SyN-Jacobian hemisphere statistics, and the atlas-warp
+centroid QC. All of them used to split on world X = 0. That is wrong whenever the subject is
+not centred at the world origin — and <code>register_mni_to_subject</code> reorients the subject to RAS
+but never recentres it, so the anatomical midline sits at world X = M, not 0 in general.</p>
+<p><strong>Why this is a <em>diagnostic</em> problem, not a bundle problem.</strong> Final left/right bundle
+assignment is ROI-based: a streamline belongs to the left CST if it traverses the left motor
+cortex, regardless of where the midline is. So the bundles were never misassigned. The four
+sites above are diagnostics and filters, and they <em>were</em> biased — most consequentially
+<code>sample_peduncle_fa</code>, whose "lower left peduncle FA" output underpinned [[07 Decisions]] D3.</p>
+<p><strong>Why the warped MNI midline, not a centroid proxy.</strong> The MNI152 template is symmetric about
+world X = 0, so the MNI X = 0 plane <em>is</em> the anatomical midline. Warping it into subject
+space gives the true subject midline. The cheaper proxies — the FA&gt;0.15 brain centroid, or
+the brainstem centroid — are not midline estimates: the brain is not perfectly symmetric, and
+the brainstem is anatomically right-shifted in at least one subject (centroid +4.9 mm, against
+a local warped midline of +2.9 mm there), so it overstates the offset.</p>
+<p>On the two subjects examined, the warped midline is genuinely off-centre: its median world X is
+−3.58 mm (healthy control) and +0.84 mm (ALS), and the healthy control's midline sits ~4 mm left
+of X = 0 at every level (brainstem −4.75 mm, mid −3.91 mm, cortex −3.68 mm). The subject is
+reoriented to RAS but never recentered, so X = 0 is simply not the midline.</p>
+<p><strong>And the midline is not a plane at all.</strong> It curves with the non-linear warp: the ALS subject's
+runs from +2.94 mm at the brainstem to −2.91 mm at the cortex — a ~6 mm range. No single X value
+is correct at both ends, which is the reason the per-voxel <code>hemisphere_mask</code> is the primary
+output rather than a scalar.</p>
+<p>Both effects land on a structure with no room for them: the cerebral peduncles are only
+~10–15 mm wide, so a cut several mm off the true midline mislabels a large fraction of their
+voxels. Judge a midline error against the structure being split, not against the head.</p>
+<p><strong>Why one source of truth, in three views.</strong> <code>compute_warped_midline</code> warps a whole-brain
+MNI left-hemisphere mask (<code>X_mni &lt; 0</code>) into subject space and returns three representations of
+the same surface, because the consumers need different things:</p>
+<ul>
+<li>a per-voxel <code>hemisphere_mask</code> (the anatomical L/R label) for the voxel-based sites —
+  <code>sample_peduncle_fa</code> and the Jacobian split. This is the gold standard: each voxel is
+  assigned to the hemisphere it maps to in MNI, with no scalar approximation.</li>
+<li>a signed <code>midline_distance</code> volume (mm) for the one site that operates on continuous
+  streamline <em>points</em> — the midline-crossing exclusion. A single scalar plane is a poor fit
+  here: the warped midline curves with SyN, and a whole-brain median is biased by asymmetric
+  sub-cortical structures (it sat at −3.6 mm for one subject while the cortical midline sat
+  at −0.6 mm — using the scalar would have <em>regressed</em> that subject).</li>
+<li>a scalar <code>midline_x</code> (median world X of the central-slab midline surface) for the atlas-warp
+  centroid QC, which only needs the <em>sign</em> of each motor centroid relative to the midline and
+  is insensitive to a few mm.</li>
+</ul>
+<p><strong>Why the Jacobian gradient is per mm (AU19).</strong> The SyN forward field returned by
+<code>DiffeomorphicMap.get_forward_field()</code> is in world (mm) units on dipy 1.9–1.12.1 — verified
+empirically from <code>_warp_forward</code>, where the displacement is added to a world coordinate before
+the world-to-grid transform is applied. The Jacobian is <code>J = I + d(displacement_mm)/d(world_mm)</code>,
+so <code>np.gradient</code> must take the voxel size as spacing. The original code took it per voxel
+index, scaling the spread by the voxel size (≈2× on 2 mm isotropic data) — which is why the
+reported <code>L 1.000±0.388 / R 0.999±0.330</code> was miscalibrated. The hemisphere split also dropped
+the off-diagonal affine terms; the full affine is now used (and the per-voxel mask is
+preferred when available).</p>
+<p><strong>What moved and what did not.</strong> Bundle assignment and final CST counts are unchanged
+(ROI-based). On the two real subjects the peduncle FA asymmetry largely vanishes under the
+correct midline (the X = 0 split manufactured an ~8% "lower-left" asymmetry on the healthy
+control that the warped-MNI mask makes symmetric), and the Jacobian std roughly halves while
+the L/R symmetry it was quoted as evidence for survives. See the CHANGELOG <code>[Unreleased]</code>
+entry for the measured table, and [[07 Decisions]] D3 for the consequence to the
+"lower-left peduncle FA is a data property" claim.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025 Alem Nalo
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
