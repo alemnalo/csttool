@@ -43,8 +43,9 @@ def background_segmentation(
     # Determine which volumes to use for mask computation
     vol_idx = None
     if gtab is not None:
-        # Use only b0 volumes (b-value < 50)
-        b0_idx = np.where(gtab.bvals < 50)[0]
+        from csttool.defaults import DEFAULT_B0_THRESHOLD
+        # Use only b0 volumes
+        b0_idx = np.where(gtab.bvals < DEFAULT_B0_THRESHOLD)[0]
         if b0_idx.size > 0:
             vol_idx = b0_idx
     else:

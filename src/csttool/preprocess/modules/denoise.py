@@ -8,6 +8,7 @@ Denoise DWI data using one of three methods:
 """
 
 import numpy as np
+from csttool.defaults import DEFAULT_B0_THRESHOLD
 from dipy.denoise.noise_estimate import piesno
 from dipy.denoise.nlmeans import nlmeans
 from dipy.denoise.patch2self import patch2self
@@ -126,7 +127,7 @@ def denoise(
             model="ols",
             shift_intensity=True,
             clip_negative_vals=False,
-            b0_threshold=50,
+            b0_threshold=DEFAULT_B0_THRESHOLD,
         )
 
     # ==================================================================

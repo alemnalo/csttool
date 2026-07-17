@@ -1,6 +1,19 @@
 
 import argparse
 import json
+
+from csttool.defaults import (
+    DEFAULT_FA_THRESHOLD,
+    DEFAULT_SEED_DENSITY,
+    DEFAULT_STEP_SIZE,
+    DEFAULT_SH_ORDER,
+    DEFAULT_FIT_METHOD,
+    DEFAULT_RNG_SEED,
+    DEFAULT_DILATE_BRAINSTEM,
+    DEFAULT_DILATE_MOTOR,
+    DEFAULT_MIN_LENGTH_PASSTHROUGH,
+    DEFAULT_MAX_LENGTH_PASSTHROUGH,
+)
 import shutil
 import sys
 from pathlib import Path
@@ -290,12 +303,12 @@ def cmd_run(args: argparse.Namespace) -> None:
         track_args = argparse.Namespace(
             nifti=preproc_path,
             subject_id=subject_id,
-            fa_thr=getattr(args, 'fa_thr', 0.2),
-            seed_density=getattr(args, 'seed_density', 1),
-            step_size=getattr(args, 'step_size', 0.5),
-            sh_order=getattr(args, 'sh_order', 6),
-            fit_method=getattr(args, 'fit_method', 'WLS'),
-            rng_seed=getattr(args, 'rng_seed', 42),
+            fa_thr=getattr(args, 'fa_thr', DEFAULT_FA_THRESHOLD),
+            seed_density=getattr(args, 'seed_density', DEFAULT_SEED_DENSITY),
+            step_size=getattr(args, 'step_size', DEFAULT_STEP_SIZE),
+            sh_order=getattr(args, 'sh_order', DEFAULT_SH_ORDER),
+            fit_method=getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
+            rng_seed=getattr(args, 'rng_seed', DEFAULT_RNG_SEED),
             save_visualizations=getattr(args, 'save_visualizations', False),
             show_plots=getattr(args, 'show_plots', False),
             verbose=verbose,
@@ -371,10 +384,10 @@ def cmd_run(args: argparse.Namespace) -> None:
                 tractogram=tractogram_path,
                 fa=fa_path,
                 subject_id=subject_id,
-                dilate_brainstem=getattr(args, 'dilate_brainstem', 2),
-                dilate_motor=getattr(args, 'dilate_motor', 1),
-                min_length=getattr(args, 'min_length', 20.0),
-                max_length=getattr(args, 'max_length', 200.0),
+                dilate_brainstem=getattr(args, 'dilate_brainstem', DEFAULT_DILATE_BRAINSTEM),
+                dilate_motor=getattr(args, 'dilate_motor', DEFAULT_DILATE_MOTOR),
+                min_length=getattr(args, 'min_length', DEFAULT_MIN_LENGTH_PASSTHROUGH),
+                max_length=getattr(args, 'max_length', DEFAULT_MAX_LENGTH_PASSTHROUGH),
                 extraction_method=extraction_method,
                 fast_registration=getattr(args, 'fast_registration', False),
                 save_visualizations=getattr(args, 'save_visualizations', False),

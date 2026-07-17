@@ -1,4 +1,5 @@
 import warnings
+from csttool.defaults import DEFAULT_RELATIVE_PEAK_THRESHOLD, DEFAULT_MIN_SEPARATION_ANGLE
 
 
 def get_max_sh_order(n_directions: int) -> int:
@@ -29,8 +30,9 @@ def get_max_sh_order(n_directions: int) -> int:
 def _count_gradient_directions(gtab) -> int:
     """Count unique non-b0 gradient directions from a GradientTable."""
     import numpy as np
-    # Exclude b0 volumes (typically b < 50 s/mm²)
-    b0_threshold = 50
+    from csttool.defaults import DEFAULT_B0_THRESHOLD
+    # Exclude b0 volumes at the configured threshold
+    b0_threshold = DEFAULT_B0_THRESHOLD
     dwi_mask = gtab.bvals > b0_threshold
     
     if not dwi_mask.any():
@@ -113,8 +115,8 @@ def estimate_directions(data, gtab, white_matter, sh_order=6, sphere_name="symme
         model=csamodel,
         data=data,
         sphere=sphere,
-        relative_peak_threshold=0.8,
-        min_separation_angle=45,
+        relative_peak_threshold=DEFAULT_RELATIVE_PEAK_THRESHOLD,
+        min_separation_angle=DEFAULT_MIN_SEPARATION_ANGLE,
         mask=white_matter,
         npeaks=1,  # Single direction for deterministic tracking
     )

@@ -1,19 +1,23 @@
 from typing import List, Tuple, Dict, Any, Optional, Union
 import numpy as np
 from csttool.tracking.modules.estimate_directions import get_max_sh_order
+from csttool.defaults import DEFAULT_B0_THRESHOLD
 
 
-def count_unique_directions(bvecs: np.ndarray, bvals: np.ndarray, b0_threshold: int = 50) -> int:
+def count_unique_directions(bvecs: np.ndarray, bvals: np.ndarray, b0_threshold: int = None) -> int:
     """Count unique gradient directions (excluding b=0 volumes).
     
     Args:
         bvecs: (N, 3) or (3, N) array of gradient directions
         bvals: (N,) array of b-values
         b0_threshold: b-value threshold for b=0 volumes
+            (default: DEFAULT_B0_THRESHOLD)
         
     Returns:
         Number of unique gradient directions
     """
+    if b0_threshold is None:
+        b0_threshold = DEFAULT_B0_THRESHOLD
     if bvals.ndim == 2:
         bvals = bvals.flatten()
     if bvecs.shape[0] == 3 and bvecs.shape[1] != 3:
@@ -128,7 +132,7 @@ def assess_acquisition_quality(
     bvals: np.ndarray,
     voxel_size: Tuple[float, float, float],
     bids_json: Optional[Dict[str, Any]] = None,
-    b0_threshold: float = 50.0,
+    b0_threshold: float = None,
     return_metadata: bool = False
 ) -> Union[List[Tuple[str, str]], Tuple[List[Tuple[str, str]], Dict[str, Any]]]:
     """
@@ -142,7 +146,7 @@ def assess_acquisition_quality(
         bvals: (N,) or (1, N) array of b-values
         voxel_size: (x, y, z) voxel dimensions in mm
         bids_json: Optional dictionary of BIDS metadata
-        b0_threshold: Threshold for b=0 volumes (default 50 s/mm²)
+        b0_threshold: Threshold for b=0 volumes (default: DEFAULT_B0_THRESHOLD)
         return_metadata: If True, return (warnings, metadata) tuple
 
     Returns:
@@ -152,6 +156,8 @@ def assess_acquisition_quality(
     metadata = {}  # Collect statistics for reporting
 
     # 1. Input validation
+    if b0_threshold is None:
+        b0_threshold = DEFAULT_B0_THRESHOLD
     if bvals.ndim == 2:
         bvals = bvals.flatten()
 

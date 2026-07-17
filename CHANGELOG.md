@@ -127,6 +127,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report via `save_json_report`, so downstream JSON consumers may notice their absence.
   (AU15)
 
+### Fixed
+
+- **AU20 — b0 threshold is now a single source of truth** (`DEFAULT_B0_THRESHOLD = 50`
+  in `defaults.py`). Previously hardcoded as ``< 50`` in seven places across
+  `background_segmentation.py`, `estimate_directions.py`, `denoise.py`, and
+  `visualizations.py`. A dataset with b=30 shells or a non-zero lowest b-value
+  would have been silently mis-partitioned. Exposed via `--b0-threshold` on
+  `preprocess` and `run` (was only on `check-dataset`).
+
+- **Parameter transparency — all pipeline defaults now live in `defaults.py`** and
+  are read by the CLI parsers and command wrappers. Previously many defaults were
+  repeated as bare literals in `add_argument(default=…)` and `getattr(…, literal)`
+  across the CLI layer. The defaults module now covers: fa_threshold, seed_density,
+  step_size, sh_order, rng_seed, sphere_name, peak extraction thresholds, ROI
+  dilation, streamline length bounds, midline tolerance, LI interpretation bands,
+  and the artifact_index cutoff. (Parameter transparency §2)
+
+- **Provenance now captures hardware details** (CPU model, core count, RAM, GPU),
+  **threading environment variables** (`OMP_NUM_THREADS` etc.), **the full command line**
+  (`sys.argv`), and **five additional dependency versions** (nilearn, dicom2nifti,
+  pydicom, matplotlib, scikit-learn, h5py, cython) that the audits (AU8) identified
+  as missing. `--provenance` on the CLI prints the full provenance dict and exits.
+  The `CLAUDE.md` claim about `provenance.json` is now accurate.
+  (Parameter transparency §2, §3)
+
 - **`dipy` is now pinned to `>=1.9,<2`** in `pyproject.toml` and `environment.yml`. It was
   entirely unpinned, so an environment rebuild could silently install a version that breaks
   tracking outright.

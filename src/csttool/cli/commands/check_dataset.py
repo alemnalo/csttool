@@ -3,6 +3,8 @@ import argparse
 import json
 from pathlib import Path
 
+from csttool.defaults import DEFAULT_B0_THRESHOLD
+
 import numpy as np
 from dipy.io.image import load_nifti
 from dipy.io import read_bvals_bvecs
@@ -87,7 +89,7 @@ def cmd_check_dataset(args: argparse.Namespace) -> int:
             print(f"  ⚠️ JSON file not found: {args.json}")
             
     # 3. Assess Quality with metadata return
-    b0_threshold = getattr(args, 'b0_threshold', 50.0)
+    b0_threshold = getattr(args, 'b0_threshold', DEFAULT_B0_THRESHOLD)
     warnings_list, metadata = assess_acquisition_quality(
         bvecs=bvecs,
         bvals=bvals,

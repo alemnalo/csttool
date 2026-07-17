@@ -412,7 +412,8 @@ def extract_cst_passthrough(
             # The midline is the warped-MNI midline (AU11): prefer the signed
             # distance volume (the true curved surface) when available, else the
             # scalar midline_x plane. The tolerance itself remains provisional (AU14).
-            MIDLINE_TOLERANCE_MM = 8.0  # Allow minor medial excursion
+            from csttool.defaults import DEFAULT_MIDLINE_TOLERANCE_MM
+            midline_tolerance = DEFAULT_MIDLINE_TOLERANCE_MM
             if use_signed_midline:
                 # Map streamline points to voxels and look up the signed distance.
                 ones = np.ones((len(sl), 1))
@@ -428,13 +429,13 @@ def extract_cst_passthrough(
                     d_min, d_max = float(np.min(dists)), float(np.max(dists))
                 else:
                     d_min, d_max = 0.0, 0.0
-                crosses_deep = (d_min < -MIDLINE_TOLERANCE_MM and
-                                d_max > MIDLINE_TOLERANCE_MM)
+                crosses_deep = (d_min < -midline_tolerance and
+                                d_max > midline_tolerance)
             else:
                 x_coords = sl[:, 0]
                 x_min, x_max = np.min(x_coords), np.max(x_coords)
-                crosses_deep = (x_min < midline_x - MIDLINE_TOLERANCE_MM and
-                                x_max > midline_x + MIDLINE_TOLERANCE_MM)
+                crosses_deep = (x_min < midline_x - midline_tolerance and
+                                x_max > midline_x + midline_tolerance)
             if crosses_deep:
                 midline_excluded_count += 1
                 continue

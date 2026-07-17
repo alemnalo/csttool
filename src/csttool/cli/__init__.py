@@ -5,7 +5,22 @@ import argparse
 from pathlib import Path
 
 from .. import __version__
-from ..defaults import DEFAULT_DENOISE_METHOD, DEFAULT_FIT_METHOD, DEFAULT_NPEAKS
+from ..defaults import (
+    DEFAULT_DENOISE_METHOD,
+    DEFAULT_FIT_METHOD,
+    DEFAULT_NPEAKS,
+    DEFAULT_B0_THRESHOLD,
+    DEFAULT_FA_THRESHOLD,
+    DEFAULT_SEED_DENSITY,
+    DEFAULT_STEP_SIZE,
+    DEFAULT_SH_ORDER,
+    DEFAULT_RNG_SEED,
+    DEFAULT_DILATE_BRAINSTEM,
+    DEFAULT_DILATE_MOTOR,
+    DEFAULT_MIN_LENGTH_PASSTHROUGH,
+    DEFAULT_MAX_LENGTH_PASSTHROUGH,
+    DEFAULT_SEED_FA_THRESHOLD,
+)
 from .utils import add_io_arguments
 from .commands.check import cmd_check
 from .commands.doctor import cmd_doctor
@@ -31,6 +46,11 @@ def main() -> None:
         "--version",
         action="version",
         version=f"%(prog)s {__version__}"
+    )
+    parser.add_argument(
+        "--provenance",
+        action="store_true",
+        help="Print full provenance information (git, deps, platform, hardware) and exit."
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -78,8 +98,8 @@ def main() -> None:
     p_check_dataset.add_argument(
         "--b0-threshold",
         type=float,
-        default=50.0,
-        help="B-value threshold for b=0 volumes (default: 50 s/mm²)"
+        default=DEFAULT_B0_THRESHOLD,
+        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)"
     )
     p_check_dataset.add_argument(
         "--verbose",
@@ -222,6 +242,12 @@ def main() -> None:
         action="store_true",
         help="Print detailed processing information."
     )
+    p_preproc.add_argument(
+        "--b0-threshold",
+        type=float,
+        default=DEFAULT_B0_THRESHOLD,
+        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)."
+    )
     p_preproc.set_defaults(func=cmd_preprocess)
 
     # -------------------------------------------------------------------------
@@ -246,26 +272,26 @@ def main() -> None:
     p_track.add_argument(
         "--fa-thr",
         type=float,
-        default=0.2,
-        help="FA threshold for stopping and seeding (default 0.2).",
+        default=DEFAULT_FA_THRESHOLD,
+        help=f"FA threshold for stopping and seeding (default {DEFAULT_FA_THRESHOLD}).",
     )
     p_track.add_argument(
         "--seed-density",
         type=int,
-        default=1,
-        help="Seeds per voxel in the seed mask (default 1).",
+        default=DEFAULT_SEED_DENSITY,
+        help=f"Seeds per voxel in the seed mask (default {DEFAULT_SEED_DENSITY}).",
     )
     p_track.add_argument(
         "--step-size",
         type=float,
-        default=0.5,
-        help="Tracking step size in millimetres (default 0.5).",
+        default=DEFAULT_STEP_SIZE,
+        help=f"Tracking step size in millimetres (default {DEFAULT_STEP_SIZE}).",
     )
     p_track.add_argument(
         "--sh-order",
         type=int,
-        default=6,
-        help="Maximum spherical harmonic order for CSA ODF model (default 6).",
+        default=DEFAULT_SH_ORDER,
+        help=f"Maximum spherical harmonic order for CSA ODF model (default {DEFAULT_SH_ORDER}).",
     )
     p_track.add_argument(
         "--fit-method",
@@ -273,6 +299,12 @@ def main() -> None:
         default=DEFAULT_FIT_METHOD,
         choices=["OLS", "WLS", "NLLS", "RT"],
         help=f"DTI tensor fit method: OLS, WLS, NLLS, or RT (default: {DEFAULT_FIT_METHOD})."
+    )
+    p_track.add_argument(
+        "--b0-threshold",
+        type=float,
+        default=DEFAULT_B0_THRESHOLD,
+        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)."
     )
     p_track.add_argument(
         "--show-plots",
@@ -287,8 +319,8 @@ def main() -> None:
     p_track.add_argument(
         "--rng-seed",
         type=int,
-        default=42,
-        help="Random seed for reproducible tractography (default: 42). Use --random to disable."
+        default=DEFAULT_RNG_SEED,
+        help=f"Random seed for reproducible tractography (default: {DEFAULT_RNG_SEED}). Use --random to disable."
     )
     p_track.add_argument(
         "--random",
@@ -570,26 +602,26 @@ def main() -> None:
     p_run.add_argument(
         "--fa-thr",
         type=float,
-        default=0.2,
-        help="FA threshold for tracking (default: 0.2)"
+        default=DEFAULT_FA_THRESHOLD,
+        help=f"FA threshold for tracking (default: {DEFAULT_FA_THRESHOLD})"
     )
     p_run.add_argument(
         "--seed-density",
         type=int,
-        default=1,
-        help="Seeds per voxel (default: 1)"
+        default=DEFAULT_SEED_DENSITY,
+        help=f"Seeds per voxel (default: {DEFAULT_SEED_DENSITY})"
     )
     p_run.add_argument(
         "--step-size",
         type=float,
-        default=0.5,
-        help="Tracking step size in mm (default: 0.5)"
+        default=DEFAULT_STEP_SIZE,
+        help=f"Tracking step size in mm (default: {DEFAULT_STEP_SIZE})"
     )
     p_run.add_argument(
         "--sh-order",
         type=int,
-        default=6,
-        help="Spherical harmonic order (default: 6)"
+        default=DEFAULT_SH_ORDER,
+        help=f"Spherical harmonic order (default: {DEFAULT_SH_ORDER})"
     )
     p_run.add_argument(
         "--fit-method",
@@ -607,34 +639,40 @@ def main() -> None:
     p_run.add_argument(
         "--rng-seed",
         type=int,
-        default=42,
-        help="Random seed for reproducible tracking and extraction (default: 42)."
+        default=DEFAULT_RNG_SEED,
+        help=f"Random seed for reproducible tracking and extraction (default: {DEFAULT_RNG_SEED})."
+    )
+    p_run.add_argument(
+        "--b0-threshold",
+        type=float,
+        default=DEFAULT_B0_THRESHOLD,
+        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)."
     )
 
     # Extraction options
     p_run.add_argument(
         "--dilate-brainstem",
         type=int,
-        default=2,
-        help="Dilation iterations for brainstem ROI (default: 2)"
+        default=DEFAULT_DILATE_BRAINSTEM,
+        help=f"Dilation iterations for brainstem ROI (default: {DEFAULT_DILATE_BRAINSTEM})"
     )
     p_run.add_argument(
         "--dilate-motor",
         type=int,
-        default=1,
-        help="Dilation iterations for motor cortex ROI (default: 1)"
+        default=DEFAULT_DILATE_MOTOR,
+        help=f"Dilation iterations for motor cortex ROI (default: {DEFAULT_DILATE_MOTOR})"
     )
     p_run.add_argument(
         "--min-length",
         type=float,
-        default=20.0,
-        help="Minimum streamline length in mm (default: 20)"
+        default=DEFAULT_MIN_LENGTH_PASSTHROUGH,
+        help=f"Minimum streamline length in mm (default: {DEFAULT_MIN_LENGTH_PASSTHROUGH})"
     )
     p_run.add_argument(
         "--max-length",
         type=float,
-        default=200.0,
-        help="Maximum streamline length in mm (default: 200)"
+        default=DEFAULT_MAX_LENGTH_PASSTHROUGH,
+        help=f"Maximum streamline length in mm (default: {DEFAULT_MAX_LENGTH_PASSTHROUGH})"
     )
     p_run.add_argument(
         "--extraction-method",
@@ -647,8 +685,8 @@ def main() -> None:
     p_run.add_argument(
         "--seed-fa-threshold",
         type=float,
-        default=0.15,
-        help="FA threshold for roi-seeded tracking (default: 0.15)"
+        default=DEFAULT_SEED_FA_THRESHOLD,
+        help=f"FA threshold for roi-seeded tracking (default: {DEFAULT_SEED_FA_THRESHOLD})"
     )
 
     # Metrics options
@@ -854,6 +892,12 @@ def main() -> None:
     # Parse and execute
     # -------------------------------------------------------------------------
     args = parser.parse_args()
+
+    if getattr(args, 'provenance', False):
+        import json
+        from ..reproducibility import get_provenance_dict
+        print(json.dumps(get_provenance_dict(), indent=2, default=str))
+        return
 
     if hasattr(args, "func"):
         args.func(args)

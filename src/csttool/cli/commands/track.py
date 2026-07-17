@@ -4,6 +4,7 @@ from pathlib import Path
 
 from dipy.io.image import load_nifti
 from ..utils import extract_stem_from_filename, get_gtab_for_preproc
+from csttool.defaults import DEFAULT_FA_THRESHOLD, DEFAULT_RNG_SEED, DEFAULT_FIT_METHOD
 
 from csttool.tracking.modules import (
     fit_tensors,
@@ -24,7 +25,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
 
     # Create RunContext with seed from CLI
     run_seed = getattr(args, 'rng_seed', None)
-    ctx = RunContext(run_seed=run_seed) if run_seed is not None else RunContext(run_seed=42)
+    ctx = RunContext(run_seed=run_seed) if run_seed is not None else RunContext(run_seed=DEFAULT_RNG_SEED)
 
     if not preproc_nii.exists():
         print(f"  ✗ Preprocessed NIfTI not found: {preproc_nii}")
@@ -77,7 +78,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             gtab,
             brain_mask,
             fa_thresh=args.fa_thr,
-            fit_method=getattr(args, 'fit_method', 'WLS'),
+            fit_method=getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
             visualize=getattr(args, 'show_plots', False),
             verbose=verbose
         )
@@ -152,7 +153,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         'min_separation_angle': 45,  # Peak extraction: minimum angle between detected peaks
         'random_seed': ctx.run_seed,
         'use_brain_mask_stop': use_brain_mask_stop,
-        'fit_method': getattr(args, 'fit_method', 'WLS'),
+        'fit_method': getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
     }
 
     try:

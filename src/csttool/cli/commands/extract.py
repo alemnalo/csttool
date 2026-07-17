@@ -1,6 +1,18 @@
 
 import argparse
 from pathlib import Path
+
+from csttool.defaults import (
+    DEFAULT_RNG_SEED,
+    DEFAULT_DILATE_BRAINSTEM,
+    DEFAULT_DILATE_MOTOR,
+    DEFAULT_SEED_FA_THRESHOLD,
+    DEFAULT_SEED_DENSITY_EXTRACT,
+    DEFAULT_MIN_LENGTH,
+    DEFAULT_MAX_LENGTH,
+    DEFAULT_NPEAKS,
+    DEFAULT_FIT_METHOD,
+)
 import nibabel as nib
 from dipy.io.streamline import load_tractogram
 from dipy.io.image import load_nifti
@@ -286,7 +298,7 @@ def run_roi_seeded_extraction(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ctx = RunContext(run_seed=getattr(args, 'rng_seed', 42))
+    ctx = RunContext(run_seed=getattr(args, 'rng_seed', DEFAULT_RNG_SEED))
 
     # Load preprocessed DWI data
     if verbose:
@@ -352,8 +364,8 @@ def run_roi_seeded_extraction(
         warped_subcortical=warped['subcortical_warped'],
         subject_affine=fa_affine,
         roi_config=CST_ROI_CONFIG,
-        dilate_brainstem=getattr(args, 'dilate_brainstem', 2),
-        dilate_motor=getattr(args, 'dilate_motor', 1),
+        dilate_brainstem=getattr(args, 'dilate_brainstem', DEFAULT_DILATE_BRAINSTEM),
+        dilate_motor=getattr(args, 'dilate_motor', DEFAULT_DILATE_MOTOR),
         output_dir=output_dir,
         subject_id=subject_id,
         verbose=verbose,
@@ -376,14 +388,14 @@ def run_roi_seeded_extraction(
         motor_right_mask=masks['motor_right'],
         brainstem_mask=masks['brainstem'],
         fa_map=fa_data,
-        fa_threshold=getattr(args, 'seed_fa_threshold', 0.15),
-        seed_density=getattr(args, 'seed_density', 2),
+        fa_threshold=getattr(args, 'seed_fa_threshold', DEFAULT_SEED_FA_THRESHOLD),
+        seed_density=getattr(args, 'seed_density', DEFAULT_SEED_DENSITY_EXTRACT),
         step_size=0.5,
-        min_length=getattr(args, 'min_length', 30.0),
-        max_length=getattr(args, 'max_length', 200.0),
+        min_length=getattr(args, 'min_length', DEFAULT_MIN_LENGTH),
+        max_length=getattr(args, 'max_length', DEFAULT_MAX_LENGTH),
         random_seed=ctx.rng_tracking_seed(),
-        npeaks=getattr(args, 'npeaks', 1),
-        fit_method=getattr(args, 'fit_method', 'WLS'),
+        npeaks=getattr(args, 'npeaks', DEFAULT_NPEAKS),
+        fit_method=getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
         verbose=verbose
     )
     
@@ -462,7 +474,7 @@ def run_bidirectional_extraction(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ctx = RunContext(run_seed=getattr(args, 'rng_seed', 42))
+    ctx = RunContext(run_seed=getattr(args, 'rng_seed', DEFAULT_RNG_SEED))
 
     if verbose:
         print(f"    • Input: {preproc_path}")
@@ -518,8 +530,8 @@ def run_bidirectional_extraction(
         warped_subcortical=warped['subcortical_warped'],
         subject_affine=fa_affine,
         roi_config=CST_ROI_CONFIG,
-        dilate_brainstem=getattr(args, 'dilate_brainstem', 2),
-        dilate_motor=getattr(args, 'dilate_motor', 1),
+        dilate_brainstem=getattr(args, 'dilate_brainstem', DEFAULT_DILATE_BRAINSTEM),
+        dilate_motor=getattr(args, 'dilate_motor', DEFAULT_DILATE_MOTOR),
         output_dir=output_dir,
         subject_id=subject_id,
         verbose=verbose,
@@ -541,14 +553,14 @@ def run_bidirectional_extraction(
         motor_right_mask=masks['motor_right'],
         brainstem_mask=masks['brainstem'],
         fa_map=fa_data,
-        fa_threshold=getattr(args, 'seed_fa_threshold', 0.15),
-        seed_density=getattr(args, 'seed_density', 2),
+        fa_threshold=getattr(args, 'seed_fa_threshold', DEFAULT_SEED_FA_THRESHOLD),
+        seed_density=getattr(args, 'seed_density', DEFAULT_SEED_DENSITY_EXTRACT),
         step_size=0.5,
-        min_length=getattr(args, 'min_length', 30.0),
-        max_length=getattr(args, 'max_length', 200.0),
+        min_length=getattr(args, 'min_length', DEFAULT_MIN_LENGTH),
+        max_length=getattr(args, 'max_length', DEFAULT_MAX_LENGTH),
         random_seed=ctx.rng_tracking_seed(),
-        npeaks=getattr(args, 'npeaks', 1),
-        fit_method=getattr(args, 'fit_method', 'WLS'),
+        npeaks=getattr(args, 'npeaks', DEFAULT_NPEAKS),
+        fit_method=getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
         verbose=verbose,
     )
 

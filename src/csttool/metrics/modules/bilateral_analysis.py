@@ -181,11 +181,12 @@ def compute_li(left_value, right_value):
     pct_diff = 100 * abs_diff / mean_value if mean_value > 0 else 0.0
     
     # Interpret laterality
-    if abs(li) < 0.05:
+    from csttool.defaults import DEFAULT_LI_SYMMETRIC, DEFAULT_LI_MILD, DEFAULT_LI_MODERATE
+    if abs(li) < DEFAULT_LI_SYMMETRIC:
         interpretation = 'symmetric'
-    elif abs(li) < 0.10:
+    elif abs(li) < DEFAULT_LI_MILD:
         interpretation = 'mild asymmetry'
-    elif abs(li) < 0.20:
+    elif abs(li) < DEFAULT_LI_MODERATE:
         interpretation = 'moderate asymmetry'
     else:
         interpretation = 'strong asymmetry'

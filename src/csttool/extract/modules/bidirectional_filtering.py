@@ -364,11 +364,12 @@ def extract_cst_bidirectional(
         print(f"  Right CST: {stats['cst_right_count']:,} streamlines ({stats['right_yield']:.2f}% yield)")
         print(f"  Total:     {stats['cst_total_count']:,} streamlines  R/L = {lr:.3f}")
         print(f"  Forward/reverse inflation — left: {inflation_L:.2f}  right: {inflation_R:.2f}")
-        if artifact_index > 0.2:
-            print(f"  Artifact index: {artifact_index:.2f} (>0.20) — cortical interface "
+        from csttool.defaults import DEFAULT_ARTIFACT_INDEX_THRESHOLD
+        if artifact_index > DEFAULT_ARTIFACT_INDEX_THRESHOLD:
+            print(f"  Artifact index: {artifact_index:.2f} (>{DEFAULT_ARTIFACT_INDEX_THRESHOLD:.2f}) — cortical interface "
                   f"asymmetry suspected; residual L/R count difference may be methodological.")
         else:
-            print(f"  Artifact index: {artifact_index:.2f} (≤0.20) — inflation symmetric; "
+            print(f"  Artifact index: {artifact_index:.2f} (≤{DEFAULT_ARTIFACT_INDEX_THRESHOLD:.2f}) — inflation symmetric; "
                   f"residual L/R count difference is likely structural.")
         if 'length_mean' in stats:
             print(f"  Length: mean={stats['length_mean']:.1f}, "

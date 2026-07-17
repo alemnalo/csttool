@@ -301,7 +301,8 @@ def plot_brain_mask_overlay(
     viz_dir.mkdir(parents=True, exist_ok=True)
     
     # Get b0 volume
-    b0_idx = np.where(gtab.bvals < 50)[0]
+    from csttool.defaults import DEFAULT_B0_THRESHOLD
+    b0_idx = np.where(gtab.bvals < DEFAULT_B0_THRESHOLD)[0]
     if len(b0_idx) == 0:
         b0_idx = [0]
     b0 = data[..., b0_idx[0]]
@@ -551,7 +552,8 @@ def create_preprocessing_summary(
         data_original = data_preprocessed
     
     # Get b0 volume index
-    b0_idx = np.where(gtab.bvals < 50)[0]
+    from csttool.defaults import DEFAULT_B0_THRESHOLD
+    b0_idx = np.where(gtab.bvals < DEFAULT_B0_THRESHOLD)[0]
     if len(b0_idx) == 0:
         b0_idx = [0]
     vol_idx = b0_idx[0]
