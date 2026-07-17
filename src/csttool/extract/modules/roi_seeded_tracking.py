@@ -222,7 +222,8 @@ def extract_cst_roi_seeded(
     relative_peak_threshold=0.5,
     min_separation_angle=25,
     random_seed=None,
-    verbose=True
+    verbose=True,
+    npeaks=1
 ):
     """
     Extract bilateral CST using ROI-seeded tractography.
@@ -274,6 +275,8 @@ def extract_cst_roi_seeded(
         difference. If None, results vary between runs.
     verbose : bool, optional
         Print progress information.
+    npeaks : int, optional
+        Number of peaks to extract per voxel. Default is 1.
 
     Returns
     -------
@@ -332,7 +335,8 @@ def extract_cst_roi_seeded(
         default_sphere,
         relative_peak_threshold=relative_peak_threshold,
         min_separation_angle=min_separation_angle,
-        mask=wm_mask
+        mask=wm_mask,
+        npeaks=npeaks
     )
     
     if verbose:
