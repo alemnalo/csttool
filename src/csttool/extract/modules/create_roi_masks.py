@@ -14,6 +14,36 @@ from scipy.ndimage import binary_dilation
 from nibabel.orientations import apply_orientation, ornt_transform
 
 
+def _clamp_to_hemisphere_by_world_x(mask, affine, side, midline_x=0.0):
+    """Clamp a binary mask to one side of a world-X plane.
+
+    Parameters
+    ----------
+    mask : ndarray of bool
+    affine : ndarray, shape (4, 4)
+    side : str
+        'left'  → keep voxels with world X <  midline_x
+        'right' → keep voxels with world X >= midline_x
+    midline_x : float
+
+    Returns
+    -------
+    clamped : ndarray of bool
+    """
+    indices = np.argwhere(mask)
+    if len(indices) == 0:
+        return mask.copy()
+    world_x = indices @ affine[:3, :3].T + affine[:3, 3]
+    world_x = world_x[:, 0]
+    clamped = mask.copy()
+    for idx, wx in zip(indices, world_x):
+        if side == 'left' and wx >= midline_x:
+            clamped[tuple(idx)] = False
+        elif side == 'right' and wx < midline_x:
+            clamped[tuple(idx)] = False
+    return clamped
+
+
 def reorient_to_original(data, reorientation_transform):
     """
     Apply inverse of reorientation transform to convert RAS data back to original orientation.
@@ -117,7 +147,9 @@ def create_cst_roi_masks(
     save_masks=True,
     verbose=True,
     original_subject_affine=None,
-    reorientation_transform=None
+    reorientation_transform=None,
+    hemisphere_mask=None,
+    midline_x=None,
 ):
     """
     Create all ROI masks needed for bilateral CST extraction.
@@ -147,6 +179,21 @@ def create_cst_roi_masks(
         Save masks as NIfTI files. Default is True.
     verbose : bool, optional
         Print progress information. Default is True.
+    original_subject_affine : ndarray, optional
+        Original subject affine (before reorientation to RAS). Used when
+        saving masks to restore the original voxel orientation.
+    reorientation_transform : ndarray, optional
+        Transform that converted original → RAS. Used alongside
+        ``original_subject_affine`` to save masks in original orientation.
+    hemisphere_mask : ndarray of bool, optional
+        Per-voxel left-hemisphere label from ``compute_warped_midline``,
+        on the same voxel grid as the warped atlases. When provided,
+        ``motor_left`` is clamped to ``hemisphere_mask`` and
+        ``motor_right`` to ``~hemisphere_mask`` after dilation.
+    midline_x : float, optional
+        Scalar midline world X (from ``compute_warped_midline``). Used
+        as a fallback clamping plane when ``hemisphere_mask`` is None.
+        If both are None, no clamping is applied.
         
     Returns
     -------
@@ -239,7 +286,57 @@ def create_cst_roi_masks(
 
     masks['motor_left'] = motor_left_mask
     masks['motor_right'] = motor_right_mask
-    
+
+    # -------------------------------------------------------------------------
+    # Step 3.5: Clamp motor ROIs at the anatomical midline
+    # -------------------------------------------------------------------------
+    if hemisphere_mask is not None:
+        if verbose:
+            left_before = int(np.sum(motor_left_mask))
+            right_before = int(np.sum(motor_right_mask))
+
+        motor_left_mask = motor_left_mask & hemisphere_mask
+        motor_right_mask = motor_right_mask & (~hemisphere_mask)
+
+        masks['motor_left'] = motor_left_mask
+        masks['motor_right'] = motor_right_mask
+
+        if verbose:
+            left_after = int(np.sum(motor_left_mask))
+            right_after = int(np.sum(motor_right_mask))
+            left_clipped = left_before - left_after
+            right_clipped = right_before - right_after
+            if left_clipped or right_clipped:
+                print(f"\n    • Midline clamp — "
+                      f"left: {left_before:,} → {left_after:,} "
+                      f"({left_clipped} voxels clipped), "
+                      f"right: {right_before:,} → {right_after:,} "
+                      f"({right_clipped} voxels clipped)")
+    elif midline_x is not None:
+        if verbose:
+            left_before = int(np.sum(motor_left_mask))
+            right_before = int(np.sum(motor_right_mask))
+
+        motor_left_mask = _clamp_to_hemisphere_by_world_x(
+            motor_left_mask, subject_affine, side='left', midline_x=midline_x
+        )
+        motor_right_mask = _clamp_to_hemisphere_by_world_x(
+            motor_right_mask, subject_affine, side='right', midline_x=midline_x
+        )
+
+        masks['motor_left'] = motor_left_mask
+        masks['motor_right'] = motor_right_mask
+
+        if verbose:
+            left_after = int(np.sum(motor_left_mask))
+            right_after = int(np.sum(motor_right_mask))
+            left_clipped = left_before - left_after
+            right_clipped = right_before - right_after
+            if left_clipped or right_clipped:
+                print(f"\n    • Midline clamp (world X={midline_x:.2f}) — "
+                      f"left: {left_before:,} → {left_after:,}, "
+                      f"right: {right_before:,} → {right_after:,}")
+
     # -------------------------------------------------------------------------
     # Save masks
     # -------------------------------------------------------------------------

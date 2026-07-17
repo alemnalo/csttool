@@ -107,6 +107,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with all previously reported numbers. See `--fit-method` and `--npeaks` under Added.
   (AU13, AU17)
 
+- **Motor cortex ROIs are now clamped at the anatomical midline** using the warped-MNI
+  `hemisphere_mask` from AU11. Previously, dilated Harvard-Oxford motor labels could
+  bleed across the midline (documented: up to 9.5 mm into the contralateral hemisphere)
+  and the mutual-exclusivity filter only caught streamlines hitting *both* ROIs — a bled
+  ROI silently accepted wrong-hemisphere streamlines and attributed contralateral FA
+  values to the wrong side. The bidirectional method corrects the count artifact
+  but not this ROI-placement artifact on FA sampling. Clamping is applied after
+  dilation in `create_cst_roi_masks`; when `hemisphere_mask` is unavailable the scalar
+  `midline_x` is used as a fallback. Both are already carried by the `warped` dict.
+  (AU12)
+
 - **`dipy` is now pinned to `>=1.9,<2`** in `pyproject.toml` and `environment.yml`. It was
   entirely unpinned, so an environment rebuild could silently install a version that breaks
   tracking outright.

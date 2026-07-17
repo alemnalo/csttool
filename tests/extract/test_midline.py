@@ -343,3 +343,196 @@ def test_extract_cst_passthrough_midline_exclusion_legacy_scalar():
     )
     assert result['stats']['midline_excluded'] == 1
     assert len(result['cst_left']) == 1
+
+
+# --------------------------------------------------------------------------- #
+# AU12: motor ROI clamping at the warped-MNI midline
+# --------------------------------------------------------------------------- #
+def test_clamp_motor_rois_at_hemisphere_mask():
+    """A motor_left mask that bleeds into the right hemisphere is clamped back."""
+    from csttool.extract.modules.create_roi_masks import create_cst_roi_masks
+
+    shape = (20, 20, 20)
+    vx = 2.0
+    affine = np.diag([vx, vx, vx, 1.0])
+
+    # Hemisphere mask: left = i < 10, right = i >= 10 (world X=0 at i=0, so X<20=left)
+    hemisphere_mask = np.zeros(shape, dtype=bool)
+    hemisphere_mask[:10] = True
+
+    # Motor labels extracted from warped atlas: left label=7 crosses i=10 by 2 voxels
+    warped_cortical = np.zeros(shape, dtype=np.int16)
+    warped_cortical[6:12, 8:12, 8:12] = 7   # motor left, bleeds 2 voxels right
+    warped_cortical[10:16, 8:12, 8:12] = 107  # motor right, entirely on right side
+
+    # Brainstem label (not clamped, but needed for the call)
+    warped_subcortical = np.zeros(shape, dtype=np.int16)
+    warped_subcortical[8:12, 8:12, 8:12] = 3  # arbitrary brainstem label
+
+    roi_config = {
+        'brainstem': {'label': 3},
+        'motor_left': {'label': 7},
+        'motor_right': {'label': 107},
+    }
+
+    masks = create_cst_roi_masks(
+        warped_cortical, warped_subcortical, affine, roi_config,
+        dilate_brainstem=0, dilate_motor=0,
+        save_masks=False, verbose=False,
+        hemisphere_mask=hemisphere_mask,
+    )
+
+    motor_left = masks['motor_left']
+    motor_right = masks['motor_right']
+
+    # Motor left must not have any voxels in the right hemisphere
+    assert not np.any(motor_left & (~hemisphere_mask)), \
+        "motor_left should be clamped to the left hemisphere only"
+
+    # Motor right must not have any voxels in the left hemisphere
+    assert not np.any(motor_right & hemisphere_mask), \
+        "motor_right should be clamped to the right hemisphere only"
+
+    # Brainstem must be untouched (it's a midline structure)
+    assert masks['brainstem'].sum() > 0
+
+
+def test_clamp_motor_rois_with_dilation():
+    """Clamping happens AFTER dilation so dilated-into-other-hemi voxels are clipped."""
+    from csttool.extract.modules.create_roi_masks import create_cst_roi_masks
+
+    shape = (20, 20, 20)
+    vx = 2.0
+    affine = np.diag([vx, vx, vx, 1.0])
+
+    hemisphere_mask = np.zeros(shape, dtype=bool)
+    hemisphere_mask[:10] = True
+
+    # Left motor label sits right against the midline at i=9 (last left voxel).
+    # Dilation with iterations=1 will push it into i=10 (right hemisphere).
+    warped_cortical = np.zeros(shape, dtype=np.int16)
+    warped_cortical[7:10, 8:12, 8:12] = 7  # left motor, touches midline
+    warped_cortical[10:13, 8:12, 8:12] = 107  # right motor
+
+    warped_subcortical = np.zeros(shape, dtype=np.int16)
+    warped_subcortical[8:12, 8:12, 8:12] = 3
+
+    roi_config = {
+        'brainstem': {'label': 3},
+        'motor_left': {'label': 7},
+        'motor_right': {'label': 107},
+    }
+
+    masks_no_clamp = create_cst_roi_masks(
+        warped_cortical, warped_subcortical, affine, roi_config,
+        dilate_brainstem=0, dilate_motor=1,
+        save_masks=False, verbose=False,
+        hemisphere_mask=None,  # no clamping
+    )
+
+    masks_clamped = create_cst_roi_masks(
+        warped_cortical, warped_subcortical, affine, roi_config,
+        dilate_brainstem=0, dilate_motor=1,
+        save_masks=False, verbose=False,
+        hemisphere_mask=hemisphere_mask,
+    )
+
+    left_no_clamp = masks_no_clamp['motor_left']
+    left_clamped = masks_clamped['motor_left']
+
+    # Without clamping, dilation bleeds into the right hemisphere
+    assert np.any(left_no_clamp & (~hemisphere_mask)), \
+        "without clamping, dilation should cross the midline"
+
+    # With clamping, those bleed voxels are removed
+    assert not np.any(left_clamped & (~hemisphere_mask)), \
+        "clamped mask must stay strictly in the left hemisphere"
+
+    # The clamped mask should be strictly smaller (or equal) than the unclamped one
+    assert left_clamped.sum() <= left_no_clamp.sum()
+
+    # But not empty — it still has its original left-hemisphere voxels
+    assert left_clamped.sum() > 0
+
+
+def test_clamp_motor_rois_scalar_midline_fallback():
+    """When hemisphere_mask is None but midline_x is given, the scalar plane is used."""
+    from csttool.extract.modules.create_roi_masks import create_cst_roi_masks
+
+    shape = (20, 20, 20)
+    affine = np.eye(4)  # 1 mm isotropic, world X = i (no translation)
+
+    # Midline at world X = 10 mm (i=10). Left = i < 10.
+    midline_x = 10.0
+
+    warped_cortical = np.zeros(shape, dtype=np.int16)
+    warped_cortical[6:13, 8:12, 8:12] = 7   # left motor: i=6..12, bleeds to i=12
+    warped_cortical[10:16, 8:12, 8:12] = 107  # right motor: i=10..15
+
+    warped_subcortical = np.zeros(shape, dtype=np.int16)
+    warped_subcortical[8:12, 8:12, 8:12] = 3
+
+    roi_config = {
+        'brainstem': {'label': 3},
+        'motor_left': {'label': 7},
+        'motor_right': {'label': 107},
+    }
+
+    masks = create_cst_roi_masks(
+        warped_cortical, warped_subcortical, affine, roi_config,
+        dilate_brainstem=0, dilate_motor=0,
+        save_masks=False, verbose=False,
+        hemisphere_mask=None,
+        midline_x=midline_x,
+    )
+
+    motor_left = masks['motor_left']
+    motor_right = masks['motor_right']
+
+    # All motor_left voxels must have world X < 10 (i < 10)
+    left_indices = np.argwhere(motor_left)
+    if len(left_indices) > 0:
+        left_world_x = left_indices @ affine[:3, :3].T + affine[:3, 3]
+        assert np.all(left_world_x[:, 0] < midline_x), \
+            "motor_left must be clamped left of midline_x"
+
+    # All motor_right voxels must have world X >= 10 (i >= 10)
+    right_indices = np.argwhere(motor_right)
+    if len(right_indices) > 0:
+        right_world_x = right_indices @ affine[:3, :3].T + affine[:3, 3]
+        assert np.all(right_world_x[:, 0] >= midline_x), \
+            "motor_right must be clamped right of midline_x"
+
+
+def test_clamp_motor_rois_none_is_noop():
+    """When both hemisphere_mask and midline_x are None, no clamping occurs."""
+    from csttool.extract.modules.create_roi_masks import create_cst_roi_masks
+
+    shape = (20, 20, 20)
+    affine = np.eye(4)
+
+    warped_cortical = np.zeros(shape, dtype=np.int16)
+    warped_cortical[6:13, 8:12, 8:12] = 7   # bleeds across hypothetical midline
+    warped_cortical[10:16, 8:12, 8:12] = 107
+
+    warped_subcortical = np.zeros(shape, dtype=np.int16)
+    warped_subcortical[8:12, 8:12, 8:12] = 3
+
+    roi_config = {
+        'brainstem': {'label': 3},
+        'motor_left': {'label': 7},
+        'motor_right': {'label': 107},
+    }
+
+    masks = create_cst_roi_masks(
+        warped_cortical, warped_subcortical, affine, roi_config,
+        dilate_brainstem=0, dilate_motor=0,
+        save_masks=False, verbose=False,
+        hemisphere_mask=None,
+        midline_x=None,
+    )
+
+    # Without clamping, the motor_left should include all labeled voxels
+    # (i=6..9 after label 107 overwrites i=10..12: 4 slabs × 4×4)
+    assert masks['motor_left'].sum() == 4 * 4 * 4
+    assert masks['motor_right'].sum() == 6 * 4 * 4   # 6 slabs × 4×4

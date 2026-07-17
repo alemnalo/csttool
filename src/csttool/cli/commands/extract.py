@@ -159,7 +159,9 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
             subject_id=args.subject_id,
             verbose=verbose,
             original_subject_affine=warped.get('original_subject_affine'),
-            reorientation_transform=warped.get('reorientation_transform')
+            reorientation_transform=warped.get('reorientation_transform'),
+            hemisphere_mask=warped.get('hemisphere_mask'),
+            midline_x=warped.get('midline_x'),
         )
     except Exception as e:
         print(f"  ✗ Creating ROI masks failed: {e}")
@@ -356,7 +358,9 @@ def run_roi_seeded_extraction(
         subject_id=subject_id,
         verbose=verbose,
         original_subject_affine=warped.get('original_subject_affine'),
-        reorientation_transform=warped.get('reorientation_transform')
+        reorientation_transform=warped.get('reorientation_transform'),
+        hemisphere_mask=warped.get('hemisphere_mask'),
+        midline_x=warped.get('midline_x'),
     )
     
     # Step 4: ROI-seeded extraction
@@ -521,6 +525,8 @@ def run_bidirectional_extraction(
         verbose=verbose,
         original_subject_affine=warped.get('original_subject_affine'),
         reorientation_transform=warped.get('reorientation_transform'),
+        hemisphere_mask=warped.get('hemisphere_mask'),
+        midline_x=warped.get('midline_x'),
     )
 
     if verbose:
