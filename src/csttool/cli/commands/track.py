@@ -50,6 +50,10 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
     
     try:
         data, affine, img = load_nifti(str(preproc_nii), return_img=True)
+    except (EOFError, OSError) as e:
+        print(f"  ✗ Preprocessed NIfTI appears truncated or corrupt and could not be read: {preproc_nii}")
+        print(f"    ({type(e).__name__}: {e})")
+        return None
     except Exception as e:
         print(f"  ✗ Error loading NIfTI: {e}")
         return None

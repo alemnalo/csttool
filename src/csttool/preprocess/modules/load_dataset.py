@@ -107,6 +107,18 @@ def load_dataset(dir_path: str, fname: str):
     )
     num_of_gradients = len(gtab)
 
+    # AU31: confirm the NIfTI data array is actually readable on disk. A
+    # truncated .nii.gz loads its header fine (nib.load succeeds, shape looks
+    # correct) but get_fdata()/dataobj raises EOFError deep in the pipeline.
+    # Surface that here as a clear "file truncated" message naming the path.
+    try:
+        _ = nii.get_fdata(dtype=np.float32, caching="unchanged")
+    except (EOFError, OSError) as e:
+        raise ValueError(
+            f"NIfTI file appears truncated or corrupt and could not be read: "
+            f"{nii_path}\n  ({type(e).__name__}: {e})"
+        ) from e
+
     
     # Try to load JSON sidecar
     metadata = {}

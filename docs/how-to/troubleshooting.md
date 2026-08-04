@@ -30,6 +30,17 @@ csttool preprocess --nifti raw.nii.gz --out ./preproc --denoise-method nlmeans
 
 **Fix**: This usually means the tractogram and FA map come from different processing runs with different reslicing. Re-run `track` and `extract` against the same `preprocess` output. As a last-resort debug, pass `--skip-coordinate-validation` — but treat any extraction it produces with suspicion.
 
+### Degenerate / pathological inputs
+
+These are caught and reported rather than failing silently:
+
+- **Truncated NIfTI** (`load`/`track`): the header loads but the data array cannot be read, raising a clear `NIfTI file appears truncated or corrupt` error naming the path — re-convert from DICOM or restore the file.
+- **All-zero DWI** (`track`): yields FA = 0 everywhere and an empty white-matter mask; `fit_tensors` warns `No white-matter voxels found … tractography will produce zero streamlines`. This is a valid but useless input — the run completes with empty output.
+- **Single-direction DWI** (`track`): too few directions for the requested SH order; `validate_sh_order` warns and reduces the order automatically.
+- **Misordered / malformed bvec/bval**: rejected at load by the gradient-table validator (see [Data requirements](../getting-started/data-requirements.md#gradient-table-validation-bvalsbvecs)).
+- **Zero-streamline tractogram** (`extract`): returns a well-formed empty result (zero counts, `extraction_rate = 0`), not a crash.
+- **DICOM with missing tags** (`import`): defaulted to empty/zero values and classified as unsuitable for tractography, rather than crashing.
+
 ## Installation
 
 ### WeasyPrint fails to install or render PDFs

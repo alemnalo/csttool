@@ -56,6 +56,21 @@ def fit_tensors(data, gtab, brain_mask, fa_thresh=0.2, visualize=False, verbose=
     white_matter = binary_dilation(white_matter, iterations=1)
     wm_after_dilation = white_matter.sum()
 
+    # AU31: warn (not fail) on an empty white-matter mask. An all-zero or
+    # otherwise degenerate DWI legitimately yields FA <= threshold everywhere,
+    # which then yields zero seeds and zero streamlines downstream — a silent
+    # empty success. Surface it as a warning so the empty output is not a
+    # mystery, but do not raise: all-zero is a valid, if useless, input.
+    if wm_after_dilation == 0:
+        import warnings
+        warnings.warn(
+            "No white-matter voxels found (FA <= "+str(fa_thresh)+" everywhere). "
+            "The DWI data may be all-zero or have no diffusion contrast; "
+            "tractography will produce zero streamlines.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     if verbose:
         print(f"    • White matter (FA > {fa_thresh}):")
         print(f"    ├─ Before dilation: {wm_before_dilation:,} voxels")

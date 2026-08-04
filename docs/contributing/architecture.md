@@ -71,10 +71,13 @@ If you add a new stochastic step anywhere in the pipeline, plumb it through this
 tests/
 ├── unit/             # pure-Python, no I/O on real datasets
 ├── integration/      # CLI invocations on small synthetic data
+├── edge_cases/        # AU31: pathological inputs (zero streamlines, all-zero
+│                     # DWI, single direction, misordered bvec/bval,
+│                     # truncated NIfTI, DICOM missing tags)
 └── fixtures/         # tiny synthetic DWI volumes, gradient files
 ```
 
-Unit tests live next to the module they cover when practical (the layout mirrors `src/csttool/`). Integration tests live under `tests/integration/` and are slower.
+Unit tests live next to the module they cover when practical (the layout mirrors `src/csttool/`). Integration tests live under `tests/integration/` and are slower. The `tests/edge_cases/` package (AU31) characterises pathological inputs across module boundaries — it pins current behaviour so a regression that turns a clear error into a silent failure (or vice versa) is caught.
 
 ## Where to make common changes
 
