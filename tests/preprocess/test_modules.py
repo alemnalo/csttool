@@ -104,6 +104,30 @@ class TestLoadDataset:
         nii, gtab, _, _ = load_dataset(str(tmp_path), fname)
         assert len(gtab.bvals) == len(synthetic_bvals)
 
+    def test_malformed_gradients_fail_loudly(self, tmp_path, synthetic_nifti, synthetic_bvals):
+        """AU21: a malformed gradient table (here, non-unit DWI bvec) must
+        fail at load rather than silently building a corrupt gradient table.
+        """
+        from csttool.preprocess.modules.gradient_validation import (
+            GradientTableValidationError,
+        )
+        fname = "test_bad_grads"
+        nib.save(synthetic_nifti, tmp_path / f"{fname}.nii.gz")
+        np.savetxt(tmp_path / f"{fname}.bval", synthetic_bvals)
+        # DWI bvecs with norm 2 (not unit) — a real corruption.
+        bad_bvecs = np.array([
+            [0, 0, 0],
+            [2, 0, 0],
+            [0, 2, 0],
+            [0, 0, 2],
+            [2, 2, 0],
+            [2, 0, 2],
+            [0, 2, 2],
+        ], dtype=float)
+        np.savetxt(tmp_path / f"{fname}.bvec", bad_bvecs.T)
+        with pytest.raises(GradientTableValidationError, match="unit-norm"):
+            load_dataset(str(tmp_path), fname)
+
     @patch('csttool.preprocess.modules.load_dataset.dicom2nifti.dicom_series_to_nifti')
     @patch('csttool.preprocess.modules.load_dataset.nib.load')
     def test_dicom_conversion(self, mock_load, mock_dicom2nifti, tmp_path):
@@ -114,6 +138,7 @@ class TestLoadDataset:
         
         fname = "converted"
         nifti_dir = tmp_path / "nifti"
+        nifti_dir.mkdir(parents=True, exist_ok=True)
         
         # Mock returns
         mock_dicom2nifti.return_value = {
@@ -122,15 +147,32 @@ class TestLoadDataset:
             "BVEC_FILE": str(nifti_dir / f"{fname}.bvec")
         }
         
-        # We need to mock reading the bvals/bvecs if we want the rest to succeed, 
-        # or we just mock read_bvals_bvecs
+        # Return a real (non-RAS) DWI image from the nib.load mock so the AU21
+        # image+bvec reorientation runs end-to-end. A bare MagicMock would
+        # break reorient_dwi_to_ras, which needs a real affine + get_fdata().
+        # LPS-ish affine: x and y inverted, z normal — a real reorientation case.
+        raw_affine = np.array([[-1, 0, 0, 10],
+                               [0, -1, 0, 20],
+                               [0, 0, 1, 0],
+                               [0, 0, 0, 1]], dtype=float)
+        raw_data = np.random.random((4, 4, 4, 2)).astype(np.float32)
+        raw_img = nib.Nifti1Image(raw_data, raw_affine)
+        mock_load.return_value = raw_img
+        
+        # mock read_bvals_bvecs so the gtab build + reorientation use a known pair.
         with patch('csttool.preprocess.modules.load_dataset.read_bvals_bvecs') as mock_read:
-            mock_read.return_value = (np.array([0, 1000]), np.array([[0,0,0], [1,0,0]]))
+            mock_read.return_value = (np.array([0, 1000]), np.array([[0, 0, 0], [1, 0, 0]]))
             
             nii, gtab, out_dir, metadata = load_dataset(str(dcm_dir), fname)
             
             mock_dicom2nifti.assert_called_once()
+            # AU21: conversion must use reorient_nifti=False (image+bvecs stay
+            # consistent in scanner space; we reorient ourselves).
+            _, kwargs = mock_dicom2nifti.call_args
+            assert kwargs.get("reorient_nifti") is False
             assert str(out_dir) == str(nifti_dir)
+            # The loaded image is now RAS (the reoriented one), not the LPS input.
+            assert nib.aff2axcodes(nii.affine) == ('R', 'A', 'S')
 
 
 class TestBackgroundSegmentation:

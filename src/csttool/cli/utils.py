@@ -9,9 +9,12 @@ from datetime import datetime
 from time import time
 
 from dipy.io import read_bvals_bvecs
-from dipy.core.gradients import gradient_table
 
 from csttool import __version__
+from csttool.defaults import DEFAULT_B0_THRESHOLD
+from csttool.preprocess.modules.gradient_validation import (
+    validate_gradient_table,
+)
 from csttool.preprocess.modules.load_dataset import load_dataset as load_dataset_module
 
 def add_io_arguments(p: argparse.ArgumentParser) -> None:
@@ -50,17 +53,37 @@ def resolve_nifti(args: argparse.Namespace) -> Path:
             pass
 
         import dicom2nifti
+        import nibabel as nib
+        import numpy as np
+        from csttool.preprocess.modules.gradient_validation import (
+            reorient_dwi_to_ras,
+        )
 
         nifti_dir = args.out / "nifti"
         nifti_dir.mkdir(parents=True, exist_ok=True)
         output_nii = nifti_dir / (stem + ".nii.gz")
 
         print(f"  → Output: {output_nii}")
-        dicom2nifti.dicom_series_to_nifti(
+        # AU21: convert with reorient_nifti=False (image + bvecs in the same
+        # scanner voxel space), then reorient both to RAS together — see
+        # gradient_validation.reorient_dwi_to_ras. dicom2nifti's reorient_nifti
+        # reorients only the image, leaving bvecs in scanner space and silently
+        # flipping gradient directions relative to the stored array.
+        result = dicom2nifti.dicom_series_to_nifti(
             str(args.dicom),
             str(output_nii),
-            reorient_nifti=True
+            reorient_nifti=False,
         )
+        bval_p = result.get("BVAL_FILE")
+        bvec_p = result.get("BVEC_FILE")
+        if bvec_p and bval_p:
+            from dipy.io import read_bvals_bvecs
+            raw_img = nib.load(str(output_nii))
+            _bvals, raw_bvecs = read_bvals_bvecs(str(bval_p), str(bvec_p))
+            ras_img, ras_bvecs = reorient_dwi_to_ras(raw_img, raw_bvecs)
+            nib.save(ras_img, str(output_nii))
+            # Only the bvec changes under reorientation; bvals are invariant.
+            np.savetxt(bvec_p, ras_bvecs.T, fmt="%.8f")
         nii = output_nii
 
     else:
@@ -170,7 +193,12 @@ def get_gtab_for_preproc(preproc_nii: Path):
     print(f"  → bvec: {bvec}")
 
     bvals, bvecs = read_bvals_bvecs(str(bval), str(bvec))
-    gtab = gradient_table(bvals, bvecs=bvecs)
+    # AU21: validate the gradient table at load rather than letting a malformed
+    # table silently corrupt the tensor fit. Uses the single-source-of-truth
+    # b0 threshold so the gtab's b0s_mask matches the rest of the pipeline.
+    gtab = validate_gradient_table(
+        bvals, bvecs, b0_threshold=DEFAULT_B0_THRESHOLD
+    )
     return gtab
 
 

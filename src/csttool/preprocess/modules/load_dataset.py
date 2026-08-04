@@ -9,10 +9,16 @@ import os
 from pathlib import Path
 
 import dicom2nifti
+import numpy as np
 
 import nibabel as nib
-from dipy.core.gradients import gradient_table
 from dipy.io import read_bvals_bvecs
+
+from csttool.defaults import DEFAULT_B0_THRESHOLD
+from csttool.preprocess.modules.gradient_validation import (
+    validate_gradient_table,
+    reorient_dwi_to_ras,
+)
 
 def load_dataset(dir_path: str, fname: str):
     """
@@ -44,20 +50,37 @@ def load_dataset(dir_path: str, fname: str):
     # Check if DICOM directory
     if any(f.suffix == ".dcm" for f in dir_path.iterdir()):
         print(f"DICOM directory detected: {dir_path}")
-        # Convert DICOM to NIfTI
-        # Save NIfTI, bval and bvec files to a directory called nifti one level up from dir_path
+        # Convert DICOM to NIfTI.
+        # AU21: dicom2nifti's ``reorient_nifti=True`` reorients the *image* to
+        # LAS but leaves the *bvecs* in the original scanner voxel space, so the
+        # two become mutually inconsistent (a silent gradient flip that
+        # corrupts the tensor fit). We therefore convert with
+        # ``reorient_nifti=False`` (image + bvecs both in scanner voxel space,
+        # consistent) and reorient *both* to RAS together below, matching the
+        # dcm2niix primary path's convention.
         print(f"Converting DICOM to NIfTI...")
         nifti_dir = dir_path.parent / "nifti"
         nifti_dir.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
         result = dicom2nifti.dicom_series_to_nifti(
             str(dir_path),
             str(nifti_dir / (fname + ".nii.gz")),
-            reorient_nifti=True
+            reorient_nifti=False,
         )
-        nii = nib.load(result["NII_FILE"])
+        nii_path = result["NII_FILE"]
         bval_path = result.get("BVAL_FILE")
-        bvec_path = result.get("BVEC_FILE") 
-        nii_path = result["NII_FILE"] # Ensure path is available for sidecar lookup 
+        bvec_path = result.get("BVEC_FILE")
+
+        # Reorient image + bvecs to RAS together and rewrite the bvec sidecar so
+        # every later stage (get_gtab_for_preproc reads these same files) sees a
+        # consistent image/bvec pair. b-values are orientation-invariant, so the
+        # .bval file is left untouched.
+        raw_img = nib.load(nii_path)
+        _bvals, raw_bvecs = read_bvals_bvecs(bval_path, bvec_path)
+        ras_img, ras_bvecs = reorient_dwi_to_ras(raw_img, raw_bvecs)
+        nib.save(ras_img, nii_path)
+        # bvecs are stored transposed (3, N) per FSL/dicom2nifti convention.
+        np.savetxt(bvec_path, ras_bvecs.T, fmt="%.8f")
+        nii = ras_img
     else:
         print(f"NIfTI directory detected: {dir_path}")
         nifti_dir = dir_path
@@ -74,9 +97,14 @@ def load_dataset(dir_path: str, fname: str):
         
         nii = nib.load(nii_path)
 
-    # Read bvalues and bvectors, build a gradient table
+    # Read bvalues and bvectors, build a validated gradient table.
+    # AU21: validate at load (unit-norm DWI bvecs, non-negative bvals, b0>=1,
+    # shape/count match) so a malformed table fails loudly instead of silently
+    # corrupting the tensor fit.
     bvals, bvecs = read_bvals_bvecs(bval_path, bvec_path)
-    gtab = gradient_table(bvals=bvals, bvecs=bvecs)
+    gtab = validate_gradient_table(
+        bvals, bvecs, b0_threshold=DEFAULT_B0_THRESHOLD
+    )
     num_of_gradients = len(gtab)
 
     

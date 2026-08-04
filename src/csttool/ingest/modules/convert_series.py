@@ -203,7 +203,23 @@ def _run_dicom2nifti(
     reorient: bool,
     verbose: bool,
 ) -> None:
-    """Run dicom2nifti and populate *result* in-place."""
+    """Run dicom2nifti and populate *result* in-place.
+
+    AU21: dicom2nifti's ``reorient_nifti`` reorients the *image* array to LAS
+    but never reorients the *bvecs*, leaving them in the original scanner voxel
+    space — a silent gradient flip that corrupts the tensor fit. We therefore
+    ignore dicom2nifti's reorientation flag, convert in the native (scanner)
+    voxel space where image and bvecs are mutually consistent, and reorient
+    *both* to RAS together via ``reorient_dwi_to_ras``. RAS+ matches the dcm2niix
+    primary path's convention. The ``reorient`` argument is kept for API
+    compatibility but now only controls whether a RAS reorientation is applied
+    (True, the default) — there is no longer a dicom2nifti LAS step.
+    """
+    import nibabel as nib
+    import numpy as np
+    from dipy.io import read_bvals_bvecs
+    from csttool.preprocess.modules.gradient_validation import reorient_dwi_to_ras
+
     if verbose:
         print("    → Converting via dicom2nifti...")
 
@@ -212,23 +228,43 @@ def _run_dicom2nifti(
     conversion_result = _d2n.dicom_series_to_nifti(
         str(dicom_dir),
         output_file=str(output_nii),
-        reorient_nifti=reorient,
+        # Native (scanner) voxel space: image + bvecs consistent. We reorient
+        # to RAS ourselves below so the bvecs come along.
+        reorient_nifti=False,
     )
 
     nii_path = conversion_result.get("NII_FILE")
     if not nii_path or not Path(nii_path).exists():
         raise RuntimeError("dicom2nifti produced no output file")
 
+    bval_path = conversion_result.get("BVAL_FILE")
+    bvec_path = conversion_result.get("BVEC_FILE")
+
+    # Reorient image + bvecs to RAS together, rewriting the on-disk bvec sidecar
+    # so every later stage reads a consistent pair. b-values are invariant.
+    if bvec_path and bval_path and reorient:
+        try:
+            raw_img = nib.load(str(nii_path))
+            _bvals, raw_bvecs = read_bvals_bvecs(str(bval_path), str(bvec_path))
+            ras_img, ras_bvecs = reorient_dwi_to_ras(raw_img, raw_bvecs)
+            nib.save(ras_img, str(nii_path))
+            np.savetxt(str(bvec_path), ras_bvecs.T, fmt="%.8f")
+        except Exception as e:
+            result["warnings"].append(
+                f"DWI bvec reorientation failed: {e}. The image and bvecs may be "
+                "in inconsistent voxel spaces; verify before tractography."
+            )
+            if verbose:
+                print(f"    ⚠️  {e}")
+
     result["nifti_path"] = Path(nii_path)
     result["success"] = True
 
-    bval_path = conversion_result.get("BVAL_FILE")
     if bval_path and Path(bval_path).exists():
         result["bval_path"] = Path(bval_path)
     else:
         result["warnings"].append("No .bval file generated")
 
-    bvec_path = conversion_result.get("BVEC_FILE")
     if bvec_path and Path(bvec_path).exists():
         result["bvec_path"] = Path(bvec_path)
     else:
