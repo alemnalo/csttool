@@ -319,6 +319,88 @@ def resample_atlas_to_mni_grid(atlas_img, mni_shape, mni_affine, verbose=True):
     return resampled_data
 
 
+# Motor-ROI labels for the centroid QC (Harvard-Oxford cortical precentral
+# split: 7 = left, 107 = right). Hard-coded here to match CST_ROI_CONFIG and
+# the split applied by ``split_atlas_hemispheres_mni``.
+_MOTOR_LEFT_LABEL = 7
+_MOTOR_RIGHT_LABEL = 107
+
+
+def compute_atlas_warp_qc(
+    warped_atlas,
+    orig_labels,
+    subject_affine,
+    midline_x=0.0,
+    motor_left_label=_MOTOR_LEFT_LABEL,
+    motor_right_label=_MOTOR_RIGHT_LABEL,
+):
+    """Build the assertable atlas-warp QC dict (AU33).
+
+    The previous ``warp_atlas_to_subject`` only ``print()``ed its QC checks
+    (label-count change, motor-centroid side, motor Z-difference), so they were
+    assert-free: a registration that silently dropped a label or swapped a
+    hemisphere would warn to stdout and pass. This pure function lifts those
+    checks into a dict so a test (or a caller) can assert on them.
+
+    Parameters
+    ----------
+    warped_atlas : ndarray of int
+        Atlas labels after warping to subject space.
+    orig_labels : array-like of int
+        Unique nonzero labels of the atlas *before* warping (on the grid that
+        was actually warped, i.e. after any resample to the MNI grid).
+    subject_affine : ndarray, shape (4, 4)
+        Affine of the subject grid the atlas was warped onto (world coords).
+    midline_x : float, optional
+        Subject-space anatomical midline world X (from
+        ``compute_warped_midline``). Motor centroids are compared against it.
+    motor_left_label, motor_right_label : int, optional
+        Label values for the L/R motor cortex. Defaults match the
+        Harvard-Oxford cortical split (7 / 107).
+
+    Returns
+    -------
+    qc : dict
+        Always contains ``labels_original``, ``labels_warped``,
+        ``labels_preserved`` and ``label_counts``. When both motor labels
+        survive warping it additionally carries the motor-centroid fields
+        (see ``warp_atlas_to_subject``'s return docstring).
+    """
+    warped_unique = np.unique(warped_atlas[warped_atlas > 0])
+    orig = np.asarray(orig_labels)
+    orig_unique = np.unique(orig[orig > 0]) if orig.size else np.array([], dtype=int)
+
+    label_counts = {int(l): int(np.sum(warped_atlas == l)) for l in warped_unique}
+    labels_preserved = set(orig_unique.tolist()) == set(warped_unique.tolist())
+    qc = {
+        'labels_original': sorted(int(l) for l in orig_unique),
+        'labels_warped': sorted(int(l) for l in warped_unique),
+        'labels_preserved': bool(labels_preserved),
+        'label_counts': label_counts,
+    }
+
+    if motor_left_label in warped_unique and motor_right_label in warped_unique:
+        left_coords = np.array(np.where(warped_atlas == motor_left_label)).T
+        right_coords = np.array(np.where(warped_atlas == motor_right_label)).T
+        left_centroid = left_coords.mean(axis=0)
+        right_centroid = right_coords.mean(axis=0)
+        left_world = subject_affine @ np.append(left_centroid, 1)
+        right_world = subject_affine @ np.append(right_centroid, 1)
+        left_x = float(left_world[0])
+        right_x = float(right_world[0])
+        left_z = float(left_world[2])
+        right_z = float(right_world[2])
+        qc.update({
+            'motor_left_centroid_world': (left_x, float(left_world[1]), left_z),
+            'motor_right_centroid_world': (right_x, float(right_world[1]), right_z),
+            'left_centroid_right_of_midline': bool(left_x > midline_x),
+            'right_centroid_left_of_midline': bool(right_x < midline_x),
+            'motor_z_diff_mm': float(abs(left_z - right_z)),
+            'midline_x': float(midline_x),
+        })
+    return qc
+
+
 def warp_atlas_to_subject(
     atlas_img,
     mapping,
@@ -367,6 +449,21 @@ def warp_atlas_to_subject(
     -------
     warped_atlas : ndarray
         Atlas labels warped to subject space. Shape matches subject_shape.
+    qc : dict
+        Assertable atlas-warp QC (AU33). The previous implementation only
+        ``print()``ed these checks, so label-count changes and motor-centroid
+        side/Z warnings were assert-free. The dict always contains:
+        - ``labels_original`` / ``labels_warped``: sorted lists of unique
+          nonzero labels before/after warping.
+        - ``labels_preserved``: True iff the warped label *set* equals the
+          original (count change alone is necessary but not sufficient — a
+          resample can split/merge labels while keeping the count).
+        - ``label_counts``: ``{label: voxel_count}`` of the warped atlas.
+        When both motor labels (7 and 107) survive warping it additionally
+        carries ``motor_left_centroid_world``, ``motor_right_centroid_world``
+        (xyz), ``left_centroid_right_of_midline``,
+        ``right_centroid_left_of_midline``, ``motor_z_diff_mm`` and
+        ``midline_x`` — the same values the verbose path prints as warnings.
     """
     if interpolation != 'nearest':
         raise ValueError(
@@ -374,79 +471,85 @@ def warp_atlas_to_subject(
             "Linear interpolation creates invalid fractional labels."
         )
     
-    atlas_data = atlas_img.get_fdata()
-    atlas_shape = atlas_data.shape
-    
+    # Use the *resampled* atlas data (if a resample happened) as the label-set
+    # ground truth, so the label-preservation check is not confused by the
+    # Harvard-Oxford grid differing from the MNI grid.
+    atlas_data_raw = atlas_img.get_fdata()
+    atlas_shape = atlas_data_raw.shape
+    orig_labels = np.unique(atlas_data_raw[atlas_data_raw > 0])
+
     if verbose:
-        unique_labels = np.unique(atlas_data[atlas_data > 0])
         print(f"  → Warping atlas to subject space...")
-    if verbose:
         print(f"    • Atlas shape: {atlas_shape}")
         print(f"    • Target shape: {subject_shape}")
-        print(f"    • Unique labels: {len(unique_labels)}")
+        print(f"    • Unique labels: {len(orig_labels)}")
         print(f"    • Interpolation: {interpolation}")
-    
+
     # Check if atlas needs resampling to match MNI template grid
     if mni_shape is not None and atlas_shape != mni_shape:
         if verbose:
             print(f"    ⚠️ Atlas grid {atlas_shape} differs from MNI template {mni_shape}")
         atlas_data = resample_atlas_to_mni_grid(atlas_img, mni_shape, mni_affine, verbose=verbose)
-    
+        # Resampling (even nearest-neighbour) can shift a label's voxel set, so
+        # recompute the original label set on the resampled grid.
+        orig_labels = np.unique(atlas_data[atlas_data > 0])
+    else:
+        atlas_data = atlas_data_raw
+
     # Apply the mapping with nearest-neighbor interpolation
     # Registration was: static=subject, moving=MNI template
     # mapping.transform() warps from domain (MNI) to codomain (subject)
     # Must provide image_world2grid to tell DIPY how to interpret the input coordinates
     image_world2grid = np.linalg.inv(mni_affine) if mni_affine is not None else None
-    
+
     warped_atlas = mapping.transform(
         atlas_data,
         interpolation=interpolation,
         image_world2grid=image_world2grid
     )
-    
+
     # Ensure integer labels
     warped_atlas = np.round(warped_atlas).astype(np.int16)
-    
+
     if verbose:
         warped_unique = np.unique(warped_atlas[warped_atlas > 0])
         print(f"    • Warped labels: {len(warped_unique)}")
 
-    if verbose:
-        # Sanity check: labels should be preserved
-        orig_labels = np.unique(atlas_img.get_fdata()[atlas_img.get_fdata() > 0])
-        if len(warped_unique) != len(orig_labels):
-            print(f"    ⚠️ Label count changed ({len(orig_labels)} → {len(warped_unique)})")
+    # AU33: build the assertable QC dict via the shared helper so the same
+    # checks are available to tests/callers without re-deriving them.
+    qc = compute_atlas_warp_qc(
+        warped_atlas, orig_labels, subject_affine, midline_x=midline_x
+    )
 
-    if verbose:
-        # QC: Report motor ROI centroids and bounding boxes (if motor labels present)
-        if 7 in warped_unique and 107 in warped_unique:
-            left_coords = np.array(np.where(warped_atlas == 7)).T
-            right_coords = np.array(np.where(warped_atlas == 107)).T
+    if verbose and not qc['labels_preserved']:
+        print(f"    ⚠️ Label set changed "
+              f"({len(qc['labels_original'])} → {len(qc['labels_warped'])})")
 
-            left_centroid = left_coords.mean(axis=0)
-            right_centroid = right_coords.mean(axis=0)
+    # QC: Report motor ROI centroids and bounding boxes (if motor labels present)
+    if 'motor_left_centroid_world' in qc:
+        left_x, left_y, left_z = qc['motor_left_centroid_world']
+        right_x, right_y, right_z = qc['motor_right_centroid_world']
+        z_diff = qc['motor_z_diff_mm']
+        left_right_of_mid = qc['left_centroid_right_of_midline']
+        right_left_of_mid = qc['right_centroid_left_of_midline']
 
-            # Convert to world coordinates
-            left_world = subject_affine @ np.append(left_centroid, 1)
-            right_world = subject_affine @ np.append(right_centroid, 1)
-
-            # AU11: the anatomical midline is world X = midline_x (the warped MNI
-            # midline), not necessarily 0. Compare centroids against that plane.
+        # AU11: the anatomical midline is world X = midline_x (the warped MNI
+        # midline), not necessarily 0. Compare centroids against that plane.
+        if verbose:
             print("    • Motor ROI Diagnostics:")
-            print(f"    ├─ Left centroid (world):  X={left_world[0]:.1f}, Y={left_world[1]:.1f}, Z={left_world[2]:.1f}")
-            print(f"    └─ Right centroid (world): X={right_world[0]:.1f}, Y={right_world[1]:.1f}, Z={right_world[2]:.1f}")
+            print(f"    ├─ Left centroid (world):  X={left_x:.1f}, Y={left_y:.1f}, Z={left_z:.1f}")
+            print(f"    └─ Right centroid (world): X={right_x:.1f}, Y={right_y:.1f}, Z={right_z:.1f}")
 
             # Check for obvious issues
-            if left_world[0] > midline_x:
-                print(f"    ⚠️ Left motor centroid is right of the midline (X={left_world[0]:.1f} > {midline_x:.1f})")
-            if right_world[0] < midline_x:
-                print(f"    ⚠️ Right motor centroid is left of the midline (X={right_world[0]:.1f} < {midline_x:.1f})")
+            if left_right_of_mid:
+                print(f"    ⚠️ Left motor centroid is right of the midline (X={left_x:.1f} > {midline_x:.1f})")
+            if right_left_of_mid:
+                print(f"    ⚠️ Right motor centroid is left of the midline (X={right_x:.1f} < {midline_x:.1f})")
 
-            z_diff = abs(left_world[2] - right_world[2])
             if z_diff > 10:
                 print(f"    ⚠️ Motor centroids differ by {z_diff:.1f}mm in Z (should be similar)")
 
-    return warped_atlas
+    return warped_atlas, qc
 
 
 def warp_harvard_oxford_to_subject(
@@ -525,7 +628,7 @@ def warp_harvard_oxford_to_subject(
     if verbose:
         print("\n[Step 2/3] Warping subcortical atlas...")
     
-    subcortical_warped = warp_atlas_to_subject(
+    subcortical_warped, subcortical_qc = warp_atlas_to_subject(
         atlas_img=atlases['subcortical_img'],
         mapping=mapping,
         subject_shape=subject_shape,
@@ -535,16 +638,16 @@ def warp_harvard_oxford_to_subject(
         midline_x=midline_x,
         verbose=verbose
     )
-    
+
     # Step 3: Warp cortical atlas (contains precentral gyrus)
     if verbose:
         print("\n[Step 3/3] Warping cortical atlas...")
-    
+
     # SPLIT HEMISPHERES IN MNI SPACE BEFORE WARPING
     # This fixes the asymmetry issue caused by splitting in subject space
     cortical_split = split_atlas_hemispheres_mni(atlases['cortical_img'], verbose=verbose)
-    
-    cortical_warped = warp_atlas_to_subject(
+
+    cortical_warped, cortical_qc = warp_atlas_to_subject(
         atlas_img=cortical_split,
         mapping=mapping,
         subject_shape=subject_shape,
@@ -561,6 +664,9 @@ def warp_harvard_oxford_to_subject(
         'subcortical_warped': subcortical_warped,
         'cortical_warped_path': None,
         'subcortical_warped_path': None,
+        # AU33: assertable atlas-warp QC (label preservation + motor centroids)
+        'cortical_qc': cortical_qc,
+        'subcortical_qc': subcortical_qc,
         'subject_affine': subject_affine,  # RAS affine (for internal processing)
         'original_subject_affine': original_subject_affine,  # Original affine (for saving)
         'was_reoriented': was_reoriented,
