@@ -110,7 +110,9 @@ csttool run --nifti dwi.nii.gz --out results --extraction-method bidirectional
 - **When to use**: When passthrough yields a laterality index |LI| > 0.15, or when bilateral
   symmetry is important for interpretation (e.g. single-subject clinical studies).
 - **Note**: NOT available in `csttool extract` — requires raw DWI; use `csttool run`
-- **Further reading**: [Bidirectional seeding — motivation and validation](../../fixes/bidirectional_seeding.md)
+- **Further reading**: [Design decisions — bidirectional seeding](../../explanation/design-decisions.md),
+  and `docs/fixes/bidirectional_seeding.md` in the companion `csttool-devlog` repository for the
+  full write-up
 
 ### Algorithm Pipeline
 

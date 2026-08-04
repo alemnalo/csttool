@@ -409,6 +409,5 @@ The semantic meaning (debug-level detail) is preserved, even though the visual f
 
 ### Related Documents
 
-- [Contributing Guidelines](contributing.md)
 - [Development Setup](development-setup.md)
 - [Architecture Overview](architecture.md)

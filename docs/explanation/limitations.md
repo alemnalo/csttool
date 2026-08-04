@@ -132,8 +132,8 @@ is a direction-dependent seeding artifact, not a structural finding.
 All diffusion metrics (FA, MD, RD, AD) are unaffected and remain symmetric regardless of
 extraction method.
 
-See [Bidirectional seeding — motivation and validation](../fixes/bidirectional_seeding.md)
-for the full technical analysis.
+See `docs/fixes/bidirectional_seeding.md` in the companion `csttool-devlog` repository for
+the full technical analysis.
 
 ---
 

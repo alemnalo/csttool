@@ -38,4 +38,4 @@ Bibliography for the scholarly citations used across the **Explanation** pages. 
 
 ## Notes on currency of citations
 
-All entries above are sourced from `thesis/references.bib`. If you are adding new statements to docs that are not covered by an existing citation, either find a supporting entry there or mark the claim with `[citation needed]` inline so it can be sourced later — do not fabricate references. The current `[citation needed]` list (if any) is tracked in [`DOCUMENTATION_CHECKLIST.md`](../DOCUMENTATION_CHECKLIST.md).
+All entries above are sourced from `references.bib` in the companion `masterthesis` repository. If you are adding new statements to docs that are not covered by an existing citation, either find a supporting entry there or mark the claim with `[citation needed]` inline so it can be sourced later — do not fabricate references. The current `[citation needed]` list (if any) is tracked in `DOCUMENTATION_CHECKLIST.md` in the companion `csttool-devlog` repository.
