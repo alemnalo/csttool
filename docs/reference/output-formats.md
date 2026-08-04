@@ -129,13 +129,13 @@ Diagnostic images produced when `--save-visualizations` is passed. Named
 | File | Description |
 | --- | --- |
 | `*_report.html` | Interactive HTML clinical report (self-contained; embeds all QC images) |
-| `*_report.pdf` | A4 PDF clinical report (requires WeasyPrint) |
+| `*_report.pdf` | Clinical report, exactly one A4 portrait page (requires WeasyPrint) |
 
 #### Tabular outputs
 
 | File | Description |
 | --- | --- |
-| `*_metrics.json` | Complete bilateral metrics with acquisition and processing metadata |
+| `*_metrics.json` | Complete bilateral metrics with acquisition, processing, and provenance metadata |
 | `*_metrics.csv` | Flat CSV table for group-level analysis (one row per subject) |
 
 #### Pipeline logs (provenance)

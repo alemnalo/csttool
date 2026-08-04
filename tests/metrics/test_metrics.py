@@ -49,6 +49,12 @@ def test_analyze_cst_hemisphere_basic(synthetic_tractogram, synthetic_nifti, syn
     assert 0.0 <= metrics['fa']['mean'] <= 1.0
     assert 0.0 <= metrics['md']['mean'] <= 0.001
 
+    # median_length is an additive descriptive statistic (AU10: length LI still
+    # uses mean_length, not this). On this fixture both streamlines are 6 mm,
+    # so the median equals the mean.
+    assert 'median_length' in metrics['morphology']
+    assert np.isclose(metrics['morphology']['median_length'], 6.0)
+
 def test_analyze_cst_hemisphere_empty():
     """Test handling of empty streamlines."""
     streamlines = []

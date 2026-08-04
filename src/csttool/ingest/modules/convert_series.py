@@ -210,10 +210,14 @@ def _run_dicom2nifti(
     space — a silent gradient flip that corrupts the tensor fit. We therefore
     ignore dicom2nifti's reorientation flag, convert in the native (scanner)
     voxel space where image and bvecs are mutually consistent, and reorient
-    *both* to RAS together via ``reorient_dwi_to_ras``. RAS+ matches the dcm2niix
-    primary path's convention. The ``reorient`` argument is kept for API
-    compatibility but now only controls whether a RAS reorientation is applied
-    (True, the default) — there is no longer a dicom2nifti LAS step.
+    *both* to RAS together via ``reorient_dwi_to_ras``. RAS+ is chosen because it
+    is a deterministic canonical target, not because it matches the dcm2niix
+    primary path — dcm2niix preserves the scanner's native orientation (commonly
+    LAS for Siemens axial DWI), so the two import paths can legitimately produce
+    different voxel-orientation codes for the same series. The ``reorient``
+    argument is kept for API compatibility but now only controls whether a RAS
+    reorientation is applied (True, the default) — there is no longer a
+    dicom2nifti LAS step.
     """
     import nibabel as nib
     import numpy as np

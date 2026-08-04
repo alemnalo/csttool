@@ -178,6 +178,8 @@ def compute_morphology(streamlines, affine):
         Dictionary containing:
         - n_streamlines: number of streamlines
         - mean_length: average streamline length in mm
+        - median_length: median streamline length in mm (additive descriptive stat;
+          the length LI uses mean_length, not this)
         - std_length: standard deviation of lengths
         - min_length: minimum streamline length
         - max_length: maximum streamline length
@@ -188,6 +190,7 @@ def compute_morphology(streamlines, affine):
         return {
             'n_streamlines': 0,
             'mean_length': 0.0,
+            'median_length': 0.0,
             'std_length': 0.0,
             'min_length': 0.0,
             'max_length': 0.0,
@@ -220,9 +223,14 @@ def compute_morphology(streamlines, affine):
     # Total tract volume
     tract_volume = n_voxels * voxel_volume
     
+    # median_length is an additive descriptive statistic paired with mean_length;
+    # the length laterality index still uses mean_length (see bilateral_analysis),
+    # so adding the median changes no existing metric value. See
+    # docs/explanation/design-decisions.md.
     morphology = {
         'n_streamlines': len(streamlines),
         'mean_length': float(np.mean(lengths)),
+        'median_length': float(np.median(lengths)),
         'std_length': float(np.std(lengths)),
         'min_length': float(np.min(lengths)),
         'max_length': float(np.max(lengths)),

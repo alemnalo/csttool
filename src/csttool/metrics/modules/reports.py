@@ -54,6 +54,445 @@ def _embed_image(path):
         return None
 
 
+# The reproducibility footer reports a *fixed* dependency subset rather than
+# whatever happened to be importable, so the footer has a deterministic height
+# and two reports are directly comparable line by line. Display names are the
+# projects' own capitalisation.
+_FOOTER_DEPENDENCIES = (
+    ('numpy', 'NumPy'),
+    ('scipy', 'SciPy'),
+    ('dipy', 'DIPY'),
+    ('nibabel', 'NiBabel'),
+    ('matplotlib', 'Matplotlib'),
+)
+
+# Thread-limit environment variables, shortened for the footer summary.
+_THREAD_VARS = (
+    ('OMP_NUM_THREADS', 'OMP'),
+    ('MKL_NUM_THREADS', 'MKL'),
+    ('OPENBLAS_NUM_THREADS', 'OPENBLAS'),
+    ('NUMEXPR_NUM_THREADS', 'NUMEXPR'),
+    ('VECLIB_MAXIMUM_THREADS', 'VECLIB'),
+    ('DIPY_NUM_THREADS', 'DIPY'),
+)
+
+
+def _truncate(text, limit):
+    """Shorten a string to ``limit`` characters with an ellipsis character."""
+    text = str(text)
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + '…'
+
+
+def _short_python_version(raw):
+    """``"3.12.3 (main, ...) [GCC 13.3.0]"`` -> ``"3.12.3"``."""
+    if not raw:
+        return 'N/A'
+    return str(raw).split()[0]
+
+
+def _short_platform(raw):
+    """``"Linux-6.17.0-40-generic-x86_64-with-glibc2.39"`` -> ``"Linux 6.17.0-40-generic (x86_64)"``.
+
+    ``platform.platform()`` returns one long hyphenated token. The OS name,
+    kernel release and machine are the parts a reader needs; the libc suffix is
+    noise in a one-line footer.
+    """
+    if not raw:
+        return 'N/A'
+    text = str(raw)
+    head, sep, _ = text.partition('-with-')
+    parts = (head if sep else text).split('-')
+    if len(parts) >= 3:
+        system, machine = parts[0], parts[-1]
+        release = '-'.join(parts[1:-1])
+        return _truncate(f"{system} {release} ({machine})", 40)
+    return _truncate(text, 40)
+
+
+def _build_report_provenance(raw_provenance):
+    """Build a filtered provenance view for the human-readable report.
+
+    The full provenance dict (including git commit and raw command line) is
+    preserved in the JSON report. This function returns only the fields
+    relevant to a scientific reader: hardware, threading environment, a fixed
+    dependency subset, Python version, and platform — each pre-formatted as one
+    short line so the footer is fixed-height.
+
+    Parameters
+    ----------
+    raw_provenance : dict
+        Full provenance dict from ``get_provenance_dict()`` (may be empty).
+
+    Returns
+    -------
+    dict
+        Filtered provenance with keys ``python_version``, ``platform``,
+        ``machine``, ``hardware_str``, ``thread_env_str``, ``dependencies_str``.
+        All values are strings; None / missing keys produce "N/A" placeholders.
+    """
+    if not raw_provenance:
+        return {}
+
+    hardware = raw_provenance.get('hardware', {}) or {}
+    cpu_model = hardware.get('cpu_model') or 'N/A'
+    cpu_count = hardware.get('cpu_count')
+    ram = hardware.get('total_ram_gb')
+    gpu = hardware.get('gpu')
+
+    # Long CPU strings are truncated horizontally; the footer must not wrap.
+    hardware_parts = [_truncate(cpu_model, 44)]
+    if cpu_count is not None:
+        hardware_parts.append(f"{cpu_count} logical cores")
+    if ram is not None:
+        hardware_parts.append(f"{ram:.1f} GB RAM")
+    if gpu:
+        gpu_str = ', '.join(gpu) if isinstance(gpu, list) else str(gpu)
+        hardware_parts.append(_truncate(gpu_str, 30))
+
+    # Summarised, not one line per raw variable: "Thread limits: unset" when the
+    # process inherited no limits, otherwise only the variables actually set.
+    thread_env = raw_provenance.get('thread_env', {}) or {}
+    set_vars = [
+        f"{short}={thread_env[var]}"
+        for var, short in _THREAD_VARS
+        if thread_env.get(var) is not None
+    ]
+    if not thread_env:
+        thread_str = 'Thread limits: not recorded'
+    elif not set_vars:
+        thread_str = 'Thread limits: unset'
+    else:
+        unset = len(thread_env) - len(set_vars)
+        thread_str = 'Threads: ' + ', '.join(set_vars)
+        if unset:
+            thread_str += ' (others unset)'
+
+    deps = raw_provenance.get('dependencies', {}) or {}
+    dep_parts = [
+        f"{display} {deps.get(key, 'N/A')}" for key, display in _FOOTER_DEPENDENCIES
+    ]
+
+    return {
+        'python_version': _short_python_version(raw_provenance.get('python_version')),
+        'platform': _short_platform(raw_provenance.get('platform')),
+        'machine': raw_provenance.get('machine') or 'N/A',
+        'hardware_str': ' · '.join(hardware_parts) if hardware_parts else 'N/A',
+        'thread_env_str': thread_str,
+        'dependencies_str': 'Dependencies: ' + ' · '.join(dep_parts),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric formatting helpers (module-level, unit-tested).
+#
+# Single source of truth for the precision, units, and sign conventions used in
+# both the global and regional tables. Promoted out of the closures that used
+# to live inside save_html_report so the rules can be tested independently and
+# cannot drift between the two tables.
+# ---------------------------------------------------------------------------
+
+# Scalars stored in SI units (mm^2/s, ~1e-3) and displayed scaled by 1000 as
+# "x10^-3 mm^2/s". FA is dimensionless.
+_DIFFUSIVITY_SCALARS = ('md', 'rd', 'ad')
+
+
+def format_mean_sd(mean, std, is_diffusivity=False):
+    """Format a mean +/- SD string.
+
+    Diffusivity values are scaled by 1000 to match the report's ``x10^-3 mm^2/s``
+    axis convention; FA is dimensionless (3 decimals).
+    """
+    if is_diffusivity:
+        return f"{mean * 1000:.2f} ± {std * 1000:.2f}"
+    return f"{mean:.3f} ± {std:.3f}"
+
+
+def format_med_range(median, min_val, max_val, is_diffusivity=False, decimals=3):
+    """Format a ``median (min-max)`` string.
+
+    Diffusivity values are scaled by 1000 (2 decimals). FA uses 3 decimals.
+    Length (mm) is non-diffusivity but reported at 1 decimal, so the caller
+    passes ``decimals=1``.
+    """
+    if is_diffusivity:
+        return f"{median * 1000:.2f} ({min_val * 1000:.2f}-{max_val * 1000:.2f})"
+    return (
+        f"{median:.{decimals}f} "
+        f"({min_val:.{decimals}f}-{max_val:.{decimals}f})"
+    )
+
+
+def format_li(value):
+    """Format a laterality index with an explicit sign, 3 decimals.
+
+    Positive (left-dominant) values carry a leading ``+``; negative values keep
+    their ``-``; zero renders as ``0.000``. One rule for both tables.
+    """
+    if value > 0:
+        return f"+{value:.3f}"
+    return f"{value:.3f}"
+
+
+def format_localized(left, right, asym, scalar, region):
+    """Format a regional ``L / R / LI`` cell string.
+
+    FA uses 3 decimals; diffusivities use 2 decimals scaled by 1000. LI is
+    signed via :func:`format_li`. Returns ``"-"`` when the scalar/region is
+    absent.
+    """
+    if scalar not in left or region not in left[scalar]:
+        return "-"
+    l_val = left[scalar][region]
+    r_val = right[scalar][region]
+    li_key = f"{scalar}_{region}"
+    li_val = asym.get(li_key, {}).get("laterality_index", 0.0)
+    if scalar == "fa":
+        return f"{l_val:.3f} / {r_val:.3f} / {format_li(li_val)}"
+    return f"{l_val * 1000:.2f} / {r_val * 1000:.2f} / {format_li(li_val)}"
+
+
+def li_class(value):
+    """CSS class for an LI cell, by sign (blue/orange/neutral)."""
+    if value > 0:
+        return "li-left"
+    if value < 0:
+        return "li-right"
+    return "li-zero"
+
+
+def _scalar_med_range_block(side_metrics, scalar):
+    """Build a ``median (min-max)`` cell for a scalar, with legacy fallback.
+
+    Legacy data without ``median``/``min``/``max`` (older reports) falls back to
+    a mean +/- 3*SD envelope rather than crashing, preserving the existing
+    backward-compatible behaviour. A mean is never displayed as a median.
+    """
+    block = side_metrics[scalar]
+    median = block.get("median", block["mean"])
+    min_val = block.get("min", max(0.0, block["mean"] - 3 * block["std"]))
+    max_val = block.get("max", min(1.0, block["mean"] + 3 * block["std"]))
+    is_diff = scalar in _DIFFUSIVITY_SCALARS
+    return format_med_range(median, min_val, max_val, is_diffusivity=is_diff)
+
+
+def _build_global_metrics(left, right, asym):
+    """Build the global metrics table rows (6-column).
+
+    Streamlines and Volume carry no per-streamline distribution in this report,
+    so their median columns render an explicit em dash. Length uses the genuine
+    ``median_length`` when present; legacy morphology without it renders an em
+    dash rather than substituting the mean (a mean is never shown as a median).
+    """
+    rows = []
+
+    li_sc = asym["streamline_count"]["laterality_index"]
+    rows.append({
+        "label": "Streamlines",
+        "left_mean_sd": str(left["morphology"]["n_streamlines"]),
+        "left_med_range": "—",
+        "right_mean_sd": str(right["morphology"]["n_streamlines"]),
+        "right_med_range": "—",
+        "li": format_li(li_sc),
+        "li_class": li_class(li_sc),
+    })
+
+    li_vol = asym["volume"]["laterality_index"]
+    rows.append({
+        "label": "Volume (cm³)",
+        "left_mean_sd": f"{left['morphology']['tract_volume'] / 1000.0:.2f}",
+        "left_med_range": "—",
+        "right_mean_sd": f"{right['morphology']['tract_volume'] / 1000.0:.2f}",
+        "right_med_range": "—",
+        "li": format_li(li_vol),
+        "li_class": li_class(li_vol),
+    })
+
+    lm = left["morphology"]
+    rm = right["morphology"]
+    li_len = asym["mean_length"]["laterality_index"]
+    # Length: genuine median when present (1 decimal, mm); em dash for legacy
+    # data (never the mean dressed as a median).
+    if "median_length" in lm and "median_length" in rm:
+        left_len_med = format_med_range(
+            lm["median_length"], lm["min_length"], lm["max_length"], decimals=1
+        )
+        right_len_med = format_med_range(
+            rm["median_length"], rm["min_length"], rm["max_length"], decimals=1
+        )
+    else:
+        left_len_med = "—"
+        right_len_med = "—"
+    rows.append({
+        "label": "Length (mm)",
+        "left_mean_sd": f"{lm['mean_length']:.1f} ± {lm['std_length']:.1f}",
+        "left_med_range": left_len_med,
+        "right_mean_sd": f"{rm['mean_length']:.1f} ± {rm['std_length']:.1f}",
+        "right_med_range": right_len_med,
+        "li": format_li(li_len),
+        "li_class": li_class(li_len),
+    })
+
+    for scalar in ("fa", "md", "rd", "ad"):
+        if scalar not in left or scalar not in right:
+            continue
+        is_diff = scalar in _DIFFUSIVITY_SCALARS
+        li_val = asym[scalar]["laterality_index"]
+        rows.append({
+            "label": "FA" if scalar == "fa" else f"{scalar.upper()} (×10⁻³)",
+            "left_mean_sd": format_mean_sd(
+                left[scalar]["mean"], left[scalar]["std"], is_diffusivity=is_diff
+            ),
+            "left_med_range": _scalar_med_range_block(left, scalar),
+            "right_mean_sd": format_mean_sd(
+                right[scalar]["mean"], right[scalar]["std"], is_diffusivity=is_diff
+            ),
+            "right_med_range": _scalar_med_range_block(right, scalar),
+            "li": format_li(li_val),
+            "li_class": li_class(li_val),
+        })
+
+    return rows
+
+
+def _build_regional_metrics(left, right, asym):
+    """Build the regional metrics table rows (Pontine / PLIC / Precentral)."""
+    rows = []
+    for name, key in (("Pontine", "pontine"), ("PLIC", "plic"), ("Precentral", "precentral")):
+        rows.append({
+            "name": name,
+            "fa": format_localized(left, right, asym, "fa", key),
+            "md": format_localized(left, right, asym, "md", key),
+            "rd": format_localized(left, right, asym, "rd", key),
+            "ad": format_localized(left, right, asym, "ad", key),
+        })
+    return rows
+
+
+def _build_methods_band(acquisition, processing, space, orientation_code, version):
+    """Build the three compact methods-band columns as (label, value) row lists.
+
+    Terminology is verified against the implementation: DTI tensor model
+    (``fit_tensors.py``), CSA ODF direction model (``estimate_directions.py``),
+    deterministic LocalTracking (``run_tractography.py``), and FA-mask seeding
+    (``seed_and_stop.py``). "Anatomically constrained" is deliberately not used.
+    """
+    bvals = acquisition.get("b_values") if acquisition else None
+    max_b = f"{bvals[-1]} s/mm²" if bvals else "N/A"
+    res = acquisition.get("resolution_mm") if acquisition else None
+    if res:
+        res_str = f"{res[0]:.1f}×{res[1]:.1f}×{res[2]:.1f} mm"
+    else:
+        res_str = "N/A"
+    fs = acquisition.get("field_strength_T") if acquisition else None
+    fs_str = f"{fs:.1f} T" if fs else "N/A"
+    te = acquisition.get("echo_time_ms") if acquisition else None
+    te_str = f"{te:.1f} ms" if te else "N/A"
+    ndir = acquisition.get("n_directions", "N/A") if acquisition else "N/A"
+    acq_rows = [
+        ("Max b-value", max_b),
+        ("Directions", str(ndir)),
+        ("Resolution", res_str),
+        ("Field strength", fs_str),
+        ("Echo time", te_str),
+    ]
+
+    tparams = (processing or {}).get("tracking_params", {}) or {}
+    fit_method = tparams.get("fit_method", "WLS")
+    sh_order = tparams.get("sh_order")
+    dir_model = f"CSA ODF, SH {sh_order}" if sh_order is not None else "CSA ODF"
+    seed_density = tparams.get("seed_density")
+    seeding = f"FA mask, ×{seed_density}" if seed_density is not None else "FA mask"
+    fa_thresh = tparams.get("fa_thresh")
+    fa_str = str(fa_thresh) if fa_thresh is not None else "N/A"
+    step_size = tparams.get("step_size")
+    step_str = f"{step_size} mm" if step_size is not None else "N/A"
+    pre = (processing or {}).get("preprocessing", {}) or {}
+    motion = "Yes" if pre.get("motion_correction") else "No"
+    proc_rows = [
+        ("Scalar model", f"DTI ({fit_method})"),
+        ("Direction model", dir_model),
+        ("Tracking", "Deterministic"),
+        ("Seeding", seeding),
+        ("FA threshold", fa_str),
+        ("Step size", step_str),
+        ("Motion correction", motion),
+    ]
+
+    space_short = "Native" if (not space or "native" in space.lower()) else space
+    extraction = (processing or {}).get("extraction", {}) or {}
+    ex_method = extraction.get("method", "N/A")
+    ai = extraction.get("artifact_index")
+    if ai is not None:
+        ai_str = f"{ai:.2f}"
+    elif extraction and extraction.get("artifact_index_available") is False:
+        # The diagnostic is only defined for bidirectional extraction. Naming the
+        # method that was actually used says exactly that, in one cell, without
+        # wrapping a sentence across the band. "Not applicable" is preserved as a
+        # distinct meaning from a missing value (which renders a bare "N/A").
+        ai_str = f"N/A for {ex_method} extraction"
+    else:
+        ai_str = "N/A"
+    space_rows = [
+        ("Space", space_short),
+        ("Orientation", orientation_code or "N/A"),
+        ("csttool", f"v{version}"),
+        ("Extraction", ex_method),
+        ("Artifact index", ai_str),
+    ]
+
+    return acq_rows, proc_rows, space_rows
+
+
+def build_report_context(
+    comparison,
+    visualization_paths,
+    subject_id,
+    version,
+    space,
+    metadata,
+    fa_affine,
+):
+    """Assemble the full Jinja render context in one testable function.
+
+    Parameters
+    ----------
+    fa_affine : ndarray or None
+        FA-map affine, used to compute the orientation code dynamically. When
+        None, the orientation renders as ``N/A``.
+    """
+    from csttool.viz.geometry import orientation_code as _orientation_code
+
+    left = comparison["left"]
+    right = comparison["right"]
+    asym = comparison["asymmetry"]
+
+    orient = _orientation_code(fa_affine) if fa_affine is not None else None
+    acquisition = (metadata or {}).get("acquisition", {}) or {}
+    processing = (metadata or {}).get("processing", {}) or {}
+    acq_rows, proc_rows, space_rows = _build_methods_band(
+        acquisition, processing, space, orient, version
+    )
+
+    qc_path = visualization_paths.get("tractogram_qc_triptych")
+    qc_has_colorbar = qc_path is not None
+
+    return {
+        "subject_id": subject_id,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "version": version,
+        "method_summary": "Deterministic CST tractography",
+        "acq_rows": acq_rows,
+        "proc_rows": proc_rows,
+        "space_rows": space_rows,
+        "metrics": _build_global_metrics(left, right, asym),
+        "localized_metrics": _build_regional_metrics(left, right, asym),
+        "profile_matrix": _embed_image(visualization_paths.get("profile_matrix")),
+        "qc_triptych": _embed_image(qc_path),
+        "qc_has_colorbar": qc_has_colorbar,
+        "provenance": _build_report_provenance((metadata or {}).get("provenance", {})),
+    }
+
+
 def save_json_report(comparison, output_dir, subject_id, metadata=None):
     """
     Save comprehensive metrics report as JSON.
@@ -71,6 +510,7 @@ def save_json_report(comparison, output_dir, subject_id, metadata=None):
         - acquisition: dict with protocol, b_values, n_directions, resolution
         - processing: dict with denoising_method, tracking_method, etc.
         - qc_thresholds: dict with fa_threshold, min_length, max_length
+        - provenance: dict from get_provenance_dict() (git, deps, hardware, etc.)
         
     Returns
     -------
@@ -93,6 +533,7 @@ def save_json_report(comparison, output_dir, subject_id, metadata=None):
         'acquisition': metadata.get('acquisition', {}),
         'processing': metadata.get('processing', {}),
         'qc_thresholds': metadata.get('qc_thresholds', {}),
+        'provenance': metadata.get('provenance', {}),
         'metrics': comparison
     }
     
@@ -141,11 +582,13 @@ def save_csv_summary(comparison, output_dir, subject_id):
         # Left morphology
         'left_n_streamlines': left['morphology']['n_streamlines'],
         'left_mean_length_mm': left['morphology']['mean_length'],
+        'left_median_length_mm': left['morphology'].get('median_length', 0.0),
         'left_tract_volume_mm3': left['morphology']['tract_volume'],
-        
+
         # Right morphology
         'right_n_streamlines': right['morphology']['n_streamlines'],
         'right_mean_length_mm': right['morphology']['mean_length'],
+        'right_median_length_mm': right['morphology'].get('median_length', 0.0),
         'right_tract_volume_mm3': right['morphology']['tract_volume'],
         
         # Asymmetry
@@ -234,7 +677,8 @@ def save_html_report(
     subject_id,
     version=None,
     space="Native Space",
-    metadata=None
+    metadata=None,
+    fa_affine=None,
 ):
     """
     Generate HTML report using Jinja2 template.
@@ -244,7 +688,9 @@ def save_html_report(
     comparison : dict
         Output from compare_bilateral_cst()
     visualization_paths : dict
-        Paths to generated visualizations
+        Paths to generated visualizations. Expected keys: ``profile_matrix``
+        (the 2x2 along-tract figure) and ``tractogram_qc_triptych`` (the 1x3
+        QC composite). Both are optional and render as placeholders if absent.
     output_dir : str or Path
         Output directory
     subject_id : str
@@ -254,7 +700,10 @@ def save_html_report(
     space : str
         Space declaration (e.g., "Native Space")
     metadata : dict, optional
-        Acquisition and processing metadata
+        Acquisition, processing, and provenance metadata
+    fa_affine : ndarray, optional
+        FA-map affine used to compute the orientation code dynamically. When
+        None, orientation renders as ``N/A``.
         
     Returns
     -------
@@ -263,210 +712,33 @@ def save_html_report(
     """
     if version is None:
         version = __version__
-    
+
     if metadata is None:
         metadata = {}
-    
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Extract comparison data
-    left = comparison['left']
-    right = comparison['right']
-    asym = comparison['asymmetry']
 
-    # Helper functions for formatting
-    def fmt_mean_sd(mean, std, is_diffusivity=False):
-        """Format mean ± SD string."""
-        if is_diffusivity:
-            return f"{mean*1000:.2f} ± {std*1000:.2f}"
-        return f"{mean:.3f} ± {std:.3f}"
+    context = build_report_context(
+        comparison=comparison,
+        visualization_paths=visualization_paths,
+        subject_id=subject_id,
+        version=version,
+        space=space,
+        metadata=metadata,
+        fa_affine=fa_affine,
+    )
 
-    def fmt_med_range(median, min_val, max_val, is_diffusivity=False):
-        """Format median (min-max) string."""
-        if is_diffusivity:
-            return f"{median*1000:.2f} ({min_val*1000:.2f}-{max_val*1000:.2f})"
-        return f"{median:.3f} ({min_val:.3f}-{max_val:.3f})"
-
-    # Build metrics list for template (6-column format)
-    metrics = []
-
-    # Streamlines (no SD/range available, use simple format)
-    metrics.append({
-        "label": "Streamlines",
-        "left_mean_sd": str(left['morphology']['n_streamlines']),
-        "left_med_range": "-",
-        "right_mean_sd": str(right['morphology']['n_streamlines']),
-        "right_med_range": "-",
-        "li": asym['streamline_count']['laterality_index']
-    })
-
-    # Volume (convert mm³ to cm³, no SD/range available)
-    metrics.append({
-        "label": "Volume (cm³)",
-        "left_mean_sd": f"{left['morphology']['tract_volume'] / 1000.0:.2f}",
-        "left_med_range": "-",
-        "right_mean_sd": f"{right['morphology']['tract_volume'] / 1000.0:.2f}",
-        "right_med_range": "-",
-        "li": asym['volume']['laterality_index']
-    })
-
-    # Length
-    lm = left['morphology']
-    rm = right['morphology']
-    metrics.append({
-        "label": "Length (mm)",
-        "left_mean_sd": f"{lm['mean_length']:.1f} ± {lm['std_length']:.1f}",
-        "left_med_range": f"({lm['min_length']:.1f}-{lm['max_length']:.1f})",
-        "right_mean_sd": f"{rm['mean_length']:.1f} ± {rm['std_length']:.1f}",
-        "right_med_range": f"({rm['min_length']:.1f}-{rm['max_length']:.1f})",
-        "li": asym['mean_length']['laterality_index']
-    })
-
-    # FA
-    if 'fa' in left:
-        # Backward compatibility: use mean as fallback for median if not present
-        left_fa_median = left['fa'].get('median', left['fa']['mean'])
-        left_fa_min = left['fa'].get('min', max(0.0, left['fa']['mean'] - 3*left['fa']['std']))
-        left_fa_max = left['fa'].get('max', min(1.0, left['fa']['mean'] + 3*left['fa']['std']))
-        right_fa_median = right['fa'].get('median', right['fa']['mean'])
-        right_fa_min = right['fa'].get('min', max(0.0, right['fa']['mean'] - 3*right['fa']['std']))
-        right_fa_max = right['fa'].get('max', min(1.0, right['fa']['mean'] + 3*right['fa']['std']))
-
-        metrics.append({
-            "label": "FA",
-            "left_mean_sd": fmt_mean_sd(left['fa']['mean'], left['fa']['std']),
-            "left_med_range": fmt_med_range(left_fa_median, left_fa_min, left_fa_max),
-            "right_mean_sd": fmt_mean_sd(right['fa']['mean'], right['fa']['std']),
-            "right_med_range": fmt_med_range(right_fa_median, right_fa_min, right_fa_max),
-            "li": asym['fa']['laterality_index']
-        })
-
-    # MD (×10⁻³ mm²/s)
-    if 'md' in left:
-        # Backward compatibility: use mean as fallback for median if not present
-        left_md_median = left['md'].get('median', left['md']['mean'])
-        left_md_min = left['md'].get('min', max(0.0, left['md']['mean'] - 3*left['md']['std']))
-        left_md_max = left['md'].get('max', left['md']['mean'] + 3*left['md']['std'])
-        right_md_median = right['md'].get('median', right['md']['mean'])
-        right_md_min = right['md'].get('min', max(0.0, right['md']['mean'] - 3*right['md']['std']))
-        right_md_max = right['md'].get('max', right['md']['mean'] + 3*right['md']['std'])
-
-        metrics.append({
-            "label": "MD (×10⁻³)",
-            "left_mean_sd": fmt_mean_sd(left['md']['mean'], left['md']['std'], is_diffusivity=True),
-            "left_med_range": fmt_med_range(left_md_median, left_md_min, left_md_max, is_diffusivity=True),
-            "right_mean_sd": fmt_mean_sd(right['md']['mean'], right['md']['std'], is_diffusivity=True),
-            "right_med_range": fmt_med_range(right_md_median, right_md_min, right_md_max, is_diffusivity=True),
-            "li": asym['md']['laterality_index']
-        })
-
-    # RD (×10⁻³ mm²/s)
-    if 'rd' in left:
-        # Backward compatibility: use mean as fallback for median if not present
-        left_rd_median = left['rd'].get('median', left['rd']['mean'])
-        left_rd_min = left['rd'].get('min', max(0.0, left['rd']['mean'] - 3*left['rd']['std']))
-        left_rd_max = left['rd'].get('max', left['rd']['mean'] + 3*left['rd']['std'])
-        right_rd_median = right['rd'].get('median', right['rd']['mean'])
-        right_rd_min = right['rd'].get('min', max(0.0, right['rd']['mean'] - 3*right['rd']['std']))
-        right_rd_max = right['rd'].get('max', right['rd']['mean'] + 3*right['rd']['std'])
-
-        metrics.append({
-            "label": "RD (×10⁻³)",
-            "left_mean_sd": fmt_mean_sd(left['rd']['mean'], left['rd']['std'], is_diffusivity=True),
-            "left_med_range": fmt_med_range(left_rd_median, left_rd_min, left_rd_max, is_diffusivity=True),
-            "right_mean_sd": fmt_mean_sd(right['rd']['mean'], right['rd']['std'], is_diffusivity=True),
-            "right_med_range": fmt_med_range(right_rd_median, right_rd_min, right_rd_max, is_diffusivity=True),
-            "li": asym['rd']['laterality_index']
-        })
-
-    # AD (×10⁻³ mm²/s)
-    if 'ad' in left:
-        # Backward compatibility: use mean as fallback for median if not present
-        left_ad_median = left['ad'].get('median', left['ad']['mean'])
-        left_ad_min = left['ad'].get('min', max(0.0, left['ad']['mean'] - 3*left['ad']['std']))
-        left_ad_max = left['ad'].get('max', left['ad']['mean'] + 3*left['ad']['std'])
-        right_ad_median = right['ad'].get('median', right['ad']['mean'])
-        right_ad_min = right['ad'].get('min', max(0.0, right['ad']['mean'] - 3*right['ad']['std']))
-        right_ad_max = right['ad'].get('max', right['ad']['mean'] + 3*right['ad']['std'])
-
-        metrics.append({
-            "label": "AD (×10⁻³)",
-            "left_mean_sd": fmt_mean_sd(left['ad']['mean'], left['ad']['std'], is_diffusivity=True),
-            "left_med_range": fmt_med_range(left_ad_median, left_ad_min, left_ad_max, is_diffusivity=True),
-            "right_mean_sd": fmt_mean_sd(right['ad']['mean'], right['ad']['std'], is_diffusivity=True),
-            "right_med_range": fmt_med_range(right_ad_median, right_ad_min, right_ad_max, is_diffusivity=True),
-            "li": asym['ad']['laterality_index']
-        })
-
-    # Build localized metrics for template
-    localized_metrics = []
-    regions = [('Pontine', 'pontine'), ('PLIC', 'plic'), ('Precentral', 'precentral')]
-
-    def fmt_localized(scalar, region):
-        """Format L / R / LI string for localized metric."""
-        if scalar not in left or region not in left[scalar]:
-            return "-"
-        l_val = left[scalar][region]
-        r_val = right[scalar][region]
-        li_key = f'{scalar}_{region}'
-        li_val = asym.get(li_key, {}).get('laterality_index', 0.0)
-        if scalar == 'fa':
-            return f"{l_val:.3f} / {r_val:.3f} / {li_val:+.3f}"
-        else:
-            # Diffusivity values (×10⁻³)
-            return f"{l_val*1000:.2f} / {r_val*1000:.2f} / {li_val:+.3f}"
-
-    for region_name, region_key in regions:
-        localized_metrics.append({
-            'name': region_name,
-            'fa': fmt_localized('fa', region_key),
-            'md': fmt_localized('md', region_key),
-            'rd': fmt_localized('rd', region_key),
-            'ad': fmt_localized('ad', region_key)
-        })
-
-    # Build visualization data for template (coronal only). The report shows the
-    # single stacked-profiles figure (all four scalars); the old per-scalar
-    # profile_fa/md/rd/ad keys were never populated and only fed a dead template
-    # fallback, so they are dropped (BUG-2).
-    viz = {
-        "stacked_profiles": _embed_image(visualization_paths.get('stacked_profiles')),
-        "tractogram_coronal": _embed_image(visualization_paths.get('tractogram_qc_coronal'))
-    }
-    
-    # Get acquisition/processing metadata with defaults
-    acquisition = metadata.get('acquisition', {})
-    processing = metadata.get('processing', {})
-    
-    # Format whole brain streamline count
-    whole_brain = processing.get('whole_brain_streamlines', 'N/A')
-    if whole_brain != 'N/A' and isinstance(whole_brain, (int, float)):
-        processing = {**processing, 'whole_brain': f'{int(whole_brain):,} streamlines'}
-    else:
-        processing = {**processing, 'whole_brain': whole_brain}
-    
     # Load template and CSS
     template = _jinja_env.get_template("report.html.j2")
     css = (_TEMPLATE_DIR / "report.css").read_text()
-    
+
     # Render template with context
-    html_content = template.render(
-        subject_id=subject_id,
-        date=datetime.now().strftime("%Y-%m-%d"),
-        version=version,
-        space=space,
-        css=css,
-        metrics=metrics,
-        localized_metrics=localized_metrics,
-        viz=viz,
-        acquisition=acquisition,
-        processing=processing,
-    )
-    
+    html_content = template.render(css=css, **context)
+
     html_path = output_dir / f"{subject_id}_report.html"
     html_path.write_text(html_content, encoding="utf-8")
-    
+
     print(f"  ✓ HTML report saved: {html_path}")
     return html_path
 
@@ -593,8 +865,8 @@ def generate_complete_report(
         plot_tract_profiles,
         plot_bilateral_comparison,
         create_summary_figure,
-        plot_stacked_profiles,
-        plot_tractogram_qc_preview
+        plot_profile_matrix,
+        plot_tractogram_qc_triptych,
     )
     from csttool.viz import style as _style
     _style.apply_house_style()  # shared typography/spines/DPI for metrics figures
@@ -613,28 +885,23 @@ def generate_complete_report(
     if background_image is None:
         background_image = fa_map
     
-    # Generate visualizations for PDF (new single-page layout)
-    pdf_viz_paths = {}
-
-    # Stacked FA/MD profiles for PDF
-    pdf_viz_paths['stacked_profiles'] = plot_stacked_profiles(
-        comparison['left'],
-        comparison['right'],
-        viz_dir,
-        subject_id
-    )
-
-    # Tractogram QC preview for PDF (Coronal only)
-    pdf_viz_paths['tractogram_qc_coronal'] = plot_tractogram_qc_preview(
-        streamlines_left,
-        streamlines_right,
-        background_image,
-        affine,
-        viz_dir,
-        subject_id,
-        slice_type='coronal',
-        set_title=False
-    )
+    # Generate the two composite figures used by the one-page PDF report.
+    # The FA map is the QC background by default, so the grayscale FA colorbar is
+    # scientifically valid (background_kind="fa").
+    pdf_viz_paths = {
+        'profile_matrix': plot_profile_matrix(
+            comparison['left'], comparison['right'], viz_dir, subject_id
+        ),
+        'tractogram_qc_triptych': plot_tractogram_qc_triptych(
+            streamlines_left,
+            streamlines_right,
+            background_image,
+            affine,
+            viz_dir,
+            subject_id,
+            background_kind=("fa" if background_image is fa_map else "other"),
+        ),
+    }
     
     # Also generate individual plots for detailed analysis
     viz_paths = {}
@@ -677,8 +944,12 @@ def generate_complete_report(
     viz_paths.update(pdf_viz_paths)
     
     # Generate reports
-    # 1. HTML Report (now critical as PDF is derived from it)
-    html_path = save_html_report(comparison, pdf_viz_paths, output_dir, subject_id, version, space, metadata)
+    # 1. HTML Report (critical as PDF is derived from it); pass the FA affine so
+    #    the orientation code is computed dynamically.
+    html_path = save_html_report(
+        comparison, pdf_viz_paths, output_dir, subject_id, version, space,
+        metadata, fa_affine=affine,
+    )
     
     # 2. PDF Report (from HTML)
     pdf_path = save_pdf_report(comparison, pdf_viz_paths, output_dir, subject_id, version, space, html_path)

@@ -47,7 +47,9 @@ direction is the hallmark of a cortical interface placement artifact, not anatom
 
 Result: LI = +0.002 — matches the brainstem-seeded ground truth (LI = +0.007).
 
-Full technical write-up: [Bidirectional seeding — motivation and validation](../fixes/bidirectional_seeding.md)
+Full technical write-up: `docs/fixes/bidirectional_seeding.md` in the companion
+`csttool-devlog` repository, where investigation write-ups live rather than in the published
+docs.
 
 ---
 
@@ -320,3 +322,45 @@ control that the warped-MNI mask makes symmetric), and the Jacobian std roughly 
 the L/R symmetry it was quoted as evidence for survives. See the CHANGELOG `[Unreleased]`
 entry for the measured table, and [[07 Decisions]] D3 for the consequence to the
 "lower-left peduncle FA is a data property" claim.
+
+---
+
+## Why the report shows a genuine length median, and why a mean is never shown as a median
+
+`compute_morphology` historically returned `mean_length`, `std_length`, `min_length`,
+`max_length` — but no median. The report's global table paired each row with a `median
+(min–max)` column, so the Length row showed only `(min–max)` while FA/MD/RD/AD showed a
+genuine median. That was a data gap, not an intentional alternate statistic.
+
+`compute_morphology` now also returns `median_length` (`float(np.median(lengths))`), so the
+Length row uses the same `median (min–max)` format as the other rows. This is **additive
+only**: the length laterality index is defined on `mean_length` (the per-streamline
+headline, AU10), so `median_length` is a descriptive companion that changes no existing
+metric value and no LI.
+
+A mean is never displayed as a median. Legacy morphology dicts that predate `median_length`
+(and any report re-rendered from them) render an explicit em dash in the Length median
+column, not the mean dressed as a median. The Streamlines and Volume rows carry an em dash
+by design — Streamlines is a count and Volume is a single bundle volume, neither of which has
+a per-streamline distribution from which a median is meaningful in this report.
+
+## Why the PDF report is one A4 page with a dynamic orientation label
+
+The clinical report is a single A4 portrait page, enforced by an automated PDF page-count
+test across a realistic envelope of inputs (full/empty metadata, FA-only scalars, long
+subject IDs, zero streamlines, pathologically long provenance strings). The test asserts on
+the rendered PDF, and a companion test asserts the layout still leaves several millimetres
+of headroom, so a report that fits only by a hair fails before it reaches a second page.
+
+The orientation label (`RAS`, `LAS`, …) is computed from the FA affine via
+`nib.orientations.aff2axcodes`, never hardcoded. **`LAS` is a normal value here, not a bug.**
+csttool does not force subject data into RAS: the primary `dcm2niix` import path preserves
+the scanner's native voxel orientation, which for a typical Siemens axial DWI series is LAS.
+Only the `dicom2nifti` fallback reorients to RAS, and it does so for gradient-consistency
+reasons (image and bvecs reoriented *together*, see AU21), not because RAS is the pipeline's
+declared output space. So the label genuinely varies by subject and by import path, which is
+exactly why it is derived rather than written down. It is shown once in the methods band, not
+repeated per QC slice.
+
+Laterality colour is reserved for data (blue = Left, orange = Right); structural elements are
+neutral, and no red is used for laterality.

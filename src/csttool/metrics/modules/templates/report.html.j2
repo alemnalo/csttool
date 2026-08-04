@@ -1,220 +1,156 @@
-{# CST Analysis Report Template #}
-{# Uses Jinja2 templating with raw data passed from Python #}
+{# CST Analysis Report — one A4 portrait page #}
+{# Context is assembled by reports.build_report_context() #}
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CST Analysis Report</title>
     <style>{{ css }}</style>
 </head>
-
 <body>
-    <div class="page-container">
-        {# ===== Header ===== #}
-        <header class="header">
+<div class="page">
+
+    {# ===== Header ===== #}
+    <header class="header">
+        <div class="header-left">
             <h1>CST Analysis Report</h1>
-            <div class="meta">
-                Subject: <strong>{{ subject_id }}</strong> |
-                Date: <strong>{{ date }}</strong> |
-                csttool <strong>v{{ version }}</strong> |
-                <span class="extraction-badge">Metrics Extracted In: {{ space }}</span>
-            </div>
-        </header>
-
-
-        {# ===== Acquisition & Processing Parameters ===== #}
-        <div class="params-row">
-            <div class="param-box">
-                <h3>Acquisition Parameters</h3>
-                <div class="param-grid">
-                    <span class="param-label">Field Strength:</span>
-                    <span class="param-value">
-                        {% if acquisition.field_strength_T %}
-                            {{ "%.1f"|format(acquisition.field_strength_T) }} T
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Echo Time:</span>
-                    <span class="param-value">
-                        {% if acquisition.echo_time_ms %}
-                            {{ "%.1f"|format(acquisition.echo_time_ms) }} ms
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Max b-value:</span>
-                    <span class="param-value">
-                        {% if acquisition.b_values %}
-                            {{ acquisition.b_values[-1] }} s/mm²
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Directions:</span>
-                    <span class="param-value">{{ acquisition.n_directions | default('N/A') }}</span>
-                    <span class="param-label">Resolution:</span>
-                    <span class="param-value">
-                        {% if acquisition.resolution_mm %}
-                            {{ "%.1f"|format(acquisition.resolution_mm[0]) }}×{{ "%.1f"|format(acquisition.resolution_mm[1]) }}×{{ "%.1f"|format(acquisition.resolution_mm[2]) }} mm
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </span>
-                </div>
-            </div>
-            <div class="param-box">
-                <h3>Processing Parameters</h3>
-                <div class="param-grid">
-                    <span class="param-label">Denoising:</span>
-                    <span class="param-value">
-                        {% if processing.preprocessing %}
-                            {{ processing.preprocessing.method | default('External') }}
-                        {% else %}
-                            External
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Motion Correction:</span>
-                    <span class="param-value">
-                        {% if processing.preprocessing and processing.preprocessing.motion_correction %}
-                            Yes
-                        {% else %}
-                            No
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Tracking Method:</span>
-                    <span class="param-value">{{ processing.tracking_method | default('Deterministic (CSA)') }}</span>
-                    <span class="param-label">FA Threshold:</span>
-                    <span class="param-value">{{ processing.tracking_params.fa_thresh if processing.tracking_params else 'N/A' }}</span>
-                    <span class="param-label">Angle Threshold:</span>
-                    <span class="param-value">
-                        {% if processing.tracking_params and processing.tracking_params.angle_threshold %}
-                            {{ processing.tracking_params.angle_threshold }}°
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Step Size:</span>
-                    <span class="param-value">
-                        {% if processing.tracking_params and processing.tracking_params.step_size %}
-                            {{ processing.tracking_params.step_size }} mm
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </span>
-                    <span class="param-label">Artifact Index:</span>
-                    <span class="param-value">
-                        {% if processing.extraction and processing.extraction.artifact_index is not none %}
-                            {{ "%.2f"|format(processing.extraction.artifact_index) }}
-                            {% if processing.extraction.artifact_index > 0.20 %}
-                                <span class="flag-warn">(&gt;0.20 — asymmetry may be methodological)</span>
-                            {% else %}
-                                <span class="flag-ok">(&le;0.20 — no strong placement-artifact signal)</span>
-                            {% endif %}
-                        {% else %}
-                            N/A <small>(bidirectional extraction only)</small>
-                        {% endif %}
-                    </span>
-                </div>
-            </div>
+            <p class="meta">
+                Subject: <strong>{{ subject_id }}</strong>
+                <span class="sep">|</span>
+                Date: <strong>{{ date }}</strong>
+                <span class="sep">|</span>
+                Method: <strong>{{ method_summary }}</strong>
+            </p>
         </div>
-
-
-        {# ===== Global Metrics Table (6 columns) ===== #}
-        <div class="metrics-section">
-            <table class="metrics-table">
-                <thead>
-                    <tr>
-                        <th style="width: 16%;">Metric</th>
-                        <th style="width: 18%;">Left Mean±SD</th>
-                        <th style="width: 18%;">Right Mean±SD</th>
-                        <th style="width: 18%;">Left Median</th>
-                        <th style="width: 18%;">Right Median</th>
-                        <th style="width: 12%;">LI</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for m in metrics %}
-                    <tr>
-                        <td>{{ m.label }}</td>
-                        <td>{{ m.left_mean_sd }}</td>
-                        <td>{{ m.right_mean_sd }}</td>
-                        <td>{{ m.left_med_range }}</td>
-                        <td>{{ m.right_med_range }}</td>
-                        <td class="{{ 'li-positive' if m.li > 0 else 'li-negative' }}">
-                            {%- if m.li > 0 %}+{% endif %}{{ "%.3f" | format(m.li) }}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-
+        <div class="header-right">
             <div class="legend">
-                Legend: <span class="left-gt">Left&gt;Right</span>, <span class="right-gt">Right&gt;Left</span>
+                <span class="swatch left"></span>Left CST
+                <span class="swatch right"></span>Right CST
+            </div>
+            <div class="li-formula">LI = (L - R) / (L + R)</div>
+            <div class="li-signs">
+                <span class="li-left">LI &gt; 0 · Left-dominant</span>
+                <span class="li-right">LI &lt; 0 · Right-dominant</span>
             </div>
         </div>
+    </header>
 
-        {# ===== Localized Metrics Table ===== #}
-        {% if localized_metrics %}
-        <div class="localized-metrics-section">
-            <h3>Regional Metrics</h3>
-            <table class="localized-table">
-                <thead>
-                    <tr>
-                        <th>Region</th>
-                        <th>FA (L / R / LI)</th>
-                        <th>MD (L / R / LI)</th>
-                        <th>RD (L / R / LI)</th>
-                        <th>AD (L / R / LI)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for region in localized_metrics %}
-                    <tr>
-                        <td>{{ region.name }}</td>
-                        <td>{{ region.fa }}</td>
-                        <td>{{ region.md }}</td>
-                        <td>{{ region.rd }}</td>
-                        <td>{{ region.ad }}</td>
-                    </tr>
+    {# ===== Methods band (3 columns) ===== #}
+    {# Rows are flex, not a CSS grid: the band is content-sized and its height #}
+    {# must be predictable in WeasyPrint for the one-page budget. #}
+    <section class="methods-band">
+        {% for title, rows in [("Acquisition", acq_rows),
+                               ("Processing", proc_rows),
+                               ("Space &amp; Orientation", space_rows)] %}
+        <div class="method-col">
+            <h2>{{ title }}</h2>
+            {% for label, value in rows %}
+            <div class="mrow"><span class="mk">{{ label }}</span><span class="mv">{{ value }}</span></div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </section>
+
+    {# ===== Global metrics ===== #}
+    <section class="global-metrics">
+        <h2 class="section-title">Global metrics <small>Diffusivity units: mm²/s (×10⁻³)</small></h2>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th class="col-metric">Metric</th>
+                    <th>Left Mean ± SD</th>
+                    <th>Right Mean ± SD</th>
+                    <th>Left Median (min–max)</th>
+                    <th>Right Median (min–max)</th>
+                    <th class="col-li">LI</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in metrics %}
+                <tr>
+                    <td class="metric-label">{{ m.label }}</td>
+                    <td>{{ m.left_mean_sd }}</td>
+                    <td>{{ m.right_mean_sd }}</td>
+                    <td>{{ m.left_med_range }}</td>
+                    <td>{{ m.right_med_range }}</td>
+                    <td class="li {{ m.li_class }}">{{ m.li }}</td>
+                </tr>
                 {% endfor %}
-                </tbody>
-            </table>
-        </div>
+            </tbody>
+        </table>
+    </section>
+
+    {# ===== Regional metrics ===== #}
+    <section class="regional-metrics">
+        <h2 class="section-title">Regional metrics</h2>
+        <table class="regional-table">
+            <thead>
+                <tr>
+                    <th class="col-region">Region</th>
+                    <th>FA (L / R / LI)</th>
+                    <th>MD (L / R / LI)</th>
+                    <th>RD (L / R / LI)</th>
+                    <th>AD (L / R / LI)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in localized_metrics %}
+                <tr>
+                    <td class="region-label">{{ r.name }}</td>
+                    <td>{{ r.fa }}</td>
+                    <td>{{ r.md }}</td>
+                    <td>{{ r.rd }}</td>
+                    <td>{{ r.ad }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    {# ===== Along-tract profiles (2x2 matrix) ===== #}
+    {# The profile legend is owned by the Matplotlib figure (it has to be placed #}
+    {# against the subplot geometry). Do not add a second one here. #}
+    <section class="profiles">
+        <h2 class="section-title">Along-tract profiles</h2>
+        {% if profile_matrix %}
+        <img class="profile-matrix" src="{{ profile_matrix }}" alt="Along-tract profile matrix (FA, MD, RD, AD)">
+        {% else %}
+        <div class="figure-placeholder">[Along-tract profiles]</div>
         {% endif %}
+    </section>
 
-        {# ===== Visualizations ===== #}
-        <div class="viz-section">
-            {# Left column: Along-Tract Profiles #}
-            <div class="profiles-column">
-            {% if viz.stacked_profiles %}
-                <div class="stacked-profiles">
-                    <h4>Along-Tract Profiles</h4>
-                    <img src="{{ viz.stacked_profiles }}" alt="Stacked Profiles">
-                </div>
-            {% else %}
-                <div class="profile-placeholder">[Along-Tract Profiles]</div>
-            {% endif %}
-            </div>
+    {# ===== Tractography QC (1x3 triptych) ===== #}
+    <section class="qc">
+        <h2 class="section-title">Tractography QC <small>FA background</small></h2>
+        {% if qc_triptych %}
+        <img class="qc-triptych" src="{{ qc_triptych }}" alt="Tractography QC triptych (sagittal, coronal, axial)">
+        {% else %}
+        <div class="figure-placeholder">[Tractography QC]</div>
+        {% endif %}
+    </section>
 
-            {# Right column: Coronal Tractogram Only #}
-            <div class="tractogram-column">
-                <div class="tractogram-item tractogram-single">
-                    <h4>Coronal View</h4>
-                    {% if viz.tractogram_coronal %}
-                    <img src="{{ viz.tractogram_coronal }}" alt="Coronal View">
-                    {% else %}
-                    <div class="tractogram-placeholder">[Coronal View]</div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
+    {# ===== Provenance footer ===== #}
+    {# Fixed three lines, one proportional face throughout, a fixed dependency #}
+    {# subset (no open-ended list), and each line clipped horizontally so an #}
+    {# unusually long CPU/platform string can never grow the footer. #}
+    <footer class="footer">
+        <h2 class="footer-title">Reproducibility</h2>
+        {% if provenance %}
+        <p class="footer-line">
+            <strong>csttool v{{ version }}</strong>
+            <span class="sep">|</span> Python {{ provenance.python_version }}
+            <span class="sep">|</span> {{ provenance.platform }}
+            <span class="sep">|</span> {{ provenance.hardware_str }}
+        </p>
+        <p class="footer-line">{{ provenance.thread_env_str }}</p>
+        <p class="footer-line">{{ provenance.dependencies_str }}</p>
+        {% else %}
+        <p class="footer-line">Provenance information was not recorded for this run.</p>
+        <p class="footer-line">&nbsp;</p>
+        <p class="footer-line">&nbsp;</p>
+        {% endif %}
+    </footer>
 
-        {# ===== Footer ===== #}
-        <footer class="footer">
-            Method: Deterministic tractography, DTI model | Generated by csttool
-        </footer>
-    </div>
+</div>
 </body>
 </html>

@@ -42,7 +42,11 @@ test = [
     "mkdocs",
     "mkdocs-material",
     "mkdocstrings[python]",
-    "pymdown-extensions"
+    "pymdown-extensions",
+    # pypdf is a pure-Python PDF reader used only by the one-page report
+    # structural tests (gated on weasyprint). Lightweight; safe in the base
+    # test extras so the PDF gate can run wherever weasyprint is installed.
+    "pypdf",
 ]
 
 [project.scripts]

@@ -123,3 +123,30 @@ class TestSpatialHelpers:
         world = geo.voxel_to_world(pts, LAS_AFFINE)
         back = geo.world_to_voxel(world, LAS_AFFINE)
         np.testing.assert_allclose(back, pts, atol=1e-9)
+
+
+class TestOrientationCode:
+    """orientation_code returns the 3-letter voxel orientation from the affine.
+
+    This is the compact, scientifically exact orientation label shown once in the
+    report's Methods band. It must be derived from the affine, never hardcoded,
+    so a subject reoriented to RAS during preprocessing is reported as RAS.
+    """
+
+    def test_ras_affine(self):
+        assert geo.orientation_code(RAS_AFFINE) == "RAS"
+
+    def test_las_affine(self):
+        assert geo.orientation_code(LAS_AFFINE) == "LAS"
+
+    def test_lps_affine(self):
+        # Negative X (Left), negative Y (Posterior), positive Z (Superior).
+        lps = np.array([[-2, 0, 0, 90.0],
+                        [0, -2, 0, -75.0],
+                        [0, 0, 2, -70.0],
+                        [0, 0, 0, 1.0]])
+        assert geo.orientation_code(lps) == "LPS"
+
+    def test_three_letters(self):
+        code = geo.orientation_code(RAS_AFFINE)
+        assert len(code) == 3

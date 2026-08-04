@@ -33,6 +33,27 @@ jobs:
         run: pytest tests/ -x -q
 
   # ---------------------------------------------------------------------------
+  # report-pdf: the one-page A4 PDF report gate. WeasyPrint's native deps are
+  # heavy, so it is a dedicated single-platform job (not in the OS/version
+  # matrix). It installs the [reports] extra + pypdf and runs the PDF
+  # structural tests (exactly one A4 page, content, git-commit absence).
+  # ---------------------------------------------------------------------------
+  report-pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install csttool with report + test dependencies
+        run: pip install -e ".[test,reports]"
+      # The whole report-layout file, not just the -k "pdf" subset: this is the
+      # only job with WeasyPrint installed, so it is where the one-page gate,
+      # the headroom budget and the figure-geometry assertions all really run.
+      - name: Run report layout + PDF tests
+        run: pytest tests/metrics/test_report_layout.py -q
+
+  # ---------------------------------------------------------------------------
   # publish: triggered on a v* tag only, after tests pass
   #
   # Prerequisites (one-time setup on PyPI):

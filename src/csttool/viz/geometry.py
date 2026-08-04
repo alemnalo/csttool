@@ -29,6 +29,18 @@ VIEW_AXES = {
 # ---------------------------------------------------------------------------
 # Coordinate transforms
 # ---------------------------------------------------------------------------
+def orientation_code(affine) -> str:
+    """Return the 3-letter voxel-orientation code of ``affine`` (e.g. ``"RAS"``).
+
+    This is the compact, scientifically exact description of the image's voxel
+    axis orientation (anatomical axis + direction of increasing index). It is
+    computed from the affine, never hardcoded, so a subject reoriented to RAS
+    during preprocessing is reported as RAS regardless of what a mockup may say.
+    """
+    import nibabel as nib
+    return "".join(nib.orientations.aff2axcodes(affine))
+
+
 def to_ras(data, affine):
     """Reorient a 3D array + affine to RAS+ voxel orientation.
 

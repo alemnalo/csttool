@@ -564,6 +564,8 @@ _QC_NAMES = {
     "_tract_profile_fa.png":       ("metrics",    "tractprofile"),
     "_bilateral_comparison.png":   ("metrics",    "bilateral"),
     "_stacked_profiles.png":       ("metrics",    "profiles"),
+    "_profile_matrix.png":         ("metrics",    "profiles-matrix"),
+    "_tractogram_qc_triptych.png": ("metrics",    "tractogram-triptych"),
     "_tractogram_qc_axial.png":    ("metrics",    "tractogram-axial"),
     "_tractogram_qc_sagittal.png": ("metrics",    "tractogram-sagittal"),
     "_tractogram_qc_coronal.png":  ("metrics",    "tractogram-coronal"),

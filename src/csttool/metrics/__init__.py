@@ -33,7 +33,9 @@ from .modules.visualizations import (
     create_summary_figure,
     plot_asymmetry_radar,
     plot_stacked_profiles,
+    plot_profile_matrix,
     plot_tractogram_qc_preview,
+    plot_tractogram_qc_triptych,
 )
 
 from .modules.reports import (
@@ -66,7 +68,9 @@ __all__ = [
     'create_summary_figure',
     'plot_asymmetry_radar',
     'plot_stacked_profiles',
+    'plot_profile_matrix',
     'plot_tractogram_qc_preview',
+    'plot_tractogram_qc_triptych',
     
     # Reports
     'save_json_report',

@@ -13,8 +13,9 @@ from csttool.metrics import (
     print_hemisphere_summary,
     plot_tract_profiles,
     plot_bilateral_comparison,
-    plot_stacked_profiles,
+    plot_profile_matrix,
     plot_tractogram_qc_preview,
+    plot_tractogram_qc_triptych,
 )
 from csttool.metrics.modules.reports import (
     save_json_report,
@@ -273,19 +274,21 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
     except Exception as e:
         print(f"  ⚠️ Could not generate bilateral comparison: {e}")
 
-    # Generate additional visualizations for PDF if requested
+    # Generate report figures and standalone QC visuals when requested.
+    # The PDF report consumes the two composite figures (profile_matrix +
+    # tractogram_qc_triptych); the standalone per-view QC PNGs are also written
+    # for --save-visualizations so sub-*/figures/ still receives the
+    # individual views. The triptych shares one grayscale FA scale + colorbar.
     if getattr(args, 'generate_pdf', False) or getattr(args, 'save_visualizations', False):
         try:
-            viz_paths['stacked_profiles'] = plot_stacked_profiles(
+            viz_paths['profile_matrix'] = plot_profile_matrix(
                 left_metrics, right_metrics, viz_dir, args.subject_id
             )
-            print(f"  ✓ Saved: {viz_paths['stacked_profiles']}")
+            print(f"  ✓ Saved: {viz_paths['profile_matrix']}")
         except Exception as e:
-            print(f"  ⚠️ Could not generate stacked profiles: {e}")
-            
+            print(f"  ⚠️ Could not generate profile matrix: {e}")
+
         try:
-            # For QC preview, we need background image (FA) and affine
-            # If FA is not available, we can try to use a dummy or skip
             if fa_map is not None:
                 bg_img = fa_map
                 bg_affine = affine
@@ -294,8 +297,9 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
                  # For now, skip if no background
                  bg_img = None
                  bg_affine = None
-            
+
             if bg_img is not None:
+                # Standalone per-view QC PNGs (for figures/ / diagnostics).
                 for view in ['axial', 'sagittal', 'coronal']:
                     viz_paths[f'tractogram_qc_{view}'] = plot_tractogram_qc_preview(
                         streamlines_left,
@@ -305,9 +309,21 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
                         viz_dir,
                         args.subject_id,
                         slice_type=view,
-                        set_title=False  # HTML template adds titles
+                        set_title=False,
                     )
                     print(f"  ✓ Saved: {viz_paths[f'tractogram_qc_{view}']}")
+                # Composite 1x3 triptych for the PDF report (shared FA scale).
+                if getattr(args, 'generate_pdf', False):
+                    viz_paths['tractogram_qc_triptych'] = plot_tractogram_qc_triptych(
+                        streamlines_left,
+                        streamlines_right,
+                        bg_img,
+                        bg_affine,
+                        viz_dir,
+                        args.subject_id,
+                        background_kind="fa",
+                    )
+                    print(f"  ✓ Saved: {viz_paths['tractogram_qc_triptych']}")
         except Exception as e:
             print(f"  ⚠️ Could not generate tractogram QC: {e}")
     
@@ -319,14 +335,16 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
             # Use new HTML→PDF pipeline with metadata
             space = getattr(args, 'space', "Native Space")
             
-            # First generate HTML report
+            # First generate HTML report; pass the FA affine so the
+            # orientation code is computed dynamically.
             html_path = save_html_report(
-                comparison, 
-                viz_paths, 
-                args.out, 
+                comparison,
+                viz_paths,
+                args.out,
                 args.subject_id,
                 space=space,
-                metadata=metadata
+                metadata=metadata,
+                fa_affine=affine,
             )
             print(f"  ✓ Saved: {html_path}")
             

@@ -108,3 +108,31 @@ def test_compare_bilateral_cst_localized_metrics(synthetic_affine):
     # FA plic and precentral should be symmetric (LI ≈ 0)
     assert abs(comparison['asymmetry']['fa_plic']['laterality_index']) < 0.01
     assert abs(comparison['asymmetry']['fa_precentral']['laterality_index']) < 0.01
+
+
+def test_length_li_uses_mean_not_median():
+    """Adding median_length must not change the length laterality index.
+
+    Regression guard for the additive morphology data-model extension: the
+    length LI is defined on mean_length (AU10), so a new median_length field is
+    descriptive only and must not perturb any existing metric value.
+    """
+    from csttool.metrics.modules.bilateral_analysis import compute_laterality_indices
+
+    def mk(median_len):
+        return {
+            'morphology': {
+                'n_streamlines': 10, 'tract_volume': 100.0,
+                'mean_length': 90.0, 'median_length': median_len,
+                'std_length': 5.0, 'min_length': 80.0, 'max_length': 100.0,
+            },
+            'fa': {'mean': 0.5, 'std': 0.05},
+        }
+
+    left = mk(88.0)
+    right = mk(92.0)
+    asym = compute_laterality_indices(left, right)
+    # LI on mean_length (90 vs 90) is exactly 0 regardless of the medians.
+    assert asym['mean_length']['laterality_index'] == 0.0
+    # median_length is not an asymmetry key at all.
+    assert 'median_length' not in asym

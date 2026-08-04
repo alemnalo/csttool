@@ -1,392 +1,235 @@
-/*
- * CST Analysis Report - Print-Focused Stylesheet
- * Designed for A4 PDF output via WeasyPrint
- * All dimensions in mm for precise print control
- */
+/* CST Analysis Report — one A4 portrait page (WeasyPrint) */
+/* All dimensions in mm. Page budget documented in the implementation plan. */
 
-/* ===== Page Setup ===== */
 @page {
     size: A4 portrait;
-    margin: 10mm;
+    margin: 8mm;
 }
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
+:root {
+    --ink: #10254a;
+    --text: #172033;
+    --muted: #5f6b7a;
+    --rule: #aeb9c8;
+    --band: #e8edf2;
+    --blue: #1f77b4;   /* Left CST — laterality only */
+    --orange: #ff7f0e; /* Right CST — laterality only */
+    --row-alt: #f6f8fa;
 }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    width: 190mm;
-    /* A4 width (210mm) - 2×10mm margins */
-    height: 277mm;
-    /* A4 height (297mm) - 2×10mm margins */
-    margin: 0 auto;
-    font-size: 10pt;
-    color: #333;
+    font-family: Arial, Helvetica, sans-serif;
+    color: var(--text);
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
 }
 
-/* ===== Page Container ===== */
-.page-container {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
+/* The page box is sized by its content. There is deliberately no fixed height
+   and no `overflow: hidden` here: content is made to fit for real, and a
+   regression that no longer fits must show up as a second page in the
+   one-page PDF test rather than being silently clipped. */
+.page {
+    width: 194mm;
 }
 
 /* ===== Header (14mm) ===== */
 .header {
-    height: 14mm;
-    text-align: center;
-    margin-bottom: 4mm;
-    flex-shrink: 0;
-}
-
-.header h1 {
-    color: #1976D2;
-    font-size: 16pt;
-    margin-bottom: 1mm;
-}
-
-.header .meta {
-    color: #555;
-    font-size: 9pt;
-}
-
-.extraction-badge {
-    background: #E3F2FD;
-    color: #1565C0;
-    padding: 0.5mm 2mm;
-    border-radius: 2mm;
-    display: inline;
-    font-weight: 600;
-    font-size: 8pt;
-}
-
-/* ===== Parameters Row ===== */
-.params-row {
     display: flex;
-    gap: 4mm;
-    min-height: 18mm;
-    margin-bottom: 3mm;
-    flex-shrink: 0;
-}
-
-.param-box {
-    flex: 1;
-    background: #F8F9FA;
-    border-left: 1mm solid #2196F3;
-    padding: 2mm 3mm;
-    border-radius: 1mm;
-}
-
-.param-box h3 {
-    color: #1976D2;
-    font-size: 9pt;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 0.3mm solid var(--rule);
+    padding-bottom: 1.5mm;
     margin-bottom: 2mm;
-    font-weight: 600;
 }
-
-.param-grid {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 1mm 3mm;
+.header h1 {
+    color: var(--ink);
+    font-size: 17pt;
+    line-height: 1;
+}
+.header .meta {
+    font-size: 8pt;
+    margin-top: 1.5mm;
+    color: var(--text);
+}
+.header .meta .sep { color: var(--rule); padding: 0 1.5mm; }
+.header-right {
+    text-align: right;
     font-size: 7pt;
+    line-height: 1.3;
 }
-
-.param-label {
-    color: #666;
+.legend {
+    display: flex;
+    align-items: center;
+    gap: 2mm;
+    justify-content: flex-end;
 }
-
-.param-value {
-    color: #333;
-    font-family: 'Consolas', 'Courier New', monospace;
+.swatch {
+    display: inline-block;
+    width: 7mm;
+    height: 1mm;
+    margin-right: 0.5mm;
+    vertical-align: middle;
 }
+.swatch.left { background: var(--blue); }
+.swatch.right { background: var(--orange); }
+.li-formula { font-style: italic; margin: 0.8mm 0; color: var(--ink); }
+.li-signs { font-size: 6.5pt; }
+.li-signs .li-left { color: var(--blue); }
+.li-signs .li-right { color: var(--orange); margin-left: 2mm; }
 
-.flag-warn {
-    color: #D32F2F;
-    font-family: inherit;
-}
-
-.flag-ok {
-    color: #2E7D32;
-    font-family: inherit;
-}
-
-/* ===== Metrics Table (6 columns) ===== */
-.metrics-section {
-    min-height: 30mm;
+/* ===== Methods band — content-sized (~24mm) =====
+   Flex rows, not a CSS grid: WeasyPrint lays these out at a predictable height,
+   and the band grows only with the number of rows it actually has. */
+.methods-band {
+    display: flex;
+    border: 0.3mm solid var(--rule);
+    border-radius: 1mm;
     margin-bottom: 2mm;
-    flex-shrink: 0;
+}
+.method-col {
+    flex: 1;
+    padding: 1.2mm 2.5mm 1.4mm;
+    min-width: 0;
+}
+.method-col + .method-col { border-left: 0.3mm solid var(--rule); }
+.method-col h2 {
+    color: var(--ink);
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.8mm;
+}
+.mrow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 2mm;
+    font-size: 6.8pt;
+    line-height: 1.25;
+}
+.mrow .mk { font-weight: 600; color: var(--muted); white-space: nowrap; }
+.mrow .mv {
+    color: var(--text);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.metrics-table {
+/* ===== Section titles ===== */
+.section-title {
+    color: var(--ink);
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin: 1.6mm 0 0.9mm;
+}
+.section-title small {
+    font-size: 6.5pt;
+    text-transform: none;
+    font-weight: 400;
+    color: var(--muted);
+    margin-left: 2mm;
+}
+
+/* ===== Global metrics table (28mm) ===== */
+.metrics-table, .regional-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 7.5pt;
+    table-layout: fixed;
 }
-
-.metrics-table thead {
-    background: linear-gradient(135deg, #2196F3, #1976D2);
-    color: white;
-}
-
-.metrics-table th {
-    padding: 1.5mm 1.5mm;
+.metrics-table thead th, .regional-table thead th {
+    background: var(--band);
+    color: var(--ink);
+    border-bottom: 0.3mm solid var(--rule);
+    padding: 0.8mm 1.5mm;
     text-align: center;
     font-weight: 600;
     font-size: 7pt;
 }
-
-.metrics-table th:first-child {
+.metrics-table thead th:first-child,
+.regional-table thead th:first-child { text-align: left; }
+.metrics-table tbody td, .regional-table tbody td {
+    padding: 0.55mm 1.5mm;
+    border-bottom: 0.2mm solid #e8edf2;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.metrics-table tbody td:first-child,
+.regional-table tbody td:first-child {
     text-align: left;
-}
-
-.metrics-table td {
-    padding: 1mm 1.5mm;
-    border-bottom: 0.3mm solid #E0E0E0;
-    text-align: center;
-    font-size: 7pt;
-}
-
-.metrics-table td:first-child {
-    text-align: left;
-    font-weight: 500;
-}
-
-.metrics-table tbody tr:nth-child(even) {
-    background: #FAFAFA;
-}
-
-.li-positive {
-    color: #D32F2F;
     font-weight: 600;
 }
+.metrics-table tbody tr:nth-child(even),
+.regional-table tbody tr:nth-child(even) { background: var(--row-alt); }
+.col-metric { width: 16%; }
+.col-li { width: 9%; }
+.col-region { width: 14%; }
 
-.li-negative {
-    color: #1976D2;
-    font-weight: 600;
+/* LI cells: blue/orange by sign (laterality only, no red) */
+.li { font-weight: 600; font-variant-numeric: tabular-nums; }
+.li-left { color: var(--blue); }
+.li-right { color: var(--orange); }
+.li-zero { color: var(--text); }
+
+/* ===== Regional table (17mm) ===== */
+.regional-table { font-size: 7pt; }
+.regional-table tbody td { font-size: 6.8pt; }
+
+/* ===== Figures =====
+   Each figure is generated by Matplotlib at exactly this printed width (see
+   PROFILE_MATRIX_SIZE_MM / QC_TRIPTYCH_SIZE_MM in visualizations.py) and saved
+   with bbox_inches=None, so the rendered height is the designed height and the
+   page budget below is exact. Do not resize figures with CSS. */
+.profile-matrix {
+    width: 194mm;
+    display: block;
 }
-
-.legend {
-    text-align: center;
-    font-size: 7pt;
-    color: #666;
-    margin-top: 1mm;
+.qc-triptych {
+    width: 116mm;
+    display: block;
+    margin: 0 auto;   /* panels stay square; the block is centred, not stretched */
 }
-
-.legend .left-gt {
-    color: #D32F2F;
-}
-
-.legend .right-gt {
-    color: #1976D2;
-}
-
-/* ===== Localized Metrics Table ===== */
-.localized-metrics-section {
-    margin-bottom: 2mm;
-    flex-shrink: 0;
-}
-
-.localized-metrics-section h3 {
-    color: #1976D2;
-    font-size: 9pt;
-    font-weight: 600;
-    margin-bottom: 1mm;
-}
-
-.localized-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 7pt;
-}
-
-.localized-table thead {
-    background: linear-gradient(135deg, #4CAF50, #388E3C);
-    color: white;
-}
-
-.localized-table th {
-    padding: 1.5mm 2mm;
-    text-align: center;
-    font-weight: 600;
-    font-size: 7pt;
-}
-
-.localized-table th:first-child {
-    text-align: left;
-}
-
-.localized-table td {
-    padding: 1mm 2mm;
-    border-bottom: 0.3mm solid #E0E0E0;
-    text-align: center;
-    font-size: 6.5pt;
-    font-family: 'Consolas', 'Courier New', monospace;
-}
-
-.localized-table td:first-child {
-    text-align: left;
-    font-weight: 500;
-    font-family: inherit;
-}
-
-.localized-table tbody tr:nth-child(even) {
-    background: #F5FFF5;
-}
-
-/* ===== Visualizations (flex: 1, fills remaining ~145mm) ===== */
-.viz-section {
-    flex: 1;
-    display: flex;
-    gap: 4mm;
-    margin-bottom: 4mm;
-    overflow: hidden;
-    min-height: 0;
-    /* Critical for flex shrinking */
-}
-
-/* Left column: Profiles (60%) */
-.profiles-column {
-    flex: 3;
-    display: flex;
-    flex-direction: column;
-    gap: 2mm;
-    overflow: hidden;
-    min-height: 0;
-}
-
-.profile-plot {
-    flex: 1;
-    border: 0.3mm solid #E0E0E0;
-    border-radius: 1mm;
-    padding: 2mm;
-    background: white;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-}
-
-.profile-plot h4 {
-    color: #1976D2;
-    font-size: 8pt;
-    font-weight: 600;
-    text-align: center;
-    margin-bottom: 1mm;
-    flex-shrink: 0;
-}
-
-.profile-plot img {
-    flex: 1;
-    width: 100%;
-    object-fit: contain;
-    min-height: 0;
-}
-
-.stacked-profiles {
-    flex: 1;
-    border: 0.3mm solid #E0E0E0;
-    border-radius: 1mm;
-    padding: 2mm;
-    background: white;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-}
-
-.stacked-profiles h4 {
-    color: #1976D2;
-    font-size: 9pt;
-    font-weight: 600;
-    text-align: center;
-    margin-bottom: 2mm;
-    flex-shrink: 0;
-}
-
-.stacked-profiles img {
-    flex: 1;
-    width: 100%;
-    object-fit: contain;
-    min-height: 0;
-}
-
-/* Right column: Tractogram (single coronal view) */
-.tractogram-column {
-    flex: 2;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-}
-
-.tractogram-item {
-    flex: 1;
-    border: 0.3mm solid #E0E0E0;
-    border-radius: 1mm;
-    padding: 2mm;
-    background: white;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-}
-
-.tractogram-item.tractogram-single {
-    /* Single view takes full height */
-    flex: 1;
-}
-
-.tractogram-item h4 {
-    color: #1976D2;
-    font-size: 8pt;
-    font-weight: 600;
-    text-align: center;
-    margin-bottom: 1mm;
-    flex-shrink: 0;
-}
-
-.tractogram-item img {
-    flex: 1;
-    width: 100%;
-    object-fit: contain;
-    min-height: 0;
-}
-
-/* Placeholder styling */
-.profile-placeholder,
-.tractogram-placeholder {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #F5F5F5;
-    border: 0.3mm dashed #CCC;
-    border-radius: 1mm;
-    color: #888;
+.profiles { margin-bottom: 1mm; }
+.qc { margin-bottom: 0; }
+.figure-placeholder {
+    border: 0.3mm dashed var(--rule);
+    color: var(--muted);
     font-style: italic;
     font-size: 8pt;
     text-align: center;
+    padding: 8mm;
+    background: var(--row-alt);
+    border-radius: 1mm;
 }
 
-.tractogram-placeholder {
-    background: #2a2a2a;
-    color: #888;
-}
-
-/* ===== Footer (8mm) ===== */
+/* ===== Reproducibility footer — fixed height (~13mm) =====
+   One proportional face throughout: nothing here is an identifier, a hash or a
+   command, so nothing is set in monospace. Each line is clipped horizontally
+   rather than wrapping, so an unusually long CPU or platform string cannot push
+   the report onto a second page. */
 .footer {
-    height: 8mm;
-    padding-top: 2mm;
-    border-top: 0.3mm solid #E0E0E0;
-    text-align: center;
-    color: #666;
-    font-size: 7pt;
-    flex-shrink: 0;
+    border-top: 0.3mm solid var(--rule);
+    padding-top: 1.2mm;
+    margin-top: 1.5mm;
 }
+.footer-title {
+    color: var(--ink);
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.6mm;
+}
+.footer-line {
+    font-size: 7pt;
+    line-height: 1.3;
+    color: var(--text);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.footer-line .sep { color: var(--rule); padding: 0 1mm; }
