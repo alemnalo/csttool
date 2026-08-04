@@ -7,7 +7,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Redesigned one-page A4 PDF report.** The clinical report is restructured to
+  the approved layout: a compact header with a laterality legend and the LI
+  formula, a three-column methods band (Acquisition / Processing / Space &
+  Orientation) with terminology verified against the implementation (DTI scalar
+  model, CSA ODF direction model, deterministic LocalTracking, FA-mask seeding),
+  titled global and regional tables with consistent units/precision and
+  blue/orange LI colour semantics (no red), a large 2×2 along-tract profile
+  matrix (FA/MD/RD/AD) with a single shared legend and shared bottom x-axis, a
+  compact 1×3 tractography-QC triptych (sagittal/coronal/axial) sharing one
+  grayscale FA scale and one colorbar, and a readable reproducibility footer
+  (hardware retained; git commit stays in JSON only). The orientation code is
+  derived dynamically from the FA affine (`viz.geometry.orientation_code`),
+  never hardcoded. Report formatting helpers are centralized and unit-tested
+  (`reports.format_*`, `build_report_context`), and the two report-generation
+  paths (library `generate_complete_report` and CLI `cmd_metrics`) now share one
+  composite-figure pipeline. The obsolete "Metrics Extracted In" badge is
+  removed.
+
+- **`median_length` morphology statistic (additive).**
+  `compute_morphology` now also returns `median_length` (`float(np.median(lengths))`;
+  `0.0` for the empty case). Additive only: the length laterality index still
+  uses `mean_length` (AU10), so no existing metric value changes. The report's
+  global Length row now shows a genuine `median (min–max)` cell; legacy
+  morphology without `median_length` renders an em dash rather than
+  substituting the mean (a mean is never displayed as a median). New CSV columns
+  `left_median_length_mm` / `right_median_length_mm`; the JSON `metrics.*.morphology`
+  block gains the key. See `docs/explanation/design-decisions.md`.
+
+- **Unmocked end-to-end test of the extraction scientific core (AU28).**
+  `tests/integration/test_pipeline.py` patched
+  `register_mni_to_subject`, `load_mni_template`, `fetch_harvard_oxford`,
+  `extract_cst_passthrough` and `validate_tractogram_coordinates` with
+  `MagicMock`, so registration, warping, ROI construction and filtering had no
+  automated end-to-end coverage. New `tests/integration/test_unmocked_extract_core.py`
+  runs the *real* implementations of all four stages on a small, fully-synthetic,
+  self-contained scene (a 40³ MNI template + synthetic Harvard-Oxford-style atlas
+  shipped as session fixtures in `tests/conftest.py`, so CI never depends on the
+  FSL-licensed Tier-2 `fetch-data` atlases). It asserts the four planted CST
+  streamlines are recovered and split by the correct hemisphere, the junk
+  streamline is excluded, and `validate_tractogram_coordinates` passes on the
+  synthetic tractogram — one of the five sites AU28 named as mocked. The only
+  piece still substituted is `fetch_harvard_oxford`, which fetches a license-gated
+  atlas that cannot be assumed present in CI.
+
+- **Automated tests of registration quality / ROI placement / atlas-warp label
+  preservation (AU33).** The QC in `warp_atlas_to_subject` (label-count change,
+  motor-centroid side, motor Z-difference) only `print()`ed and
+  `verify_atlas_labels` returned a dict no test asserted on, so there was no
+  automated test of registration quality, ROI placement, or atlas-warp label
+  preservation. New `tests/extract/test_registration_quality.py` asserts on the
+  real registration+warp of the synthetic scene: the planted +6 mm translation is
+  recovered (warped atlas motor centroids land at MNI+DX), the per-hemisphere
+  Jacobian mean is ~1.0 with no folding, the warped-MNI midline is balanced and
+  shifted off-centre, atlas labels survive warping (set unchanged, no spurious
+  labels), and the motor L/R centroids straddle the midline and sit in the same
+  axial plane. Direct unit tests of the extracted QC helper cover the
+  previously-impossible label-loss and hemisphere-swap detector paths.
+
+### Changed
+
+- **`warp_atlas_to_subject` now returns an assertable QC dict (AU33).** The
+  atlas-warp QC checks (label-set preservation, motor-centroid world
+  coordinates and side-of-midline / Z-difference flags) were `print()`-only, so a
+  registration that silently dropped a label or swapped a hemisphere would warn
+  to stdout and pass. `warp_atlas_to_subject` now returns `(warped_atlas, qc)`
+  and `warp_harvard_oxford_to_subject` exposes them as `cortical_qc` /
+  `subcortical_qc`. The QC logic is extracted into a pure, testable helper
+  `compute_atlas_warp_qc` so callers and tests can assert on it without
+  re-deriving it. Label-preservation now compares the full label *set* (a
+  resample can split/merge labels while keeping the count), and the original
+  label set is recomputed on the resampled grid so a Harvard-Oxford→MNI-grid
+  resample is not misreported as a label change. No algorithm or metric value
+  changes; verbose printing is preserved.
+
 ### Fixed
+
+- **One-page A4 report: the redesign actually fits now.** The redesigned report
+  rendered on two pages (the QC triptych and the reproducibility footer spilled
+  onto page 2) while the page div hid the overflow with a fixed height plus
+  `overflow: hidden`. Root cause of the budget error: both composite figures
+  were saved through the house-style `savefig.bbox="tight"` policy, so the PNGs
+  were cropped-and-padded to an unpredictable aspect and printed ~5 mm taller
+  than designed; on top of that the methods band's CSS-grid `<dl>` laid out at
+  ~41 mm instead of the budgeted ~16 mm. The two report figures are now saved at
+  their exact figure bbox (`PROFILE_MATRIX_SIZE_MM`, `QC_TRIPTYCH_SIZE_MM` are
+  the single source of truth, asserted against the CSS widths by a test), the
+  methods band uses flex rows and is content-sized, section gaps and table row
+  padding are tightened, and the fixed height / `overflow: hidden` are gone so a
+  regression shows up as a second page instead of silently clipped content. The
+  page-count test is joined by a headroom test and a pathological-content case
+  (very long subject ID, CPU, platform and dependency strings).
+
+- **Duplicate and clipped along-tract profile legend.** The report drew a
+  template-level legend in the profiles section *and* the legend inside the
+  Matplotlib figure; the template copy was clipped. The template legend is
+  removed — the figure owns the single legend (Left CST / Right CST / PLIC
+  region), because only it can be positioned against the subplot geometry.
+
+- **Overlapping along-tract axis and landmark labels.** "Pontine Level", "PLIC"
+  and "Precentral Gyrus" were drawn per bottom-row panel in 9 pt italics, larger
+  than the 9 pt subplot titles they sat under, and collided with the x tick
+  labels. They now live in one shared anatomical-region strip spanning both
+  columns below the grid, in regular sans at 6.5 pt (smaller than the titles),
+  centred over their own `TRACT_REGIONS` intervals, alongside a clean numeric
+  tract-position axis. Printed type sizes are named constants
+  (`_RPT_TITLE_PT` … `_RPT_REGION_PT`) and a test asserts region labels stay
+  smaller than subplot titles and are drawn exactly once each.
+
+- **QC triptych geometry: unequal panels and an image/colorbar collision.** The
+  sagittal, coronal and axial slices have different source shapes (e.g. 72×96 vs
+  96×96), so the three panels rendered at different apparent sizes, and the
+  colorbar — created with `ax=[...]`, stealing space from the shared axes area —
+  landed on top of the axial panel. Each view is now letterboxed onto a common
+  data canvas (the union of the three extents, centred), giving all three panels
+  the same physical box and the same scale with no anatomical distortion, and
+  the colorbar has its own GridSpec column snapped to the image row's real
+  vertical extent. All three images and the colorbar share one
+  `Normalize(0, 1)` instance by construction. Tests assert equal panel boxes,
+  non-overlap, and the shared norm. The documented `slice_indices` override was
+  also silently ignored (`_render_qc_slice` always recomputed the centre slice);
+  it is now honoured.
+
+- **Reproducibility footer typography and content.** The footer mixed
+  proportional prose with a monospace, open-ended dependency list that wrapped
+  and pushed the report onto page 2. It is now fixed-height and set in one
+  proportional face: hardware and Python/platform on line 1 (long CPU and
+  platform strings truncated horizontally, `platform.platform()`'s hyphen soup
+  reduced to "Linux 6.17.0-40-generic (x86_64)"), a summarised thread-limit line
+  ("Thread limits: unset" / "Threads: OMP=1, MKL=1") instead of one entry per raw
+  environment variable, and a *fixed* dependency subset (NumPy, SciPy, DIPY,
+  NiBabel, Matplotlib) so two reports are comparable line by line. Git commit and
+  command line remain JSON-only.
+
+- **Regional-metrics subtitle removed.** "Means at key landmarks" was imprecise:
+  the values are regional profile-bin means over the `TRACT_REGIONS` intervals,
+  not measurements at isolated landmarks.
+
+- **Report orientation label documented correctly.** The label was already
+  derived from the FA affine, but `docs/explanation/design-decisions.md` claimed
+  csttool reorients DWI to RAS during preprocessing, which made a correct `LAS`
+  label look like a bug. Only the `dicom2nifti` fallback reorients to RAS (for
+  gradient consistency, AU21); the primary `dcm2niix` path preserves the
+  scanner's native orientation, which is LAS for a typical Siemens axial DWI
+  series. Docs and the `convert_series` docstring are corrected, and tests now
+  round-trip RAS, LAS and an oblique PSR affine through the report context.
 
 - **Affine-equality assertion in coordinate validation (AU22).**
   `validate_tractogram_coordinates` previously checked only that streamline
@@ -50,6 +196,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   introducing a new orientation. (AU21)
 
 ### Added
+
+- **Formal edge-case suite (AU31).** A new `tests/edge_cases/` package
+  characterises the six pathological-input classes the three audits named —
+  zero streamlines, all-zero DWI, single direction, misordered bvec/bval,
+  truncated NIfTI, DICOM missing tags — pinning current behaviour so a
+  regression is caught. Targeted hardening accompanies the suite: a truncated
+  NIfTI now raises a clear `NIfTI file appears truncated or corrupt` error at
+  the load boundary (instead of a raw `EOFError` deep in a stage); an all-zero
+  DWI now warns `No white-matter voxels found` (instead of a silent empty
+  output). The remaining classes already behaved correctly (misordered
+  gradients via AU21; zero-streamline extraction returns a well-formed empty
+  result; missing DICOM tags default and classify as unsuitable) and are now
+  pinned. 16 new tests.
 
 - **`--fit-method`** on `csttool track` and `csttool run` — exposes the DTI tensor fit
   method (`OLS`, `WLS`, `NLLS`, `RT`) as an explicit parameter, pinned to `WLS` by
