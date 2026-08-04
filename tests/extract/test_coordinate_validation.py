@@ -245,3 +245,117 @@ def test_verbose_mode_prints_summary(fa_image, valid_tractogram_world, capsys):
     # Check for new format: ✓ or ✗ symbols
     assert ('✓ Coordinate validation passed' in captured.out or
             '✗ Coordinate validation failed:' in captured.out)
+
+
+# ---------------------------------------------------------------------------
+# AU22: explicit affine-equality assertion
+# ---------------------------------------------------------------------------
+
+def _fa_image(tmp_path, voxel_size, origin):
+    """Build an FA map with a specific voxel size + origin (RAS)."""
+    aff = np.eye(4)
+    aff[:3, :3] = np.diag(voxel_size)
+    aff[:3, 3] = origin
+    img = nib.Nifti1Image(np.random.rand(64, 64, 64) * 0.7, aff)
+    p = tmp_path / f"fa_{voxel_size[0]}_{origin[0]}.nii.gz"
+    nib.save(img, p)
+    return p, img
+
+
+def test_affine_mismatch_trk_fails_explicitly(tmp_path):
+    """AU22: a .trk whose affine differs from the FA map (but whose world
+    bounds overlap) must fail the explicit affine check, not pass on
+    bounding-box overlap alone. This is the audit's exact scenario.
+    """
+    fa_path, _ = _fa_image(tmp_path, (2.0, 2.0, 2.0), (-64, -64, -64))
+
+    # A tractogram saved in a DIFFERENT voxel space (1.5mm, different origin)
+    # whose streamlines' world bounds still overlap the FA bounds.
+    trk_aff = np.diag([1.5, 1.5, 1.5, 1.0])
+    trk_aff[:3, 3] = [-50, -50, -50]
+    trk_img = nib.Nifti1Image(np.zeros((40, 40, 40)), trk_aff)
+    sl = [np.array([[-40, -40, -40], [0, 0, 0], [40, 40, 40]], float)]
+    sft = StatefulTractogram(sl, trk_img, Space.RASMM)
+    trk = tmp_path / "mismatched.trk"
+    save_tractogram(sft, str(trk), bbox_valid_check=False)
+
+    result = validate_tractogram_coordinates(
+        str(trk), str(fa_path), strict=False, verbose=False
+    )
+    assert result['valid'] is False
+    # The explicit affine assertion is the error source (not just the header).
+    assert any('affines do not match' in e for e in result['errors'])
+
+
+def test_affine_mismatch_trk_strict_raises(tmp_path):
+    """Strict mode raises ValueError naming the affine mismatch."""
+    fa_path, _ = _fa_image(tmp_path, (2.0, 2.0, 2.0), (-64, -64, -64))
+    trk_aff = np.diag([1.5, 1.5, 1.5, 1.0])
+    trk_aff[:3, 3] = [-50, -50, -50]
+    trk_img = nib.Nifti1Image(np.zeros((40, 40, 40)), trk_aff)
+    sft = StatefulTractogram(
+        [np.array([[-40, -40, -40], [40, 40, 40]], float)], trk_img, Space.RASMM
+    )
+    trk = tmp_path / "mismatched_strict.trk"
+    save_tractogram(sft, str(trk), bbox_valid_check=False)
+
+    with pytest.raises(ValueError, match="affines differ"):
+        validate_tractogram_coordinates(
+            str(trk), str(fa_path), strict=True, verbose=False
+        )
+
+
+def test_affine_match_trk_passes(tmp_path):
+    """A .trk with the same affine as the FA map passes the explicit check."""
+    fa_path, fa_img = _fa_image(tmp_path, (2.0, 2.0, 2.0), (-64, -64, -64))
+    sl = [np.array([[-50, -40, -30], [30, 40, 50]], float)]
+    sft = StatefulTractogram(sl, fa_img, Space.RASMM)
+    trk = tmp_path / "matched.trk"
+    save_tractogram(sft, str(trk), bbox_valid_check=False)
+
+    result = validate_tractogram_coordinates(
+        str(trk), str(fa_path), strict=False, verbose=False
+    )
+    assert result['valid'] is True
+    assert not any('affines do not match' in e for e in result['errors'])
+
+
+def test_tck_warns_no_affine_asserted(tmp_path):
+    """AU22: .tck carries no spatial header, so affine equality cannot be
+    asserted — the validator must surface this as a warning rather than a
+    silent pass. Previously this case passed with no warnings at all.
+    """
+    fa_path, fa_img = _fa_image(tmp_path, (2.0, 2.0, 2.0), (-64, -64, -64))
+    # Save the .tck against the *matching* FA space so it would otherwise pass.
+    sft = StatefulTractogram(
+        [np.array([[-50, -40, -30], [30, 40, 50]], float)], fa_img, Space.RASMM
+    )
+    tck = tmp_path / "t.tck"
+    save_tractogram(sft, str(tck), bbox_valid_check=False)
+
+    result = validate_tractogram_coordinates(
+        str(tck), str(fa_path), strict=False, verbose=False
+    )
+    assert any('no spatial header' in w for w in result['warnings'])
+    # A matching-space .tck is still valid (no error); the warning is the point.
+    assert result['valid'] is True
+
+
+def test_affine_mismatch_tck_still_warns_not_silent(tmp_path):
+    """AU22 regression guard: a .tck in a *different* space must not pass
+    silently (it previously returned valid=True with zero warnings). The
+    headerless-format warning at least surfaces that the affine was unchecked.
+    """
+    fa_path, _ = _fa_image(tmp_path, (2.0, 2.0, 2.0), (-64, -64, -64))
+    trk_img = nib.Nifti1Image(np.zeros((40, 40, 40)), np.diag([1.5, 1.5, 1.5, 1.0]))
+    sft = StatefulTractogram(
+        [np.array([[-40, -40, -40], [40, 40, 40]], float)], trk_img, Space.RASMM
+    )
+    tck = tmp_path / "mismatched.tck"
+    save_tractogram(sft, str(tck), bbox_valid_check=False)
+
+    result = validate_tractogram_coordinates(
+        str(tck), str(fa_path), strict=False, verbose=False
+    )
+    # At minimum, the unchecked-affine warning fires (no silent pass).
+    assert any('no spatial header' in w for w in result['warnings'])

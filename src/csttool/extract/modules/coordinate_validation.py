@@ -7,10 +7,41 @@ This module addresses the critical risk of coordinate system mismatches,
 which can produce anatomically plausible but incorrect results.
 """
 
+import os
+
 import numpy as np
 import nibabel as nib
 from dipy.io.streamline import load_tractogram
 from dipy.io.stateful_tractogram import Space
+
+# Affine-equality tolerances.
+#
+# AU22: validate_tractogram_coordinates previously checked only bounding-box
+# overlap, not affine equality, so a tractogram and FA map in mismatched
+# coordinate spaces could pass when their bounds happened to overlap (GLM §3.10,
+# Qwen §3.9). The explicit check below reuses the exact tolerances from
+# ``csttool.validation.bundle_comparison.check_spatial_compatibility`` so the
+# two validators agree on what counts as a spatial mismatch.
+_AFFINE_TOL_TRANS = 1.0   # mm — translation (last affine column)
+_AFFINE_TOL_ROT = 1e-3    # rotation/scale (3x3 submatrix), elementwise
+
+
+def _tractogram_affine(tractogram_path):
+    """Return the tractogram's stored voxel→RASMM affine, or None if the
+    format carries no spatial header.
+
+    Only ``.trk`` (and ``.trx``) embed an affine; ``.tck`` and the text formats
+    do not, so for those the reference image is the only source of truth and no
+    affine equality can be asserted from the tractogram alone. Returning None
+    lets the caller emit a documented warning rather than silently passing.
+    """
+    ext = os.path.splitext(str(tractogram_path))[1].lower()
+    if ext == ".gz":
+        ext = os.path.splitext(str(tractogram_path)[:-3])[1].lower()
+    if ext == ".trk":
+        # lazy_load avoids reading the full streamline array just for the header
+        return nib.streamlines.load(str(tractogram_path), lazy_load=True).affine
+    return None
 
 
 def validate_tractogram_coordinates(
@@ -98,6 +129,57 @@ def validate_tractogram_coordinates(
         'orientation': ''.join(ref_ornt),
         'bounds_mm': ref_bounds
     }
+
+    # ------------------------------------------------------------------
+    # AU22: explicit affine-equality assertion (not just bounding-box overlap).
+    # The previous check relied on load_tractogram's implicit trk_header_check
+    # returning False on a .trk header mismatch — a side effect that is silent
+    # (logged, not raised) and does not apply to headerless formats (.tck) at
+    # all. A tractogram and FA map in mismatched coordinate spaces can have
+    # overlapping world bounds and pass the bounding-box check, then yield
+    # anatomically-plausible-but-wrong extraction (GLM §3.10, Qwen §3.9).
+    # Tolerances mirror bundle_comparison.check_spatial_compatibility.
+    # ------------------------------------------------------------------
+    trk_affine = _tractogram_affine(tractogram_path)
+    if trk_affine is not None:
+        trans_diff = float(np.linalg.norm(trk_affine[:3, 3] - ref_affine[:3, 3]))
+        rot_diff = float(np.max(np.abs(trk_affine[:3, :3] - ref_affine[:3, :3])))
+        affine_ok = trans_diff <= _AFFINE_TOL_TRANS and rot_diff <= _AFFINE_TOL_ROT
+        if not affine_ok:
+            msg = (
+                "Tractogram and reference image affines do not match "
+                f"(translation diff {trans_diff:.3f} mm > {_AFFINE_TOL_TRANS}, "
+                f"rotation/scale max diff {rot_diff:.2e} > {_AFFINE_TOL_ROT}). "
+                "A bounding-box overlap does not imply the same coordinate "
+                "space; extraction on mismatched spaces gives anatomically-"
+                "plausible-but-wrong results.\n"
+                f"Tractogram affine:\n{trk_affine}\n"
+                f"Reference affine:\n{ref_affine}"
+            )
+            result['errors'].append(msg)
+            result['valid'] = False
+            if verbose:
+                print(f"  ✗ Affine mismatch: {msg}")
+            if strict:
+                raise ValueError(
+                    f"Coordinate validation failed: tractogram and reference "
+                    f"affines differ (translation {trans_diff:.3f} mm, "
+                    f"rotation/scale {rot_diff:.2e}).\n"
+                    f"Ensure the tractogram and FA map are in the same coordinate "
+                    f"space (RASMM). Use --skip-coordinate-validation to bypass "
+                    f"(NOT RECOMMENDED)."
+                )
+    else:
+        # Headerless format (.tck, text): no embedded affine to assert against.
+        # The reference affine is the only source of truth, so a mismatch is
+        # not detectable from the files alone — surface this as a warning so
+        # the user knows the affine was not verified, rather than a silent pass.
+        result['warnings'].append(
+            f"Tractogram format '{os.path.splitext(str(tractogram_path))[1]}' "
+            "carries no spatial header; affine equality with the reference "
+            "image could not be asserted. Verify the tractogram is in the same "
+            "RASMM space as the FA map before extraction."
+        )
 
     # Load tractogram with reference
     try:
