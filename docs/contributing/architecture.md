@@ -27,6 +27,7 @@ csttool/
 ├── ingest/               # DICOM → NIfTI conversion and dataset validation
 ├── bids/                 # BIDS layout helpers (raw and derivatives)
 ├── preprocess/           # denoising, unringing, motion correction, masking
+│   └── modules/gradient_validation.py  # AU21: bval/bvec sanity + DWI bvec reorientation
 ├── tracking/             # CSA-ODF, deterministic propagation, whole-brain tractography
 ├── extract/              # atlas registration + ROI-based CST extraction
 ├── metrics/              # scalar metrics, tract profiles, HTML/PDF reports
@@ -57,7 +58,10 @@ Each stage is independently CLI-callable (`csttool preprocess`, `csttool track`,
 `reproducibility/` is the home for cross-cutting concerns that affect every stage:
 
 - RNG seeding (`--rng-seed`, default `42`).
-- Run-log writing: every CLI invocation produces a `provenance.json` capturing Python version, package versions, exact command line and resolved input paths.
+- Provenance logging: the tracking and bilateral-metrics stage reports embed
+  a provenance block (git commit, Python version, dependency versions, platform,
+  hardware info, thread environment) in their JSON reports. The HTML/PDF report
+  presents a filtered subset for scientific readers.
 
 If you add a new stochastic step anywhere in the pipeline, plumb it through this module so determinism guarantees stay intact.
 

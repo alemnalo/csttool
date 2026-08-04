@@ -104,6 +104,29 @@ For reliable CST extraction:
 !!! warning "Incomplete field of view"
     CST extraction will fail if the scan does not cover the **motor cortex** through the **brainstem**. Ensure full craniocaudal coverage.
 
+### Gradient-table validation (bvals/bvecs)
+
+At load, csttool validates the gradient table and fails loudly — rather than
+silently producing a corrupt tensor fit — on:
+
+- b-values that are non-finite or **negative** (unphysical);
+- **no b=0 volume** at the configured b0 threshold (no reference signal → no
+  tensor fit);
+- **DWI b-vectors that are not unit-norm** (a sign of a truncated/miswritten
+  `.bvec` file). b0 b-vectors may be zero.
+
+The b0 threshold is the single default in `csttool.defaults` (`50 s/mm²`),
+exposed via `--b0-threshold` on `preprocess`, `track`, and `run`.
+
+!!! note "DICOM b-vector reorientation"
+    The dicom2nifti fallback converter reorients the **image** to a standard
+    orientation but does **not** reorient the b-vectors, which would leave the
+    gradients in the scanner's voxel space and the image in a different one — a
+    silent gradient flip that corrupts the tensor fit. csttool converts in the
+    native (scanner) voxel space and reorients **both image and b-vectors to
+    RAS+ together**, matching the dcm2niix primary path. The primary dcm2niix
+    path is unaffected. (AU21)
+
 ---
 
 ## Coordinate Space Requirements
@@ -126,6 +149,15 @@ csttool automatically validates coordinate systems when running extraction. If y
 Error: Coordinate validation failed. This can lead to incorrect results.
 Errors: Coordinate space mismatch detected: values suggest voxel indices, not mm
 ```
+
+The validator also **asserts affine equality** between the tractogram and the
+FA map (translation ≤ 1.0 mm, rotation/scale ≤ 1e-3), not just bounding-box
+overlap — a tractogram and FA map in mismatched coordinate spaces can have
+overlapping world bounds and would otherwise pass, then yield
+anatomically-plausible-but-wrong extraction. For `.trk` this is checked
+explicitly; for headerless formats like `.tck` that carry no spatial header,
+csttool warns that the affine could not be asserted (verify the tractogram is
+in the same RASMM space as the FA map). (AU22)
 
 ### Converting Voxel to World Coordinates
 

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Affine-equality assertion in coordinate validation (AU22).**
+  `validate_tractogram_coordinates` previously checked only that streamline
+  coordinates looked like mm and fell within the reference volume ±15 mm —
+  bounding-box overlap, not affine equality — so a tractogram and FA map in
+  mismatched coordinate spaces could pass when their world bounds happened to
+  overlap, then yield anatomically-plausible-but-wrong extraction (GLM §3.10,
+  Qwen §3.9). The validator now explicitly asserts that the tractogram's stored
+  affine matches the reference affine (translation ≤ 1.0 mm, rotation/scale ≤
+  1e-3 elementwise), reusing the exact tolerances from
+  `validation.bundle_comparison.check_spatial_compatibility` so the two
+  validators agree. For `.trk` this replaces reliance on a silent side effect of
+  DIPY's `load_tractogram` header check with a clear, actionable error naming
+  both affines. For headerless formats (`.tck`, text) that carry no affine, a
+  warning now surfaces that the affine could not be asserted — previously a
+  `.tck` in a different voxel space passed silently with zero warnings.
+  `--skip-coordinate-validation` still bypasses everything.
+
+- **Gradient-table validation at load (AU21).** `gradient_table` was built at
+  every load site (`load_dataset`, `get_gtab_for_preproc`) with no checks that
+  bvecs are unit-normalised, bvals are non-negative, a b=0 volume exists, or that
+  bvecs/bvals counts match. A malformed table would silently corrupt the tensor
+  fit. All three audits (GLM §3.9, Qwen §3.10) flagged this. A new leaf module
+  `preprocess/modules/gradient_validation.py` now hard-fails with actionable
+  messages (naming offending indices) at load, and threads the single-source-of-
+  truth `DEFAULT_B0_THRESHOLD` into the gtab's `b0s_mask` (DIPY's own default of
+  50 only matched by coincidence). The existing opt-in `csttool check-dataset`
+  advisory assessment is unchanged.
+
+- **dicom2nifti b-vector reorientation (AU21).** dicom2nifti's
+  `reorient_nifti=True` reorients the **image** to LAS but never reorients the
+  **bvecs**, leaving them in the scanner's voxel space — a silent gradient flip
+  that corrupts the tensor fit, which the validator cannot detect from the files
+  alone. All three DICOM conversion sites (`load_dataset`, `cli/utils.resolve_nifti`,
+  `ingest/modules/convert_series`) now convert with `reorient_nifti=False` and
+  reorient **both image and bvecs to RAS+ together** via the new
+  `reorient_dwi_to_ras` helper, matching the validated dcm2niix primary path's
+  convention. `register_mni_to_subject` already reorients the subject to RAS
+  itself, so this makes the fallback consistent with the primary path rather than
+  introducing a new orientation. (AU21)
+
 ### Added
 
 - **`--fit-method`** on `csttool track` and `csttool run` — exposes the DTI tensor fit
