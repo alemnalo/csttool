@@ -127,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     expected course (physical-millimetre slab, contiguous-run polylines)?
   These prototypes are **not** embedded in the PDF report — the legacy triptych
   remains the report QC figure unchanged until independent scientific review passes
-  (see `report-improvement/visualization-refactoring-plan.md` §2.11/§14).
+  (see `../csttool-devlog/report-improvement/visualization-refactoring-plan.md` §2.11/§14).
 
 - **Six trust-chain QC panels and their diagnostics module.** The existing
   figures answer "what did the pipeline do?"; every scientific figure plotted a
@@ -185,9 +185,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run` plumbs both through — the tracking result dict now carries `v1_path` and
   each extraction result dict carries `density_path`.
 
-- **`report-improvement/generate_qc_review.py` and `qc-figure-review.md`.** A
+- **`../csttool-devlog/report-improvement/generate_qc_review.py` and `qc-figure-review.md`.** A
   driver that regenerates every QC panel for the validation subjects into a
-  stable, versioned review location (`report-improvement/qc-review/`, previous
+  stable, versioned review location (`../csttool-devlog/report-improvement/qc-review/`, previous
   sets archived under `_previous/`), and the scientific review of the six
   trust-chain panels that decides which of them are worth keeping. Findings:
   QC-8 (node homology) and QC-5 (dispersion) earn standalone-QC status; QC-6

@@ -416,7 +416,7 @@ canonical V1 product that is reproducible from the stored file + the FA map
 using two public DIPY/NumPy operations is the whole point of making V1 — not the
 DEC PNG — the source of truth.
 
-See `csttool/spatial.py` for the tested implementation and `report-improvement/
+See `csttool/spatial.py` for the tested implementation and `../csttool-devlog/report-improvement/
 visualization-refactoring-plan.md` §5.1 for the full mathematical treatment.
 
 ---
