@@ -294,7 +294,10 @@ def cmd_run(args: argparse.Namespace) -> None:
     md_path = None
     rd_path = None
     ad_path = None
-    
+    v1_path = None
+    density_path = None
+    roi_dseg_path = None
+
     try:
         if preproc_path is None:
             raise RuntimeError("No preprocessed data available")
@@ -324,6 +327,8 @@ def cmd_run(args: argparse.Namespace) -> None:
             # RD and AD maps (if available)
             rd_path = Path(track_result['rd_path']) if 'rd_path' in track_result else None
             ad_path = Path(track_result['ad_path']) if 'ad_path' in track_result else None
+            # World-frame V1; None when the tensor fit was unavailable.
+            v1_path = Path(track_result['v1_path']) if track_result.get('v1_path') else None
             step_results['track'] = {'success': True, 'result': track_result}
             
             # Capture tracking parameters
@@ -400,6 +405,14 @@ def cmd_run(args: argparse.Namespace) -> None:
         if extract_result:
             cst_left_path = extract_result.get('cst_left_path')
             cst_right_path = extract_result.get('cst_right_path')
+            # Feeds the tissue-plausibility panel; None when extraction could
+            # not write the density product.
+            density_path = (Path(extract_result['density_path'])
+                            if extract_result.get('density_path') else None)
+            # Feeds the report QC strip's ROI panel; None when extraction could
+            # not write the segmentation product.
+            roi_dseg_path = (Path(extract_result['roi_dseg_path'])
+                             if extract_result.get('roi_dseg_path') else None)
             step_results['extract'] = {'success': True, 'result': extract_result}
 
             # Carry artifact-index diagnostic into report metadata. Only the
@@ -448,6 +461,9 @@ def cmd_run(args: argparse.Namespace) -> None:
             md=md_path,
             rd=rd_path,
             ad=ad_path,
+            v1=v1_path,
+            density=density_path,
+            roi_dseg=roi_dseg_path,
             subject_id=subject_id,
             generate_pdf=getattr(args, 'generate_pdf', False),
             save_visualizations=getattr(args, 'save_visualizations', False),
@@ -555,20 +571,34 @@ _QC_NAMES = {
     "_streamlines_2d.png":         ("tracking",   "streamlines"),
     "_streamline_stats.png":       ("tracking",   "stats"),
     "_tracking_summary.png":       ("tracking",   "summary"),
+    "_dec_fa.png":                  ("tracking",   "decfa"),
     "_registration_qc.png":        ("extraction", "registration"),
     "_jacobian_map.png":           ("extraction", "jacobian"),
     "_roi_masks.png":              ("extraction", "roimasks"),
     "_cst_extraction.png":         ("extraction", "cst"),
     "_hemisphere_separation.png":  ("extraction", "hemispheres"),
     "_extraction_summary.png":     ("extraction", "summary"),
+    "_cst_density.png":            ("extraction", "density"),
     "_tract_profile_fa.png":       ("metrics",    "tractprofile"),
     "_bilateral_comparison.png":   ("metrics",    "bilateral"),
     "_stacked_profiles.png":       ("metrics",    "profiles"),
     "_profile_matrix.png":         ("metrics",    "profiles-matrix"),
+    "_report_qc_strip.png":        ("metrics",    "qc-strip"),
     "_tractogram_qc_triptych.png": ("metrics",    "tractogram-triptych"),
     "_tractogram_qc_axial.png":    ("metrics",    "tractogram-axial"),
     "_tractogram_qc_sagittal.png": ("metrics",    "tractogram-sagittal"),
     "_tractogram_qc_coronal.png":  ("metrics",    "tractogram-coronal"),
+    "_cst_over_fa.png":            ("metrics",    "cstoverfa"),
+    "_qc_tissue_plausibility.png": ("metrics",    "tissue"),
+    "_qc_v1_angle.png":            ("metrics",    "v1angle"),
+    "_qc_sampling_saturation.png": ("metrics",    "saturation"),
+    "_qc_profile_attrition.png":   ("metrics",    "attrition"),
+    "_qc_node_homology.png":       ("metrics",    "nodehomology"),
+    # Dispersion panels carry the scalar in the suffix (…_dispersion_fa.png).
+    "_qc_profile_dispersion_fa.png": ("metrics",  "dispersion-fa"),
+    "_qc_profile_dispersion_md.png": ("metrics",  "dispersion-md"),
+    "_qc_profile_dispersion_rd.png": ("metrics",  "dispersion-rd"),
+    "_qc_profile_dispersion_ad.png": ("metrics",  "dispersion-ad"),
 }
 
 
@@ -753,6 +783,48 @@ def _write_bids_derivatives(
         shutil.move(combined, dst)
         if verbose:
             print(f"    BIDS: {dst.relative_to(bids_out)}")
+
+    # ------------------------------------------------------------------
+    # New scientific NIfTI data products (visualization-refactor M2/M3)
+    # ------------------------------------------------------------------
+    # V1 world-frame field (tracking stage) and CST density (extraction stage)
+    # live in <stage>/scalar_maps/, NOT in visualizations/, so the PNG-only QC
+    # glob below does not touch them — but the unconditional ``rmtree`` at the
+    # end of this function would delete them if they were not moved explicitly
+    # first (plan §9.2, R-9). Move them + their JSON sidecars to BIDS dwi/ now.
+    v1_src = args.out / "tracking" / "scalar_maps"
+    if v1_src.is_dir():
+        for nii in v1_src.glob("*_v1.nii.gz"):
+            dst = dwi_dir / _fname("dwimap", ".nii.gz", space="orig", desc="V1")
+            shutil.move(nii, dst)
+            sidecar = nii.with_name(nii.name.replace(".nii.gz", ".json"))
+            if sidecar.exists():
+                shutil.move(sidecar, dwi_dir / _fname("dwimap", ".json", space="orig", desc="V1"))
+            if verbose:
+                print(f"    BIDS: {dst.relative_to(bids_out)}")
+    # ROI segmentation (extraction stage) lives in <stage>/nifti/, which the
+    # rmtree below removes wholesale — the very reason the three roi_*.nii.gz
+    # masks have never reached a consumer. Rescue it first.
+    roi_src = args.out / "extraction" / "nifti"
+    if roi_src.is_dir():
+        for nii in roi_src.glob("*_desc-CSTroi_dseg.nii.gz"):
+            dst = dwi_dir / _fname("dseg", ".nii.gz", space="orig", desc="CSTroi")
+            shutil.move(nii, dst)
+            sidecar = nii.with_name(nii.name.replace(".nii.gz", ".json"))
+            if sidecar.exists():
+                shutil.move(sidecar, dwi_dir / _fname("dseg", ".json", space="orig", desc="CSTroi"))
+            if verbose:
+                print(f"    BIDS: {dst.relative_to(bids_out)}")
+    dens_src = args.out / "extraction" / "scalar_maps"
+    if dens_src.is_dir():
+        for nii in dens_src.glob("*_cst_density.nii.gz"):
+            dst = dwi_dir / _fname("dwimap", ".nii.gz", space="orig", desc="CSTdensity")
+            shutil.move(nii, dst)
+            sidecar = nii.with_name(nii.name.replace(".nii.gz", ".json"))
+            if sidecar.exists():
+                shutil.move(sidecar, dwi_dir / _fname("dwimap", ".json", space="orig", desc="CSTdensity"))
+            if verbose:
+                print(f"    BIDS: {dst.relative_to(bids_out)}")
 
     # ------------------------------------------------------------------
     # QC images → figures/

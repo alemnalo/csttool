@@ -135,6 +135,90 @@ def dilate_mask(mask, iterations=1, verbose=True):
     return dilated
 
 
+# Label values of the FA-grid ROI segmentation. Background is 0; the three
+# labels are the three constraints the extraction actually applied, in the order
+# the pipeline builds them.
+ROI_DSEG_LABELS = {1: "brainstem", 2: "motor_left", 3: "motor_right"}
+
+ROI_DSEG_DESCRIPTION = (
+    "Discrete segmentation of the three warped Harvard-Oxford ROIs that "
+    "constrained CST extraction (brainstem, left motor cortex, right motor "
+    "cortex), on the subject's FA grid."
+)
+
+
+def save_roi_dseg(combined, subject_affine, nifti_dir, subject_id, *,
+                  original_subject_affine=None, reorientation_transform=None,
+                  sources=None, command_line=None, software_versions=None,
+                  verbose=True):
+    """Persist the FA-grid ROI label map + its self-describing sidecar.
+
+    Why this exists at all: the three ``roi_*.nii.gz`` files beside it are
+    written into ``extraction/nifti/``, which ``csttool run`` deletes
+    unconditionally once the stage finishes. Nothing downstream has ever been
+    able to read them, which is why the report cannot currently show what
+    constrained its own extraction. This product is the same label array,
+    written where it survives.
+
+    Grid. The registration stage reorients the subject to RAS for warping, so
+    the mask arrays are in RAS voxel order while FA, the density volume and the
+    streamlines all live on the **on-disk FA grid** (LAS for a scanner-native
+    dicom2nifti conversion, which is csttool's normal case — the pipeline does
+    not reorient to RAS). "On the FA grid" therefore means applying the same
+    inverse reorientation the other ROI files already use, so the label map can
+    be sliced against FA with no resampling at all. Passing neither
+    ``original_subject_affine`` nor ``reorientation_transform`` means the
+    subject was already RAS and the arrays are on the FA grid as they stand.
+
+    It is a pure re-serialisation of an array already computed: no new
+    thresholding, no new dilation, no RNG.
+
+    Returns the NIfTI path, or None if the write failed — an additive product
+    must never break the extraction that produced it.
+    """
+    from csttool.bids.output import write_derivative_sidecar
+
+    try:
+        nifti_dir = Path(nifti_dir)
+        nifti_dir.mkdir(parents=True, exist_ok=True)
+        prefix = f"{subject_id}_" if subject_id else ""
+        path = nifti_dir / f"{prefix}space-orig_desc-CSTroi_dseg.nii.gz"
+
+        if original_subject_affine is not None and reorientation_transform is not None:
+            data = reorient_to_original(
+                combined.astype(np.uint8), reorientation_transform
+            )
+            affine = original_subject_affine
+        else:
+            data = combined.astype(np.uint8)
+            affine = subject_affine
+        nib.save(nib.Nifti1Image(data, affine), path)
+
+        write_derivative_sidecar(
+            path,
+            sources=list(sources or []),
+            description=ROI_DSEG_DESCRIPTION,
+            command_line=command_line,
+            software_versions=software_versions,
+            extra={
+                "Labels": {str(k): v for k, v in ROI_DSEG_LABELS.items()},
+                "Space": "orig (FA grid)",
+                "VoxelCounts": {
+                    name: int(np.count_nonzero(data == value))
+                    for value, name in ROI_DSEG_LABELS.items()
+                },
+            },
+        )
+        if verbose:
+            print(f"  ✓ ROI segmentation (FA grid): {path}")
+        return path
+    except Exception as exc:
+        print(f"  ⚠️ Could not save ROI segmentation product: {exc}")
+        import warnings
+        warnings.warn(f"ROI dseg product not written: {exc}")
+        return None
+
+
 def create_cst_roi_masks(
     warped_cortical,
     warped_subcortical,
@@ -150,6 +234,9 @@ def create_cst_roi_masks(
     reorientation_transform=None,
     hemisphere_mask=None,
     midline_x=None,
+    dseg_sources=None,
+    command_line=None,
+    software_versions=None,
 ):
     """
     Create all ROI masks needed for bilateral CST extraction.
@@ -194,7 +281,9 @@ def create_cst_roi_masks(
         Scalar midline world X (from ``compute_warped_midline``). Used
         as a fallback clamping plane when ``hemisphere_mask`` is None.
         If both are None, no clamping is applied.
-        
+    dseg_sources, command_line, software_versions : optional
+        Forwarded to the ROI segmentation's BIDS sidecar.
+
     Returns
     -------
     masks : dict
@@ -205,7 +294,10 @@ def create_cst_roi_masks(
         - 'brainstem_path': Path to saved brainstem mask (if saved)
         - 'motor_left_path': Path to saved left motor mask (if saved)
         - 'motor_right_path': Path to saved right motor mask (if saved)
-        
+        - 'roi_dseg_path': Path to the FA-grid label map (if saved); see
+          :func:`save_roi_dseg` for why it exists alongside the three
+          original-orientation masks above.
+
     Notes
     -----
     If original_subject_affine and reorientation_transform are provided,
@@ -231,6 +323,7 @@ def create_cst_roi_masks(
         'brainstem_path': None,
         'motor_left_path': None,
         'motor_right_path': None,
+        'roi_dseg_path': None,
         'subject_affine': subject_affine
     }
     
@@ -412,6 +505,18 @@ def create_cst_roi_masks(
         masks['combined_path'] = combined_path
         if verbose:
             print(f"  ✓ Combined: {combined_path}")
+
+        # The same label map a second time, on the FA grid this time. The files
+        # above go out through `reorient_to_original` onto a different grid from
+        # FA/density/streamlines, which is why nothing downstream could ever read
+        # them; this one is the report's and is therefore written unreoriented.
+        masks['roi_dseg_path'] = save_roi_dseg(
+            combined, subject_affine, nifti_dir, subject_id,
+            original_subject_affine=original_subject_affine,
+            reorientation_transform=reorientation_transform,
+            sources=dseg_sources, command_line=command_line,
+            software_versions=software_versions, verbose=verbose,
+        )
 
     if verbose:
         print("\n" + "=" * 60)

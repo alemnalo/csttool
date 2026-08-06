@@ -232,6 +232,19 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
         )
         
         save_extraction_report(cst_result, output_paths, args.out, args.subject_id)
+
+        # CST density volume (unconditional scientific data product, §2.5).
+        # Written whenever the extraction stage runs, like FA/MD in the track
+        # stage. The PNG that visualizes it is a separate, gated concern.
+        from csttool.extract.modules.save_extract_outputs import write_cst_density_product
+        density_path = write_cst_density_product(
+            cst_result=cst_result,
+            reference_img=reference_img,
+            out_dir=args.out,
+            subject_id=args.subject_id,
+            step_size_mm=getattr(args, 'step_size', None),
+            verbose=verbose,
+        )
     except Exception as e:
         print(f"  ✗ Saving outputs failed: {e}")
         return None
@@ -253,6 +266,22 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
             jacobian_det=reg_result.get('jacobian_det'),
             verbose=verbose
         )
+        # CST density prototype panel (visualization-refactor M5). Reads the
+        # stored density + FA products; standalone PNG, not in the PDF report
+        # until review passes.
+        try:
+            from pathlib import Path as _P
+            from csttool.metrics.modules.qc_figures import plot_cst_density_panel
+            if density_path and _P(density_path).exists():
+                plot_cst_density_panel(
+                    density_path=density_path, fa_path=args.fa,
+                    output_dir=args.out / "extraction" / "visualizations",
+                    subject_id=args.subject_id,
+                )
+            else:
+                print("  ⚠️  Skipping CST density panel: density product not available")
+        except Exception as exc:
+            print(f"  ⚠️  Could not generate CST density panel: {exc}")
 
     # Summary
     print(f"\n✓ Extraction complete")
@@ -266,6 +295,11 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
         'cst_left_path': output_paths.get('cst_left'),
         'cst_right_path': output_paths.get('cst_right'),
         'cst_combined_path': output_paths.get('cst_combined'),
+        'density_path': density_path,  # None when the product could not be written
+        # FA-grid ROI label map. Survives the extraction-dir cleanup that the
+        # three roi_*.nii.gz masks do not, so the report can show what
+        # constrained the extraction.
+        'roi_dseg_path': masks.get('roi_dseg_path'),
         'stats': cst_result['stats']
     }
 
@@ -412,7 +446,18 @@ def run_roi_seeded_extraction(
     )
     
     save_extraction_report(cst_result, output_paths, output_dir, subject_id)
-    
+
+    # CST density volume (unconditional scientific data product, §2.5).
+    from csttool.extract.modules.save_extract_outputs import write_cst_density_product
+    density_path = write_cst_density_product(
+        cst_result=cst_result,
+        reference_img=fa_img,
+        out_dir=output_dir,
+        subject_id=subject_id,
+        step_size_mm=getattr(args, 'step_size', None),
+        verbose=verbose,
+    )
+
     # Visualizations
     if getattr(args, 'save_visualizations', False):
         from csttool.extract.modules import save_all_extraction_visualizations
@@ -428,6 +473,20 @@ def run_roi_seeded_extraction(
             jacobian_det=reg_result.get('jacobian_det'),
             verbose=verbose
         )
+        # CST density prototype panel (visualization-refactor M5).
+        try:
+            from pathlib import Path as _P
+            from csttool.metrics.modules.qc_figures import plot_cst_density_panel
+            if density_path and _P(density_path).exists():
+                plot_cst_density_panel(
+                    density_path=density_path, fa_path=args.fa,
+                    output_dir=Path(output_dir) / "extraction" / "visualizations",
+                    subject_id=subject_id,
+                )
+            else:
+                print("  ⚠️  Skipping CST density panel: density product not available")
+        except Exception as exc:
+            print(f"  ⚠️  Could not generate CST density panel: {exc}")
 
     # Summary
     if verbose:
@@ -441,6 +500,11 @@ def run_roi_seeded_extraction(
         'cst_left_path': output_paths.get('cst_left'),
         'cst_right_path': output_paths.get('cst_right'),
         'cst_combined_path': output_paths.get('cst_combined'),
+        'density_path': density_path,  # None when the product could not be written
+        # FA-grid ROI label map. Survives the extraction-dir cleanup that the
+        # three roi_*.nii.gz masks do not, so the report can show what
+        # constrained the extraction.
+        'roi_dseg_path': masks.get('roi_dseg_path'),
         'stats': cst_result['stats']
     }
 
@@ -577,6 +641,17 @@ def run_bidirectional_extraction(
 
     save_extraction_report(cst_result, output_paths, output_dir, subject_id)
 
+    # CST density volume (unconditional scientific data product, §2.5).
+    from csttool.extract.modules.save_extract_outputs import write_cst_density_product
+    density_path = write_cst_density_product(
+        cst_result=cst_result,
+        reference_img=fa_img,
+        out_dir=output_dir,
+        subject_id=subject_id,
+        step_size_mm=getattr(args, 'step_size', None),
+        verbose=verbose,
+    )
+
     if getattr(args, 'save_visualizations', False):
         from csttool.extract.modules import save_all_extraction_visualizations
         # Reorient FA into the masks' (RAS) grid so overlays align (see cmd_extract).
@@ -591,6 +666,20 @@ def run_bidirectional_extraction(
             jacobian_det=reg_result.get('jacobian_det'),
             verbose=verbose,
         )
+        # CST density prototype panel (visualization-refactor M5).
+        try:
+            from pathlib import Path as _P
+            from csttool.metrics.modules.qc_figures import plot_cst_density_panel
+            if density_path and _P(density_path).exists():
+                plot_cst_density_panel(
+                    density_path=density_path, fa_path=args.fa,
+                    output_dir=Path(output_dir) / "extraction" / "visualizations",
+                    subject_id=subject_id,
+                )
+            else:
+                print("  ⚠️  Skipping CST density panel: density product not available")
+        except Exception as exc:
+            print(f"  ⚠️  Could not generate CST density panel: {exc}")
 
     if verbose:
         print(f"\n✓ Bidirectional extraction complete")
@@ -603,5 +692,10 @@ def run_bidirectional_extraction(
         'cst_left_path': output_paths.get('cst_left'),
         'cst_right_path': output_paths.get('cst_right'),
         'cst_combined_path': output_paths.get('cst_combined'),
+        'density_path': density_path,  # None when the product could not be written
+        # FA-grid ROI label map. Survives the extraction-dir cleanup that the
+        # three roi_*.nii.gz masks do not, so the report can show what
+        # constrained the extraction.
+        'roi_dseg_path': masks.get('roi_dseg_path'),
         'stats': cst_result['stats'],
     }

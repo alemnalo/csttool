@@ -136,18 +136,45 @@ def _compute_scalar_metrics(streamlines, scalar_map, affine):
     The headline uses the per-streamline mean rather than the profile-derived mean because
     the profile resamples to a fixed arc length and drops streamlines with fewer than five
     valid points — a different population. See `docs/explanation/design-decisions.md`.
+    - **Dispersion** (``profile_p25``/``profile_p75``/``profile_n``): the per-node
+      interquartile range across the streamlines that contributed to ``profile``, so the
+      report can draw a band behind the line and a reader can tell a consensus from an
+      average over dissent. Same population, same pass — the profile is now derived from
+      `qc_stats.profile_matrix` rather than recomputed by `compute_tract_profile`, which
+      costs nothing (one sampling pass replaces one) and emits values byte-identical to it.
+      ``profile_median`` is deliberately absent: nothing consumes it, and its presence
+      would invite plotting it as the centre line, which would change every regional value.
+    - **Uncertainty** (``bootstrap_se`` and the three ``*_se`` regional keys): nonparametric
+      bootstrap standard errors, conditional on the retained bundle. See the ``uncertainty``
+      block `save_json_report` writes for the scope this does and does not cover.
     """
+    # Local import: qc_stats imports orient_streamlines_inferior_to_superior,
+    # sample_scalar_per_streamline and _sample_streamline_values from this module,
+    # so a module-level import here would be circular.
+    from . import qc_stats
+
+    n_points = 20
     point_values = sample_scalar_along_tract(streamlines, scalar_map, affine)
     streamline_means = sample_scalar_per_streamline(streamlines, scalar_map, affine)
-    profile = compute_tract_profile(streamlines, scalar_map, affine, n_points=20)
+
+    matrix, _attrition = qc_stats.profile_matrix(
+        streamlines, scalar_map, affine, n_points=n_points
+    )
+    dispersion = qc_stats.profile_dispersion(matrix, percentiles=(25, 75))
+    # matrix.mean(axis=0) reproduces compute_tract_profile exactly (enforced by
+    # tests/metrics/test_qc_stats.py); the zeros fall back to its empty return.
+    profile = (matrix.mean(axis=0).tolist() if matrix.size
+               else np.zeros(n_points).tolist())
     localized = compute_localized_metrics(profile)
 
     headline = _scalar_summary(streamline_means)
     point_pool = _scalar_summary(point_values)
 
+    empty_band = np.zeros(n_points).tolist()
     return {
         **headline,
         'n_streamlines': int(len(streamline_means)),
+        'bootstrap_se': qc_stats.bootstrap_mean_se(streamline_means),
         'mean_point_weighted': point_pool['mean'],
         'std_point_weighted': point_pool['std'],
         'median_point_weighted': point_pool['median'],
@@ -155,10 +182,42 @@ def _compute_scalar_metrics(streamlines, scalar_map, affine):
         'max_point_weighted': point_pool['max'],
         'n_samples': int(len(point_values)),
         'profile': profile,
+        'profile_p25': (dispersion['p25'].tolist() if dispersion['p25'] is not None
+                        else empty_band),
+        'profile_p75': (dispersion['p75'].tolist() if dispersion['p75'] is not None
+                        else empty_band),
+        'profile_n': int(dispersion['n']),
         'pontine': localized['pontine'],
         'plic': localized['plic'],
         'precentral': localized['precentral'],
+        **_regional_bootstrap_se(matrix),
     }
+
+
+def _regional_bootstrap_se(matrix):
+    """Bootstrap SE of each regional mean, from the profile matrix rows.
+
+    A region's value is the mean over its nodes of the per-node mean across
+    streamlines, which is identically the mean across streamlines of each
+    streamline's own regional mean. Resampling *that* per-streamline population
+    is therefore the bootstrap of the number `compute_localized_metrics` reports,
+    and it needs no extra sampling pass — the rows are already in hand.
+
+    Returns ``{'pontine_se': ..., 'plic_se': ..., 'precentral_se': ...}``, each
+    None for an empty bundle (a zero SE is never fabricated).
+    """
+    from . import qc_stats
+
+    if matrix.size == 0:
+        return {f'{name}_se': None for name, _, _ in TRACT_REGIONS}
+    n = matrix.shape[1]
+    out = {}
+    for name, start, end in TRACT_REGIONS:
+        # Identical binning to compute_localized_metrics, so the SE qualifies the
+        # value actually published rather than a neighbouring one.
+        region = matrix[:, int(start * n):int(end * n)]
+        out[f'{name}_se'] = qc_stats.bootstrap_mean_se(region.mean(axis=1))
+    return out
 
 
 def compute_morphology(streamlines, affine):
@@ -184,8 +243,13 @@ def compute_morphology(streamlines, affine):
         - min_length: minimum streamline length
         - max_length: maximum streamline length
         - tract_volume: volume in mm³
+        - bootstrap_se_length: bootstrap SE of mean_length, or None for an empty
+          bundle. Length is a mean over a resamplable per-streamline population,
+          so it carries an SE; ``tract_volume`` deliberately does not — it is a
+          set-union voxel count, and bootstrapping it would estimate the
+          variability of a coverage statistic while reading as an SE of a mean.
     """
-    
+
     if len(streamlines) == 0:
         return {
             'n_streamlines': 0,
@@ -194,7 +258,8 @@ def compute_morphology(streamlines, affine):
             'std_length': 0.0,
             'min_length': 0.0,
             'max_length': 0.0,
-            'tract_volume': 0.0
+            'tract_volume': 0.0,
+            'bootstrap_se_length': None,
         }
     
     # Compute streamline lengths
@@ -227,6 +292,8 @@ def compute_morphology(streamlines, affine):
     # the length laterality index still uses mean_length (see bilateral_analysis),
     # so adding the median changes no existing metric value. See
     # docs/explanation/design-decisions.md.
+    from . import qc_stats
+
     morphology = {
         'n_streamlines': len(streamlines),
         'mean_length': float(np.mean(lengths)),
@@ -234,7 +301,8 @@ def compute_morphology(streamlines, affine):
         'std_length': float(np.std(lengths)),
         'min_length': float(np.min(lengths)),
         'max_length': float(np.max(lengths)),
-        'tract_volume': float(tract_volume)
+        'tract_volume': float(tract_volume),
+        'bootstrap_se_length': qc_stats.bootstrap_mean_se(lengths),
     }
     
     print(f"  Morphology: {morphology['n_streamlines']} streamlines, "

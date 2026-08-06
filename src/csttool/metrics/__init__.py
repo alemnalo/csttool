@@ -34,6 +34,7 @@ from .modules.visualizations import (
     plot_asymmetry_radar,
     plot_stacked_profiles,
     plot_profile_matrix,
+    plot_report_qc_strip,
     plot_tractogram_qc_preview,
     plot_tractogram_qc_triptych,
 )
@@ -69,6 +70,7 @@ __all__ = [
     'plot_asymmetry_radar',
     'plot_stacked_profiles',
     'plot_profile_matrix',
+    'plot_report_qc_strip',
     'plot_tractogram_qc_preview',
     'plot_tractogram_qc_triptych',
     

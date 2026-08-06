@@ -75,8 +75,14 @@ def compute_laterality_indices(left_metrics, right_metrics):
         - mean MD (if available)
         - mean RD (if available)
         - mean AD (if available)
+
+    Every index whose two hemisphere values carry a bootstrap SE also gets a
+    ``laterality_index_se``, propagated by :func:`_attach_li_se`. Streamline
+    count and tract volume deliberately do not: a count *is* its own sample
+    size, and a volume is a set-union voxel count rather than a mean over a
+    resamplable population (plan §7.1).
     """
-    
+
     asymmetry = {}
     
     # Morphological asymmetry
@@ -97,35 +103,29 @@ def compute_laterality_indices(left_metrics, right_metrics):
         left_morph['mean_length'],
         right_morph['mean_length']
     )
-    
+    _attach_li_se(
+        asymmetry['mean_length'],
+        left_morph['mean_length'], right_morph['mean_length'],
+        left_morph.get('bootstrap_se_length'), right_morph.get('bootstrap_se_length'),
+    )
+
     # Microstructural asymmetry (global).
     # The headline mean is per-streamline (length-unbiased, AU10), so the global LI is
     # computed on the same population the report tabulates - not the point-weighted
     # mean that longer streamlines dominate. The regional LIs below use the
     # profile-derived values, which are per-streamline-normalised by construction.
-    if 'fa' in left_metrics and 'fa' in right_metrics:
-        asymmetry['fa'] = compute_li(
-            left_metrics['fa']['mean'],
-            right_metrics['fa']['mean']
-        )
-
-    if 'md' in left_metrics and 'md' in right_metrics:
-        asymmetry['md'] = compute_li(
-            left_metrics['md']['mean'],
-            right_metrics['md']['mean']
-        )
-
-    if 'rd' in left_metrics and 'rd' in right_metrics:
-        asymmetry['rd'] = compute_li(
-            left_metrics['rd']['mean'],
-            right_metrics['rd']['mean']
-        )
-
-    if 'ad' in left_metrics and 'ad' in right_metrics:
-        asymmetry['ad'] = compute_li(
-            left_metrics['ad']['mean'],
-            right_metrics['ad']['mean']
-        )
+    for scalar in ('fa', 'md', 'rd', 'ad'):
+        if scalar in left_metrics and scalar in right_metrics:
+            asymmetry[scalar] = compute_li(
+                left_metrics[scalar]['mean'],
+                right_metrics[scalar]['mean']
+            )
+            _attach_li_se(
+                asymmetry[scalar],
+                left_metrics[scalar]['mean'], right_metrics[scalar]['mean'],
+                left_metrics[scalar].get('bootstrap_se'),
+                right_metrics[scalar].get('bootstrap_se'),
+            )
 
     # Localized microstructural asymmetry (per region)
     regions = ['pontine', 'plic', 'precentral']
@@ -140,8 +140,29 @@ def compute_laterality_indices(left_metrics, right_metrics):
                         left_metrics[scalar][region],
                         right_metrics[scalar][region]
                     )
+                    _attach_li_se(
+                        asymmetry[key],
+                        left_metrics[scalar][region], right_metrics[scalar][region],
+                        left_metrics[scalar].get(f'{region}_se'),
+                        right_metrics[scalar].get(f'{region}_se'),
+                    )
 
     return asymmetry
+
+
+def _attach_li_se(li_info, left_value, right_value, left_se, right_se):
+    """Add ``laterality_index_se`` to an LI block, when both sides carry an SE.
+
+    The key is written unconditionally so the schema is stable, but its value is
+    None whenever either hemisphere has no bootstrap SE — legacy metric dicts,
+    or an empty bundle. Never 0.0: a zero SE is a scientific claim.
+    """
+    from . import qc_stats
+
+    li_info['laterality_index_se'] = qc_stats.propagate_li_se(
+        left_value, right_value, left_se, right_se
+    )
+    return li_info
 
 
 def compute_li(left_value, right_value):

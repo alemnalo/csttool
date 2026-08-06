@@ -1,4 +1,4 @@
-def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=None, ad=None, tracking_params=None, provenance=None, verbose=False):
+def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=None, ad=None, tracking_params=None, provenance=None, verbose=False, *, tenfit=None):
     """Save tractography outputs: tractogram, scalar maps, and processing report.
 
     Args:
@@ -14,6 +14,24 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
         tracking_params (dict): Parameters used for tracking (for reproducibility).
         provenance (dict, optional): Provenance information (git hash, versions, platform).
         verbose (bool): Print processing details.
+        tenfit: optional DIPY ``TensorFit`` whose principal eigenvector field (V1)
+            is rotated to the anatomical world (RAS+) frame and persisted as
+            ``{stem}_v1.nii.gz`` with a ``NIFTI_INTENT_VECTOR`` header and a
+            self-describing sidecar. ``None`` (the default) skips V1 with a
+            warning rather than raising, so existing library callers that do not
+            pass the tensor fit are unaffected (visualization-refactoring-plan
+            §7.1, R-14). The eigenvectors are read as ``tenfit.evecs[..., :, 0]``
+            per DIPY's ``decompose_tensor`` convention.
+
+    Returns:
+        dict: Paths to all saved outputs:
+            - tractogram: Path to .trk file
+            - fa_map: Path to FA NIfTI
+            - md_map: Path to MD NIfTI
+            - rd_map: Path to RD NIfTI (if provided)
+            - ad_map: Path to AD NIfTI (if provided)
+            - v1_map: Path to V1 world-frame NIfTI (if ``tenfit`` provided)
+            - report: Path to JSON report
 
     Returns:
         dict: Paths to all saved outputs:
@@ -88,6 +106,65 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
 
         if verbose:
             print(f"  ✓ Saved: {ad_path}")
+
+    # 5b. Save V1 principal-eigenvector field (world RAS+ frame), unconditional
+    # when the tensor fit is available (visualization-refactoring-plan §7.1).
+    # The eigenvectors come out of DIPY in the b-vec (voxel) frame; we rotate them
+    # into the anatomical world frame with the orthonormal polar factor of the
+    # affine, so the stored product is self-describing and reproducible by a
+    # third party from this file + the FA map using two public DIPY/NumPy ops.
+    if tenfit is not None:
+        try:
+            from csttool.spatial import rotate_vector_field_to_world
+            from csttool.bids.output import write_derivative_sidecar
+            evecs = np.asarray(tenfit.evecs)
+            # Principal eigenvector: evecs[..., :, 0] (DIPY columnar convention).
+            v1_voxel = evecs[..., :, 0]
+            v1_world, frame_diag = rotate_vector_field_to_world(v1_voxel, affine)
+            # Store as (X, Y, Z, 1, 3) float32 with NIFTI_INTENT_VECTOR so the
+            # header alone declares it a vector field (FSL's 4D form is not
+            # self-describing). Consumers wanting (X,Y,Z,3) squeeze axis 3.
+            v1_5d = v1_world.reshape(v1_world.shape[0], v1_world.shape[1],
+                                     v1_world.shape[2], 1, 3)
+            v1_img = nib.Nifti1Image(v1_5d.astype(np.float32), affine)
+            v1_img.header.set_intent('vector')
+            v1_path = scalar_dir / f"{stem}_v1.nii.gz"
+            nib.save(v1_img, v1_path)
+            outputs['v1_map'] = v1_path
+            # Sidecar: the frame is the load-bearing key.
+            write_derivative_sidecar(
+                v1_path,
+                sources=[],
+                description="Principal diffusion eigenvector (V1), rotated to "
+                            "anatomical world (RAS+) axes.",
+                command_line=None,
+                software_versions=None,
+                extra={
+                    "VectorFrame": "world-RAS",
+                    "VectorFrameSource": "polar-decomposition of voxel-to-RASMM affine linear part",
+                    "AffineDeterminant": float(frame_diag["det"]),
+                    "ObliquityRad": [float(x) for x in frame_diag["obliquity_rad"]],
+                    "ShearMagnitude": float(frame_diag["shear_magnitude"]),
+                    "ShearWarning": bool(frame_diag["shear_warning"]),
+                    "DerivedFrom": f"{stem}_fa.nii.gz",
+                    "EigenvectorConvention": "dipy.reconst.dti decompose_tensor, evecs[..., :, 0]",
+                },
+            )
+            if verbose:
+                print(f"  ✓ Saved: {v1_path}")
+        except Exception as exc:
+            # V1 is a new additive product; a failure must not break the rest of
+            # the track stage outputs. Report and continue.
+            print(f"  ⚠️ Could not save V1 world-frame field: {exc}")
+            import warnings
+            warnings.warn(f"V1 world-frame product not written: {exc}")
+    else:
+        import warnings
+        warnings.warn(
+            "tenfit not passed to save_tracking_outputs; V1 world-frame "
+            "product will not be written. Pass tenfit=... to persist V1.",
+            stacklevel=2,
+        )
     
     # 6. Compute statistics for report
     lengths = np.array([length(s) for s in streamlines]) if len(streamlines) > 0 else np.array([])
@@ -131,6 +208,8 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
         output_files['rd_map'] = str(outputs['rd_map'])
     if ad is not None:
         output_files['ad_map'] = str(outputs['ad_map'])
+    if 'v1_map' in outputs:
+        output_files['v1_map'] = str(outputs['v1_map'])
     
     report = {
         'processing_info': {

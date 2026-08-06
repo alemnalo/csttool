@@ -150,3 +150,117 @@ class TestOrientationCode:
     def test_three_letters(self):
         code = geo.orientation_code(RAS_AFFINE)
         assert len(code) == 3
+
+
+# ---------------------------------------------------------------------------
+# select_qc_slice + slab_membership (visualization-refactor M4: §6.4, §6.5)
+# ---------------------------------------------------------------------------
+from csttool.viz.geometry import select_qc_slice, slab_membership, DEFAULT_SLAB_MM
+
+ISO2 = np.diag([2.0, 2.0, 2.0, 1.0])
+ANISO = np.diag([2.0, 2.0, 6.0, 1.0])
+
+
+class TestSelectQcSlice:
+    def test_s1_known_peak_returns_correct_index(self):
+        # 10x10x10 volume with density only in coronal plane j=4.
+        d = np.zeros((10, 10, 10))
+        d[:, 4, :] = 0.5  # every voxel in the y=4 coronal plane is "visited"
+        idx, prov = select_qc_slice(density=d, brain_mask=np.ones((10, 10, 10)),
+                                    affine=ISO2, view="coronal")
+        assert idx == 4
+        assert prov["rule"] == "bilateral_occupancy"
+
+    def test_s2_deterministic(self):
+        d = np.zeros((10, 10, 10))
+        d[:, 3, :] = 0.5; d[:, 7, :] = 0.5
+        bm = np.ones((10, 10, 10))
+        r1 = select_qc_slice(density=d, brain_mask=bm, affine=ISO2, view="coronal")
+        r2 = select_qc_slice(density=d, brain_mask=bm, affine=ISO2, view="coronal")
+        assert r1 == r2
+
+    def test_s3_left_only_surviving_hemisphere(self):
+        dL = np.zeros((10, 10, 10)); dL[:, 5, :] = 0.4
+        dR = np.zeros((10, 10, 10))
+        idx, prov = select_qc_slice(density_left=dL, density_right=dR,
+                                    brain_mask=np.ones((10, 10, 10)),
+                                    affine=ISO2, view="coronal")
+        assert prov["rule"] == "surviving_hemisphere"
+        assert idx == 5
+
+    def test_s4_both_empty_rois_present(self):
+        roi = np.zeros((10, 10, 10), dtype=bool); roi[:, 6, :] = True
+        idx, prov = select_qc_slice(roi_masks=[roi], brain_mask=np.ones((10, 10, 10)),
+                                    affine=ISO2, view="coronal")
+        assert prov["rule"] == "roi_occupancy"
+        assert idx == 6
+
+    def test_s5_everything_empty_anatomical_centroid_never_raises(self):
+        bm = np.zeros((10, 10, 10)); bm[:, :, 3:7] = 1
+        idx, prov = select_qc_slice(brain_mask=bm, affine=ISO2, view="coronal")
+        assert prov["rule"] == "anatomical_centroid"
+        assert 0 <= idx < 10
+
+    def test_s6_tie_break_nearest_centroid(self):
+        # Two planes with equal occupancy; centroid between them picks the nearer.
+        d = np.zeros((20, 20, 20))
+        # Mass weighted to the right so centroid > 10, and tie at planes 8 and 12.
+        d[:, 8, :] = 0.1
+        d[:, 12, :] = 0.9  # heavier -> pulls centroid toward 12, so 12 wins
+        idx, prov = select_qc_slice(density=d, brain_mask=np.ones((20, 20, 20)),
+                                    affine=ISO2, view="coronal")
+        assert idx == 12
+        assert "tie" not in prov["tie_break"].lower() or "centroid" in prov["tie_break"].lower()
+
+    def test_rejects_bad_view(self):
+        with pytest.raises(ValueError):
+            select_qc_slice(brain_mask=np.ones((4, 4, 4)), affine=ISO2, view="bogus")
+
+
+class TestSlabMembership:
+    def test_b1_thickness_boundary_2mm_iso(self):
+        # Centre of coronal slice 0 in this affine is at world y=0; plane normal y.
+        # thickness 10 -> membership within +/-5 mm.
+        pts = np.array([[0.0, 4.9, 0.0], [0.0, 5.1, 0.0],
+                        [0.0, -4.9, 0.0], [0.0, -5.1, 0.0]])
+        m = slab_membership(pts, ISO2, "coronal", 0, 10.0)
+        assert m[0] and not m[1]
+        assert m[2] and not m[3]
+
+    def test_b2_anisotropic_voxels_same_physical_membership(self):
+        # Same physical world points must give the same membership under 2x2x6 as
+        # under 2x2x2 (the regression test for the voxel->mm change).
+        pts = np.array([[0.0, 4.9, 0.0], [0.0, 5.1, 0.0],
+                        [0.0, -4.9, 0.0], [0.0, -5.1, 0.0]])
+        m_iso = slab_membership(pts, ISO2, "coronal", 0, 10.0)
+        m_aniso = slab_membership(pts, ANISO, "coronal", 0, 10.0)
+        assert np.array_equal(m_iso, m_aniso)
+
+    def test_b3_oblique_normal_follows_world_plane(self):
+        # Rotate the affine 30 degrees about z; the coronal depth axis (voxel y)
+        # now has a world direction of [-sin30, cos30, 0] = [-0.5, 0.866, 0].
+        # Membership must follow that true normal, not the array axis.
+        t = np.deg2rad(30.0)
+        c, s = np.cos(t), np.sin(t)
+        aff = np.eye(4)
+        aff[:3, :3] = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) * 2.0
+        # A point straight along the world-Y axis is mostly aligned with the
+        # rotated depth normal, so inside the 10mm slab.
+        pts = np.array([[0.0, 4.0, 0.0]])
+        m = slab_membership(pts, aff, "coronal", 0, 10.0)
+        assert m[0]
+        # A point along world-X projects onto the rotated normal with magnitude
+        # |4 * (-0.5)| = 2.0 mm, still inside the ±5mm slab -> in. A point far
+        # enough along world-X to be outside: |x * (-0.5)| > 5 -> |x| > 10.
+        pts2 = np.array([[12.0, 0.0, 0.0]])
+        m2 = slab_membership(pts2, aff, "coronal", 0, 10.0)
+        assert not m2[0]
+
+    def test_b4_contiguity(self):
+        # Two runs in the slab, separated by an out-of-slab point, must not be
+        # joined by render_streamline_overlay (asserted in test_render.py). Here
+        # only the membership split is checked: 3 points in, 1 out, 2 in.
+        pts = np.array([[0, 1, 0], [0, 2, 0], [0, 50, 0], [0, 3, 0], [0, 4, 0]],
+                       dtype=float)
+        m = slab_membership(pts, ISO2, "coronal", 0, 10.0)
+        assert m.tolist() == [True, True, False, True, True]

@@ -364,3 +364,178 @@ repeated per QC slice.
 
 Laterality colour is reserved for data (blue = Left, orange = Right); structural elements are
 neutral, and no red is used for laterality.
+
+---
+
+## DEC colour encoding: world frame, not voxel frame
+
+The direction-encoded colour (DEC) image colours each voxel by the principal
+diffusion direction. csttool stores the principal eigenvector **V1** as a
+scientific data product in the **anatomical world (RAS+) frame**, with the frame
+declared in the sidecar (`VectorFrame: "world-RAS"`), and derives the DEC from
+it.
+
+### Why the world frame, not the voxel frame
+
+DIPY's `TensorModel.fit` solves for the tensor in the frame of the b-vectors,
+which csttool pins to the data's voxel axes. `tenfit.evecs[..., :, 0]` are
+therefore **direction cosines with respect to the voxel axes** — unit-length
+physical directions, not index-space displacements. For an axis-aligned
+acquisition (RAS, LAS, LPS) the voxel axes coincide (up to sign) with the
+anatomical axes, so the voxel-frame DEC is correct. But for any oblique
+acquisition — or for LAS/LPS storage combined with a coordinate convention
+that differs from the b-vec frame — colouring by the voxel-frame eigenvector is
+scientifically wrong: it colours by the *array* axes rather than by the
+*anatomical* axes the reader interprets.
+
+### How the rotation is computed
+
+The voxel→world affine `M = affine[:3,:3]` carries voxel scaling. Applying it
+directly would rescale components by voxel size and turn anisotropic voxels into
+a fake anisotropy of direction (a 45° in-plane/through-plane direction on
+2×2×6 mm data would render at ≈72°). Normalising the columns removes scale but
+leaves shear, so the result is not orthonormal. csttool therefore uses the
+**orthonormal factor `R` of the polar decomposition** `M = R·S` (`scipy.linalg.polar`),
+the closest orthogonal matrix to `M` in the Frobenius norm: the pure
+rotation/reflection content with all scale and shear removed.
+
+Reflections (`det(R) = −1` for LAS/LPS-stored data) are **not** "corrected" to
+`det = +1`. DEC takes the componentwise absolute value, so an axis reflection
+cannot change any colour; flipping a sign would silently mutate the stored V1
+field for no visual gain. `det(R)` is recorded in the sidecar so a consumer can
+tell whether the source was reflected; `|det(R)| ≈ 1` is asserted (a violation
+means `M` was singular).
+
+### The DEC formula
+
+DEC colour = `|V1_world| × clip(FA, 0, 1)` — the formula `dipy.reconst.dti.color_fa`
+executes, applied after the rotation. Red = L–R, green = A–P, blue = S–I, in
+anatomical world axes. No gamma, no percentile stretch: brightness is FA, so a
+dark panel is a real finding and must not be cosmetically brightened. A
+canonical V1 product that is reproducible from the stored file + the FA map
+using two public DIPY/NumPy operations is the whole point of making V1 — not the
+DEC PNG — the source of truth.
+
+See `csttool/spatial.py` for the tested implementation and `report-improvement/
+visualization-refactoring-plan.md` §5.1 for the full mathematical treatment.
+
+---
+
+## CST density: a normalized fraction, not a raw count
+
+The CST density volume answers "is the extracted bundle spatially coherent and
+left/right symmetric?" Its value is the **fraction of distinct retained
+bilateral CST streamlines that visit each voxel at least once**:
+
+* **Numerator:** `dipy.tracking.utils.density_map` per voxel — the number of
+  *distinct* streamlines that visit it. Repeated points of one streamline in one
+  voxel, and re-entries, are each counted **once** (verified DIPY semantics).
+  Left and right are computed separately then summed (the bundles are disjoint,
+  so summing is exact; a midline voxel visited from both sides accumulates both).
+* **Denominator:** the total number of retained bilateral streamlines
+  (`StreamlineCountLeft + StreamlineCountRight`), recorded in the sidecar so a
+  reader can recover raw counts and so two subjects' maps can be compared knowing
+  exactly what each was divided by.
+
+This makes the density **independent of streamline count** (the dominant
+confound: a denser bundle should not look "more CST" by construction) and puts
+left/right on one shared `[0,1]` scale by construction. A raw-count volume would
+make any left/right or between-subject comparison meaningless.
+
+### Step-size gap guard
+
+`density_map` counts *sampled points*, not geometric traversal: a tracking step
+long enough to skip a voxel would silently under-count it. This is unreachable
+at the default `step_size = 0.5` mm against ≥1.5 mm voxels, but step size is
+user-configurable, so the wrapper densifies the streamlines with
+`dipy.tracking.utils.subsegment` only when a step could skip a voxel
+(`step_size > min_voxel_extent / 2`), and records `Densified` in the sidecar.
+
+Normalization lives **only** in the data product; the figure sets `vmax` only.
+A second display-time normalization is forbidden — it would let two scales drift
+and the colorbar stop describing the data.
+
+See `csttool/extract/modules/density.py` and the plan §2.4/§5.2 for the full
+specification.
+
+---
+
+## Why the profile band is the IQR, and why the centre line stays the mean
+
+Every profile in the report is a per-node mean over the streamlines that
+contributed to it, drawn as a bare line. A line cannot distinguish a consensus
+from an average over dissent: two hemispheres whose means separate while their
+spreads overlap everywhere do not support the difference the lines imply. So each
+line is now backed by the per-node **interquartile range across contributing
+streamlines**.
+
+The centre line stays the **mean**, deliberately. `compute_localized_metrics`
+derives the twelve regional values — and therefore every regional laterality
+index — from that exact array. Switching the centre to the median would silently
+change every published regional metric, which is a different change wearing a
+rendering change's clothes. Where the mean and the IQR diverge visibly, that
+divergence is itself the finding (a skewed per-node distribution), not a defect
+in the choice of centre.
+
+The band is computed in the **same pass** that produces the profile: the metric
+block now derives both from `qc_stats.profile_matrix` instead of recomputing the
+profile with `compute_tract_profile`. That is a pure refactor, and it is enforced
+as one — `matrix.mean(axis=0)` must reproduce `compute_tract_profile` *exactly*,
+not approximately. Exactness matters because scalar maps are stored `float32`:
+promoting to `float64` inside the shared resampler moved the profile by ~5e-8,
+invisible in a plot and a changed published value everywhere else.
+
+Only the IQR is drawn. An earlier prototype carried 5–95 bands as well; four
+translucent bands per panel proved unreadable, so there are two, each with its
+own quartile edges stroked in its own hue so the blue/orange overlap stays
+traceable to a hemisphere.
+
+## Why the bootstrap SE is conditional on the retained bundle
+
+The report's laterality indices are differences of two means quoted without any
+statement of uncertainty, which leaves a reader unable to tell either case from
+noise. Every headline mean now carries a nonparametric bootstrap standard error
+in the JSON and CSV (not in the report tables — see below).
+
+What that SE means is narrow and must stay narrow. It is the variability of the
+reported mean **conditional on the bundle that was retained**: how much the number
+would move if a different subset of *those* streamlines had been sampled. It does
+**not** include tracking, seeding, registration, preprocessing or acquisition
+variability. A re-run of tractography does not produce a resample of this bundle;
+it produces a different bundle. Read as pipeline reproducibility, the SE would be
+badly over-confident, so the JSON carries a mandatory `metrics.uncertainty.scope`
+sentence saying exactly this, once, beside the numbers.
+
+Two quantities deliberately have no SE. A streamline count *is* its own sample
+size, so bootstrapping it is meaningless. Tract volume is a set-union voxel count,
+not a mean over a resamplable population; a bootstrap of it estimates the
+variability of a coverage statistic, which is a different claim that would be read
+as an SE of a mean.
+
+The SEs are not displayed in the report tables. That is a scope decision, not an
+oversight: twelve regional cells plus the global rows would need a redesigned
+column and a footnote for a value the reader is not yet asking for, and the page
+budget had no room for either. The data is serialised, so the display can be added
+later without recomputation.
+
+## Why node homology is reported without a threshold
+
+The twelve regional laterality indices assume node *i* is the same anatomical
+level on both sides. Node *i* is `i/(n-1)` of the way along whatever was
+reconstructed, so two hemispheres of different length put node *i* at different
+heights — on one validation subject, 6.4 mm apart with a −7.9 mm mean length
+difference. The regional table made that assumption silently; it now states the
+measured offset beside the values that depend on it.
+
+World Z is the headline rather than arc length. Arc-length mismatch is close to a
+restatement of the length difference, since the parameterisation is arc-length
+relative by construction, whereas Z answers the anatomical question directly — is
+node *i* at the same height on both sides? — and for the CST, node Z is
+near-monotone along the tract.
+
+No threshold ships. Two subjects cannot establish one, and an unvalidated
+threshold on a clinical report acquires downstream consumers immediately. So
+there is no PASS/FAIL, no colour, no icon, no suppression of any regional value,
+and — deliberately — **no `homology_flag` key in the JSON schema** for a consumer
+to start depending on. Adding one later is not a breaking change; removing one
+would be. Establishing a threshold needs ≥20 subjects and is future work.

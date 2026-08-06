@@ -9,6 +9,198 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Report enrichment: dispersion, uncertainty, node homology, and a 1×4 QC strip.**
+  The one-page A4 report now says more per millimetre, and says what it does not
+  know.
+  - **Along-tract profiles carry their dispersion.** Each of the four profile
+    lines is backed by the per-node **interquartile range across contributing
+    streamlines**, with each band's quartile edges stroked in its own hue so the
+    blue/orange overlap stays traceable. The centre line remains the **mean** —
+    the twelve regional values and their laterality indices are derived from that
+    exact array, so a median centre line would silently change every published
+    regional metric. Costs 0 mm: the band is inside the existing figure. New
+    keys `profile_p25` / `profile_p75` / `profile_n` per scalar per hemisphere.
+  - **Bootstrap standard errors** for every headline mean, every regional mean,
+    mean length and every laterality index, in `bilateral_metrics.json` and (for
+    the headline values) in the CSV. A new `metrics.uncertainty` block records
+    the method, resample count, seed and — mandatorily — the **scope**: these
+    SEs are conditional on the retained bundle and do *not* include tracking,
+    seeding, registration, preprocessing or acquisition variability. Streamline
+    count and tract volume deliberately carry no SE. Not shown in the report
+    tables (a deliberate scope decision; the data is serialised so the display
+    can be added later without recomputation).
+  - **Node-homology statement.** The regional table compares node *i* on each
+    side; the measured L–R node offset and mean length difference now sit on its
+    caption row, with the full per-node arrays in `metrics.node_homology`.
+    Descriptive only: no threshold, no PASS/FAIL, no colour, no suppression of
+    any regional value, and **no flag key in the schema** for a downstream
+    consumer to depend on.
+  - **The 1×3 tractography triptych is replaced by a 1×4 QC strip**
+    (`plot_report_qc_strip`, 194 × 44 mm): DEC-FA, CST density, extraction ROIs
+    and final CST over FA, on **one** shared coronal slice, with one legend, one
+    caption and one colourbar. The triptych answered a single question
+    (streamlines over FA) from three angles; the strip answers four different
+    ones in the same page region. Every missing input degrades its own panel to a
+    labelled grayscale-FA slot — the strip never reflows to three, so a reader
+    can see which question went unanswered.
+  - **New product `*_space-orig_desc-CSTroi_dseg.nii.gz`** — the three warped
+    extraction ROIs as a `uint8` label map (1 brainstem, 2 motor-left, 3
+    motor-right) on the FA grid, with `Labels` / `Space` / `VoxelCounts` in its
+    sidecar. Reaches BIDS `dwi/`, and is exposed to `csttool metrics` via a new
+    `--roi-dseg` flag with a sibling-glob fallback.
+
+  Four inherited defects are fixed rather than carried forward:
+  1. **The report QC panels now genuinely share one slice.** The standalone
+     panels each select their own, and two of them were called with
+     `density=None` and so fell through to the level-4 anatomical fallback while
+     a third got level 1 — the shared-slice guarantee held only inside the
+     prototype driver. The strip is now the one place it actually holds; the
+     standalone panels keep their own per-call selection.
+  2. **ROI masks reach a consumer.** They were written into `extraction/nifti/`,
+     which `csttool run` deletes wholesale, so nothing downstream could read
+     them. The `dseg` product is rescued to BIDS `dwi/` before that cleanup,
+     alongside the V1 and density products.
+  3. **The strip's streamline subsample is deterministic.** It is seeded from
+     `DEFAULT_SEED`, not `viz.utils.viz_rng`, whose `VIZ_SEED` derives from
+     Python's builtin `hash()` of a string and is randomised per process unless
+     `PYTHONHASHSEED` is set. (The global `VIZ_SEED` defect and its remaining
+     consumers are unchanged and still documented.)
+  4. **`render_streamline_overlay` drew in the wrong frame.** It decided slab
+     membership in world millimetres — correctly — but then plotted the *world*
+     points onto an `imshow` whose data coordinates are voxel indices, putting
+     the bundle far off the anatomy and autoscaling the axes out to contain it.
+     Points are now converted to voxel coordinates before plotting. This also
+     corrects the standalone CST-over-FA panel.
+
+  Two further rendering corrections found by the print review:
+  `render_density_overlay`'s `imshow` reset the axes limits and silently undid
+  the background's radiological x-inversion, so the density panel was mirrored
+  relative to its neighbours with its R/L markers on the wrong sides; and
+  `add_direction_legend` placed its labels beyond the arrow tips, where at report
+  size they overflowed the glyph box and printed over the anatomy.
+
+  **Page budget.** Measured with WeasyPrint at every step. The report uses
+  **271.4 mm** of the 281 mm printable height (the layout test asserts ≤ 275 mm),
+  verified as exactly one A4 page across all six review cases — nominal, oblique,
+  V1 withheld, density withheld, dseg withheld, and one empty hemisphere. Getting
+  there needed the profile matrix at 94 mm rather than 97, and the node-homology
+  statement on the regional table's existing caption row rather than in a block
+  of its own. The fourth documented mitigation — cropping the strip's field of
+  view to the brain-mask bounding box — was measured and **rejected**: the brain
+  fills the full superior-inferior extent, so cropping makes the panels taller,
+  not shorter.
+
+  Two DEC code paths now exist: the world-frame one in the report strip, and the
+  legacy voxel-frame one in the tracking stage's developer QC figure. The latter
+  should be migrated to the world-frame product in a follow-up.
+  `plot_tractogram_qc_triptych` and `compute_tract_profile` are unchanged,
+  exported and still tested; only the report path moved off them.
+
+- **Visualization refactor: new scientific data products and standalone QC panels.**
+  Two new **unconditional** numerical NIfTI data products are now written by the
+  producing pipeline stages and persist to BIDS derivatives, separate from any
+  rendering:
+  - `*_desc-V1_dwimap.nii.gz` — the principal diffusion eigenvector (V1) rotated
+    into the anatomical **world (RAS+) frame** by the orthonormal polar factor of
+    the affine (`csttool/spatial.py`, a new dependency-free leaf module). Stored as
+    a 5-D `(X,Y,Z,1,3)` float32 volume with `NIFTI_INTENT_VECTOR` and a
+    self-describing sidecar (`VectorFrame`, `AffineDeterminant`, `ObliquityRad`,
+    `ShearMagnitude`). The world rotation is the scientifically correct DEC basis
+    for oblique and LAS/LPS acquisitions where the voxel frame differs from the
+    anatomical frame (plain `color_fa` is wrong there). Written whenever `track`
+    runs.
+  - `*_desc-CSTdensity_dwimap.nii.gz` — the fraction of distinct retained
+    bilateral CST streamlines visiting each voxel at least once
+    (`dipy.tracking.utils.density_map` + csttool's denominator, grid guarantee and
+    step-size gap guard; `csttool/extract/modules/density.py`). Range `[0,1]`;
+    sidecar records the exact definition, the denominator and per-hemisphere
+    counts. Written whenever `extract` runs.
+  Three **standalone prototype** QC panels replace the single-question 1×3
+  tractography triptych with three complementary questions, sharing one
+  data-driven coronal slice (documented fallback chain) and rendered via a new
+  composable renderer layer (`csttool/viz/render.py`) that never creates a Figure:
+  - `_dec_fa.png` (`stage-tracking_qc-decfa`) — DEC-FA: does the diffusion field
+    support the anatomy?
+  - `_cst_density.png` (`stage-extraction_qc-density`) — is the bundle coherent
+    and symmetric?
+  - `_cst_over_fa.png` (`stage-metrics_qc-cstoverfa`) — does the CST follow the
+    expected course (physical-millimetre slab, contiguous-run polylines)?
+  These prototypes are **not** embedded in the PDF report — the legacy triptych
+  remains the report QC figure unchanged until independent scientific review passes
+  (see `report-improvement/visualization-refactoring-plan.md` §2.11/§14).
+
+- **Six trust-chain QC panels and their diagnostics module.** The existing
+  figures answer "what did the pipeline do?"; every scientific figure plotted a
+  point estimate (a mean line, a bar, a laterality index) with no statement of
+  its support. A new `csttool/metrics/modules/qc_stats.py` computes the missing
+  diagnostics and `qc_figures.py` composes them into four standalone panels
+  (`--save-visualizations` on `csttool metrics`), each answering exactly one
+  question about whether the published numbers are believable:
+  - `_qc_tissue_plausibility.png` (`stage-metrics_qc-tissue`) — the joint FA-MD
+    distribution of every voxel the CST visits, each weighted by its CST
+    density, with the free-water corner (FA < 0.2 **and** MD > 2.0e-3 mm²/s)
+    outlined and its mass fraction reported per hemisphere. The only panel that
+    questions the *input* to the metrics rather than the tractography: a bundle
+    can be anatomically perfect and still report an elevated MD because part of
+    its mass sits in voxels adjacent to the ventricles.
+  - `_qc_v1_angle.png` (`stage-metrics_qc-v1angle`) — the acute angle between
+    each streamline's tangent and the local world-frame V1, along the tract. A
+    bulge is the CST/CC/SLF crossing region announcing itself, which identifies
+    the profile nodes least supported by the tensor. Validated end-to-end on an
+    oblique subject (0.496 rad), where a voxel-frame V1 would show a systematic
+    offset and the world-frame product does not.
+  - `_qc_profile_dispersion_<scalar>.png` (`qc-dispersion-<scalar>`) — per-node
+    median, IQR and 5–95 band across streamlines. `compute_tract_profile` already
+    built this matrix and discarded it at its `np.mean`; `qc_stats.profile_matrix`
+    returns it, and `matrix.mean(axis=0)` reproduces that function exactly, so
+    the band describes the published mean rather than a near neighbour of it.
+  - `_qc_sampling_saturation.png` (`qc-saturation`) — the headline
+    length-unbiased mean recomputed over subsamples of the bundle, plus the
+    bootstrap standard error at full N (which the subsampling curve cannot show,
+    having zero variance at 100 % by construction). Seeded from `DEFAULT_SEED`,
+    not `viz.utils.VIZ_SEED` — the latter derives from Python's builtin `hash` of
+    a string and is randomised per process unless `PYTHONHASHSEED` is set.
+  - `_qc_node_homology.png` (`qc-nodehomology`) — the world Z and arc length of
+    each profile node per hemisphere, plus the two length distributions. The
+    20-node parameterisation is *relative*, so unequal bundle lengths mean node
+    *i* sits at a different anatomical level on each side and every regional
+    laterality index is confounded by geometry rather than microstructure.
+    Nothing else in the figure set checks this.
+  - `_qc_profile_attrition.png` (`qc-attrition`) — the four gates a streamline
+    passes between extraction and the published profile, per hemisphere, plus
+    the per-point retention. `compute_tract_profile` drops short streamlines and
+    out-of-bounds points silently; `qc_stats.attrition_funnel` makes the discards
+    auditable. The failure it exists to catch is *asymmetric* attrition, which
+    would leave the two hemispheres' regional metrics computed on different
+    populations. On a well-formed run the answer is "none" — the panel states
+    that verdict in words so a flat funnel reads as a pass.
+  All six sample exactly as the metrics they audit do, and are standalone — not
+  embedded in the PDF report.
+
+- **`csttool metrics --v1` and `--density`.** `--v1` points the V1-angle panel
+  at the world-frame eigenvector map; when omitted it is looked for beside the
+  FA map, where `save_tracking_outputs` writes it. `--density` points the
+  tissue-plausibility panel at the CST density product; when omitted it is looked
+  for in the extraction stage's `scalar_maps/` beside the tractograms. `csttool
+  run` plumbs both through — the tracking result dict now carries `v1_path` and
+  each extraction result dict carries `density_path`.
+
+- **`report-improvement/generate_qc_review.py` and `qc-figure-review.md`.** A
+  driver that regenerates every QC panel for the validation subjects into a
+  stable, versioned review location (`report-improvement/qc-review/`, previous
+  sets archived under `_previous/`), and the scientific review of the six
+  trust-chain panels that decides which of them are worth keeping. Findings:
+  QC-8 (node homology) and QC-5 (dispersion) earn standalone-QC status; QC-6
+  (saturation) is an unbiased estimator plotted against sample size and can
+  never look different across subjects — its only content is the bootstrap SE,
+  which belongs in the metrics JSON rather than in a 140 mm figure; QC-7 is a
+  check that happens to have a figure. Report integration is deferred.
+
+- **Two new CLI flags.** `--save-visualizations` is added to `csttool track` and
+  `csttool metrics` (it already existed on `preprocess`, `extract`, and `run`),
+  making the DEC-FA and CST-over-FA panels reachable as documented CLI
+  invocations and closing the parser inconsistency the figure inventory flagged.
+
 - **Redesigned one-page A4 PDF report.** The clinical report is restructured to
   the approved layout: a compact header with a laterality legend and the LI
   formula, a three-column methods band (Acquisition / Processing / Space &

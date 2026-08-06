@@ -173,7 +173,8 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             ad=ad,
             tracking_params=tracking_params,
             provenance=ctx.provenance,
-            verbose=verbose
+            verbose=verbose,
+            tenfit=tenfit,
         )
     except Exception as e:
         print(f"  ✗ Saving outputs failed: {e}")
@@ -197,6 +198,23 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             tracking_params=tracking_params,
             verbose=verbose
         )
+        # DEC-FA prototype panel (visualization-refactor M5). Reads the stored
+        # world-frame V1 product written above; standalone PNG, not embedded in
+        # the PDF report until review passes.
+        try:
+            from csttool.metrics.modules.qc_figures import plot_dec_fa_panel
+            v1_path = outputs.get('v1_map')
+            fa_path = outputs.get('fa_map')
+            if v1_path and Path(v1_path).exists() and fa_path and Path(fa_path).exists():
+                plot_dec_fa_panel(
+                    v1_path=v1_path, fa_path=fa_path,
+                    output_dir=args.out / "tracking" / "visualizations",
+                    subject_id=stem, brain_mask_path=None,
+                )
+            else:
+                print(f"  ⚠️ Skipping DEC-FA panel: V1 or FA product not available")
+        except Exception as exc:
+            print(f"  ⚠️ Could not generate DEC-FA panel: {exc}")
 
     # Summary
     print(f"\n✓ Tracking complete - {stem}")
@@ -210,6 +228,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         'md_path': outputs['md_map'],
         'rd_path': outputs.get('rd_map'),  # May be None if not computed
         'ad_path': outputs.get('ad_map'),  # May be None if not computed
+        'v1_path': outputs.get('v1_map'),  # None when no tenfit was supplied
         'n_streamlines': len(streamlines),
         'stem': stem,
         'tracking_params': tracking_params

@@ -82,7 +82,19 @@
 
     {# ===== Regional metrics ===== #}
     <section class="regional-metrics">
-        <h2 class="section-title">Regional metrics</h2>
+        {# Node homology rides on this existing caption row rather than in a #}
+        {# block of its own: measured, the block cost 3 mm the page did not #}
+        {# have. Descriptive only — the regional values below are never #}
+        {# suppressed, greyed or annotated with a verdict, and no validated #}
+        {# threshold exists to annotate them with. #}
+        <h2 class="section-title">Regional metrics
+            {% if node_homology.available %}
+            <small class="homology-note">Node homology — max L–R node offset {{ node_homology.max_abs_z_mm }} mm ·
+                mean length difference {{ node_homology.length_diff_mm }} mm</small>
+            {% else %}
+            <small class="homology-note">Node homology — unavailable (one hemisphere has no streamlines)</small>
+            {% endif %}
+        </h2>
         <table class="regional-table">
             <thead>
                 <tr>
@@ -119,11 +131,11 @@
         {% endif %}
     </section>
 
-    {# ===== Tractography QC (1x3 triptych) ===== #}
+    {# ===== Tractography QC (1x4 strip, one shared coronal slice) ===== #}
     <section class="qc">
-        <h2 class="section-title">Tractography QC <small>FA background</small></h2>
-        {% if qc_triptych %}
-        <img class="qc-triptych" src="{{ qc_triptych }}" alt="Tractography QC triptych (sagittal, coronal, axial)">
+        <h2 class="section-title">Tractography QC <small>one coronal slice, FA background</small></h2>
+        {% if qc_strip %}
+        <img class="qc-strip" src="{{ qc_strip }}" alt="Report QC strip (DEC-FA, CST density, extraction ROIs, CST over FA)">
         {% else %}
         <div class="figure-placeholder">[Tractography QC]</div>
         {% endif %}

@@ -433,3 +433,122 @@ class TestPdfWithProvenance:
             assert result is not None
             assert pdf_path.exists()
             assert pdf_path.stat().st_size > 0
+
+
+# ---------------------------------------------------------------------------
+# Serialization of the uncertainty, dispersion and node-homology additions.
+# ---------------------------------------------------------------------------
+
+class TestUncertaintySerialization:
+    """The bootstrap SEs and the block that scopes them."""
+
+    def _report(self, comparison, tmp_path):
+        path = save_json_report(comparison, tmp_path, "sub-unc")
+        return json.loads(Path(path).read_text())
+
+    def test_uncertainty_block_is_written(self, sample_comparison, tmp_path):
+        block = self._report(sample_comparison, tmp_path)["metrics"]["uncertainty"]
+        assert block["method"] == "nonparametric bootstrap of the per-streamline mean"
+        assert block["n_resamples"] == 1000
+        assert block["seed"] == 42
+
+    def test_scope_states_what_the_se_does_not_cover(self, sample_comparison, tmp_path):
+        """The sentence that stops the SE being read as pipeline reproducibility.
+        Its wording is mandatory, so this asserts the claims, not a paraphrase."""
+        scope = self._report(sample_comparison, tmp_path)["metrics"]["uncertainty"]["scope"]
+        assert "Conditional on the retained bundle" in scope
+        assert "THESE streamlines" in scope
+        assert "Does NOT include tracking, seeding, registration" in scope
+        assert "a re-run of tractography would produce a different bundle" in scope
+
+    def test_uncertainty_is_not_added_to_the_callers_dict(self, sample_comparison, tmp_path):
+        """The same comparison dict is also handed to the figure and HTML paths."""
+        save_json_report(sample_comparison, tmp_path, "sub-unc2")
+        assert "uncertainty" not in sample_comparison
+
+    def test_every_new_scalar_key_round_trips(self, sample_comparison, tmp_path):
+        sample_comparison["left"]["fa"].update({
+            "bootstrap_se": 0.0012, "pontine_se": 0.001, "plic_se": 0.002,
+            "precentral_se": 0.003, "profile_p25": [0.4] * 20,
+            "profile_p75": [0.5] * 20, "profile_n": 774,
+        })
+        sample_comparison["left"]["morphology"]["bootstrap_se_length"] = 0.562
+        sample_comparison["asymmetry"]["fa"]["laterality_index_se"] = 0.0026
+        metrics = self._report(sample_comparison, tmp_path)["metrics"]
+        assert metrics["left"]["fa"]["bootstrap_se"] == 0.0012
+        assert metrics["left"]["fa"]["plic_se"] == 0.002
+        assert metrics["left"]["fa"]["profile_p25"] == [0.4] * 20
+        assert metrics["left"]["fa"]["profile_n"] == 774
+        assert metrics["left"]["morphology"]["bootstrap_se_length"] == 0.562
+        assert metrics["asymmetry"]["fa"]["laterality_index_se"] == 0.0026
+
+    def test_node_homology_round_trips_including_the_per_node_arrays(
+        self, sample_comparison, tmp_path
+    ):
+        sample_comparison["node_homology"] = {
+            "max_abs_z_difference_mm": 6.4, "length_difference_mm": -7.9,
+            "z_difference_mm": [0.1] * 20, "arc_difference_mm": [0.2] * 20,
+            "left_length_mean": 120.0, "right_length_mean": 127.9,
+            "left_n_streamlines": 192, "right_n_streamlines": 264, "n_points": 20,
+        }
+        homology = self._report(sample_comparison, tmp_path)["metrics"]["node_homology"]
+        assert homology["max_abs_z_difference_mm"] == 6.4
+        assert len(homology["z_difference_mm"]) == 20
+        assert len(homology["arc_difference_mm"]) == 20
+
+    def test_no_threshold_or_flag_key_exists(self, sample_comparison, tmp_path):
+        """No validated threshold exists, so none is shipped — and no key is
+        left for a downstream consumer to start depending on."""
+        sample_comparison["node_homology"] = {
+            "max_abs_z_difference_mm": 6.4, "length_difference_mm": -7.9,
+        }
+        homology = self._report(sample_comparison, tmp_path)["metrics"]["node_homology"]
+        for forbidden in ("homology_flag", "pass", "status", "threshold"):
+            assert forbidden not in homology
+
+
+class TestCsvSerialization:
+    def _row(self, comparison, tmp_path):
+        import csv as _csv
+
+        from csttool.metrics.modules.reports import save_csv_summary
+
+        path = save_csv_summary(comparison, tmp_path, "sub-csv")
+        with open(path, newline="") as handle:
+            return next(iter(_csv.DictReader(handle)))
+
+    def test_new_columns_are_present(self, sample_comparison, tmp_path):
+        row = self._row(sample_comparison, tmp_path)
+        for column in ("left_fa_bootstrap_se", "right_fa_bootstrap_se",
+                       "fa_laterality_index_se", "left_mean_length_se",
+                       "right_mean_length_se", "node_homology_max_abs_z_diff_mm",
+                       "node_homology_length_diff_mm"):
+            assert column in row
+
+    def test_missing_se_is_an_empty_cell_not_zero(self, sample_comparison, tmp_path):
+        """A zero SE claims the mean is exactly determined. A serialiser must
+        never make that claim on behalf of legacy input."""
+        row = self._row(sample_comparison, tmp_path)
+        assert row["left_fa_bootstrap_se"] == ""
+        assert row["left_mean_length_se"] == ""
+        assert row["node_homology_max_abs_z_diff_mm"] == ""
+
+    def test_present_se_is_written(self, sample_comparison, tmp_path):
+        sample_comparison["left"]["fa"]["bootstrap_se"] = 0.0012
+        sample_comparison["left"]["morphology"]["bootstrap_se_length"] = 0.562
+        sample_comparison["node_homology"] = {
+            "max_abs_z_difference_mm": 6.4, "length_difference_mm": -7.9,
+        }
+        row = self._row(sample_comparison, tmp_path)
+        assert float(row["left_fa_bootstrap_se"]) == 0.0012
+        assert float(row["left_mean_length_se"]) == 0.562
+        assert float(row["node_homology_max_abs_z_diff_mm"]) == 6.4
+        assert float(row["node_homology_length_diff_mm"]) == -7.9
+
+    def test_existing_columns_keep_their_positions(self, sample_comparison, tmp_path):
+        """New columns are appended, so a reader indexing by position is safe."""
+        row = self._row(sample_comparison, tmp_path)
+        columns = list(row)
+        assert columns[0] == "subject_id"
+        assert columns.index("left_fa_mean") < columns.index("left_fa_bootstrap_se")
+        assert columns[-1] == "node_homology_length_diff_mm"

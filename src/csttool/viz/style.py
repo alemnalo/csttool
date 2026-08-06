@@ -53,6 +53,10 @@ MD_CMAP = "inferno"       # MD magnitude (sequential, perceptually uniform)
 RESIDUAL_CMAP = "magma"
 # Signed deformation (Jacobian): diverging around 1.0.
 JACOBIAN_CMAP = "RdBu_r"
+# CST density (visualization-refactor M3): a sequential scale deliberately
+# *outside* the blue/orange hemisphere hues (LEFT/RIGHT), so a continuous
+# density value can never be misread as a laterality colour (plan §2.4, R-8).
+DENSITY_CMAP = "viridis"
 
 ANATOMY_BG = "gray"       # grayscale anatomical backgrounds (b0, FA-as-background)
 

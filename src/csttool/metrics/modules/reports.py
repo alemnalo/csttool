@@ -443,6 +443,30 @@ def _build_methods_band(acquisition, processing, space, orientation_code, versio
     return acq_rows, proc_rows, space_rows
 
 
+def build_node_homology_view(node_homology):
+    """Pre-format the node-homology status line's numbers for the template.
+
+    The template does no arithmetic and applies no rule: it prints two numbers
+    and a static sentence. There is deliberately **no** threshold, flag, colour
+    or classification here — two subjects cannot establish one, and a
+    ``homology_flag`` in the schema would immediately acquire downstream
+    consumers depending on an unvalidated rule.
+
+    Returns ``{'available': bool, 'max_abs_z_mm': str, 'length_diff_mm': str}``.
+    ``available`` is False when either hemisphere is empty, in which case the
+    template states that plainly and omits the explanatory sentence.
+    """
+    if not node_homology or node_homology.get("max_abs_z_difference_mm") is None:
+        return {"available": False, "max_abs_z_mm": "—", "length_diff_mm": "—"}
+    length_diff = node_homology.get("length_difference_mm")
+    return {
+        "available": True,
+        "max_abs_z_mm": f"{node_homology['max_abs_z_difference_mm']:.1f}",
+        # Signed: which side is longer is the whole content of the number.
+        "length_diff_mm": "—" if length_diff is None else f"{length_diff:+.1f}",
+    }
+
+
 def build_report_context(
     comparison,
     visualization_paths,
@@ -473,7 +497,11 @@ def build_report_context(
         acquisition, processing, space, orient, version
     )
 
-    qc_path = visualization_paths.get("tractogram_qc_triptych")
+    # The 1x4 strip replaces the 1x3 triptych. The legacy key is still read so a
+    # caller that has not migrated (or a replay of an older run's paths) still
+    # renders a QC figure rather than a placeholder.
+    qc_path = (visualization_paths.get("qc_strip")
+               or visualization_paths.get("tractogram_qc_triptych"))
     qc_has_colorbar = qc_path is not None
 
     return {
@@ -486,11 +514,52 @@ def build_report_context(
         "space_rows": space_rows,
         "metrics": _build_global_metrics(left, right, asym),
         "localized_metrics": _build_regional_metrics(left, right, asym),
+        "node_homology": build_node_homology_view(comparison.get("node_homology")),
         "profile_matrix": _embed_image(visualization_paths.get("profile_matrix")),
-        "qc_triptych": _embed_image(qc_path),
+        "qc_strip": _embed_image(qc_path),
         "qc_has_colorbar": qc_has_colorbar,
         "provenance": _build_report_provenance((metadata or {}).get("provenance", {})),
     }
+
+
+# The scope statement serialised beside every bootstrap SE. It is the sentence
+# that stops the SE from being read as pipeline reproducibility, so it is
+# mandatory and its wording is fixed.
+UNCERTAINTY_SCOPE = (
+    "Conditional on the retained bundle. Quantifies how much the reported mean "
+    "would move if a different subset of THESE streamlines had been sampled. "
+    "Does NOT include tracking, seeding, registration, preprocessing or "
+    "acquisition variability; a re-run of tractography would produce a "
+    "different bundle, not a resample of this one."
+)
+
+
+def build_uncertainty_block():
+    """The ``metrics.uncertainty`` block describing every ``*_se`` in the JSON.
+
+    Written once per report rather than repeated per value: the method, the
+    resample count and the seed are identical for every SE, and the scope
+    sentence needs to be read once.
+    """
+    from csttool.reproducibility.context import DEFAULT_SEED
+    from .qc_stats import REPORT_BOOTSTRAP_REPEATS
+
+    return {
+        "method": "nonparametric bootstrap of the per-streamline mean",
+        "n_resamples": REPORT_BOOTSTRAP_REPEATS,
+        "seed": DEFAULT_SEED,
+        "scope": UNCERTAINTY_SCOPE,
+    }
+
+
+def _se_cell(value):
+    """A CSV cell for a standard error: the float, or an empty string.
+
+    Never ``0.0`` for a missing SE — a zero standard error is a scientific
+    claim (the mean is exactly determined) and must not be fabricated by a
+    serialiser.
+    """
+    return "" if value is None else value
 
 
 def save_json_report(comparison, output_dir, subject_id, metadata=None):
@@ -525,7 +594,12 @@ def save_json_report(comparison, output_dir, subject_id, metadata=None):
     if metadata is None:
         metadata = {}
     
-    # Build report with extended schema
+    # Build report with extended schema. The uncertainty block is attached to the
+    # serialised copy rather than mutating the caller's comparison dict, which is
+    # also handed to the figure and HTML paths.
+    metrics = dict(comparison)
+    metrics['uncertainty'] = build_uncertainty_block()
+
     report = {
         'subject_id': subject_id,
         'processing_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -534,7 +608,7 @@ def save_json_report(comparison, output_dir, subject_id, metadata=None):
         'processing': metadata.get('processing', {}),
         'qc_thresholds': metadata.get('qc_thresholds', {}),
         'provenance': metadata.get('provenance', {}),
-        'metrics': comparison
+        'metrics': metrics
     }
     
     # Save JSON
@@ -658,6 +732,30 @@ def save_csv_summary(comparison, output_dir, subject_id):
                 li_key = f'{scalar}_{region}'
                 if li_key in asym:
                     data[f'{scalar}_{region}_laterality_index'] = asym[li_key]['laterality_index']
+
+    # Bootstrap standard errors, appended at the end so a reader that indexes by
+    # column position is unaffected. Regional SEs are deliberately not exported:
+    # 24 more columns for a value the report does not display. A missing SE is an
+    # empty cell, never 0.0 (see _se_cell).
+    data['left_mean_length_se'] = _se_cell(left['morphology'].get('bootstrap_se_length'))
+    data['right_mean_length_se'] = _se_cell(right['morphology'].get('bootstrap_se_length'))
+    for scalar in scalars:
+        if scalar in left and scalar in right:
+            data[f'left_{scalar}_bootstrap_se'] = _se_cell(left[scalar].get('bootstrap_se'))
+            data[f'right_{scalar}_bootstrap_se'] = _se_cell(right[scalar].get('bootstrap_se'))
+            data[f'{scalar}_laterality_index_se'] = _se_cell(
+                asym.get(scalar, {}).get('laterality_index_se')
+            )
+
+    # Node homology: the two headline scalars only. The 20-element per-node
+    # difference arrays stay in the JSON — they have no place in a flat table.
+    homology = comparison.get('node_homology') or {}
+    data['node_homology_max_abs_z_diff_mm'] = _se_cell(
+        homology.get('max_abs_z_difference_mm')
+    )
+    data['node_homology_length_diff_mm'] = _se_cell(
+        homology.get('length_difference_mm')
+    )
 
     # Save CSV
     csv_path = output_dir / f"{subject_id}_metrics_summary.csv"
@@ -829,7 +927,13 @@ def generate_complete_report(
     background_image=None,
     version=None,
     space="Native Space",
-    metadata=None
+    metadata=None,
+    fa_path=None,
+    v1_path=None,
+    density_path=None,
+    roi_dseg_path=None,
+    cst_left_path=None,
+    cst_right_path=None,
 ):
     """
     Generate all report formats: JSON, CSV, and PDF with visualizations.
@@ -854,18 +958,27 @@ def generate_complete_report(
         3D T1 or FA image for tractogram QC background (defaults to fa_map)
     version : str
         csttool version string
-        
+    fa_path, v1_path, density_path, roi_dseg_path, cst_left_path, cst_right_path :
+        path, optional
+        Persisted products for the 1x4 report QC strip, which reads from disk so
+        the figure is reproducible from the products alone. ``fa_path`` and the
+        two tractogram paths are the minimum; the rest degrade their own panel.
+        With no ``fa_path`` the strip is skipped entirely and the report renders
+        the legacy 1x3 triptych, which is what a caller that has not migrated
+        gets.
+
     Returns
     -------
     report_paths : dict
         Dictionary of all generated report file paths
     """
-    
+
     from .visualizations import (
         plot_tract_profiles,
         plot_bilateral_comparison,
         create_summary_figure,
         plot_profile_matrix,
+        plot_report_qc_strip,
         plot_tractogram_qc_triptych,
     )
     from csttool.viz import style as _style
@@ -892,7 +1005,24 @@ def generate_complete_report(
         'profile_matrix': plot_profile_matrix(
             comparison['left'], comparison['right'], viz_dir, subject_id
         ),
-        'tractogram_qc_triptych': plot_tractogram_qc_triptych(
+    }
+
+    # The 1x4 strip replaces the triptych in the report. It reads persisted
+    # products, so it needs paths rather than the in-memory arrays; a caller that
+    # supplies none falls back to the triptych rather than losing the QC figure.
+    if fa_path is not None:
+        pdf_viz_paths['qc_strip'] = plot_report_qc_strip(
+            fa_path=fa_path,
+            v1_path=v1_path,
+            density_path=density_path,
+            roi_dseg_path=roi_dseg_path,
+            cst_left_path=cst_left_path,
+            cst_right_path=cst_right_path,
+            output_dir=viz_dir,
+            subject_id=subject_id,
+        )
+    else:
+        pdf_viz_paths['tractogram_qc_triptych'] = plot_tractogram_qc_triptych(
             streamlines_left,
             streamlines_right,
             background_image,
@@ -900,8 +1030,7 @@ def generate_complete_report(
             viz_dir,
             subject_id,
             background_kind=("fa" if background_image is fa_map else "other"),
-        ),
-    }
+        )
     
     # Also generate individual plots for detailed analysis
     viz_paths = {}

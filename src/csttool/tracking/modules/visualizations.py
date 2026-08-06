@@ -46,12 +46,23 @@ def plot_tensor_maps(
     mid_cor = fa.shape[1] // 2
     mid_sag = fa.shape[0] // 2
     
-    # Compute RGB direction map if tenfit available
+    # Compute the RGB direction-colour (DEC) map if a tensor fit is available.
+    # The principal eigenvector (V1) is rotated from the b-vec (voxel) frame into
+    # the anatomical world (RAS+) frame via the orthonormal polar factor of the
+    # affine (csttool.spatial.rotate_vector_field_to_world), then the colour-FA
+    # formula is applied. This is numerically identical to
+    # ``dipy.reconst.dti.color_fa``'s expression ``|evecs[...,0]| * clip(FA,0,1)``
+    # (verified in visualization-refactoring-plan §5.1.2) but evaluated on the
+    # world-frame V1, so the colours encode anatomical axes (Red=L-R,
+    # Green=A-P, Blue=S-I) rather than voxel axes — the scientifically correct
+    # behaviour for non-axis-aligned or LAS/LPS acquisitions. The canonical world
+    # V1 product itself is persisted separately by ``save_tracking_outputs``.
     if tenfit is not None:
         try:
-            evecs = tenfit.evecs
-            v1 = evecs[..., 0]
-            rgb = np.abs(v1) * fa[..., np.newaxis]
+            from csttool.spatial import rotate_vector_field_to_world
+            v1_voxel = np.asarray(tenfit.evecs)[..., :, 0]
+            v1_world, _ = rotate_vector_field_to_world(v1_voxel, affine)
+            rgb = np.abs(v1_world) * np.clip(fa, 0, 1)[..., None]
             rgb = np.clip(rgb, 0, 1)
         except Exception:
             rgb = None
@@ -213,94 +224,10 @@ def plot_white_matter_mask(
 # =============================================================================
 # 2D STREAMLINE PROJECTIONS (SIMPLIFIED - NO FA BACKGROUND)
 # =============================================================================
-
-def _pad_slice_to_square(image_slice, extent=None, pad_value=0.0):
-    """
-    Pad a 2D slice to a square shape.
-
-    Returns the padded slice and an updated display extent that preserves
-    the original pixel spacing.
-    """
-    height, width = image_slice.shape
-    target_size = max(height, width)
-    pad_y = target_size - height
-    pad_x = target_size - width
-    pad_y_before = pad_y // 2
-    pad_y_after = pad_y - pad_y_before
-    pad_x_before = pad_x // 2
-    pad_x_after = pad_x - pad_x_before
-
-    padded = np.pad(
-        image_slice,
-        ((pad_y_before, pad_y_after), (pad_x_before, pad_x_after)),
-        mode='constant',
-        constant_values=pad_value
-    )
-
-    if extent is None:
-        extent = (0, width, 0, height)
-
-    x_min, x_max, y_min, y_max = extent
-    dx = (x_max - x_min) / width if width else 1.0
-    dy = (y_max - y_min) / height if height else 1.0
-    padded_extent = (
-        x_min - pad_x_before * dx,
-        x_max + pad_x_after * dx,
-        y_min - pad_y_before * dy,
-        y_max + pad_y_after * dy
-    )
-
-    return padded, padded_extent
-
-
-def _volume_world_bounds(volume_shape, affine):
-    corners = np.array([
-        [0, 0, 0],
-        [volume_shape[0], 0, 0],
-        [0, volume_shape[1], 0],
-        [0, 0, volume_shape[2]],
-        [volume_shape[0], volume_shape[1], 0],
-        [volume_shape[0], 0, volume_shape[2]],
-        [0, volume_shape[1], volume_shape[2]],
-        [volume_shape[0], volume_shape[1], volume_shape[2]],
-    ])
-    corners_h = np.hstack([corners, np.ones((corners.shape[0], 1))])
-    world = corners_h @ affine.T
-    bounds = []
-    for dim in range(3):
-        bounds.append((world[:, dim].min(), world[:, dim].max()))
-    return bounds
-
-
-def _streamline_plane_limits(streamlines, d1, d2, fallback_bounds):
-    min_d1 = None
-    max_d1 = None
-    min_d2 = None
-    max_d2 = None
-    for sl in streamlines:
-        if sl.size == 0:
-            continue
-        sl_d1 = sl[:, d1]
-        sl_d2 = sl[:, d2]
-        sl_min_d1 = sl_d1.min()
-        sl_max_d1 = sl_d1.max()
-        sl_min_d2 = sl_d2.min()
-        sl_max_d2 = sl_d2.max()
-        min_d1 = sl_min_d1 if min_d1 is None else min(min_d1, sl_min_d1)
-        max_d1 = sl_max_d1 if max_d1 is None else max(max_d1, sl_max_d1)
-        min_d2 = sl_min_d2 if min_d2 is None else min(min_d2, sl_min_d2)
-        max_d2 = sl_max_d2 if max_d2 is None else max(max_d2, sl_max_d2)
-
-    if min_d1 is None or min_d2 is None:
-        (min_d1, max_d1), (min_d2, max_d2) = fallback_bounds
-
-    range_d1 = max_d1 - min_d1
-    range_d2 = max_d2 - min_d2
-    pad_d1 = range_d1 * 0.05 if range_d1 else 1.0
-    pad_d2 = range_d2 * 0.05 if range_d2 else 1.0
-
-    return (min_d1 - pad_d1, max_d1 + pad_d1), (min_d2 - pad_d2, max_d2 + pad_d2)
-
+# Note: ``pad_slice_to_square``, ``volume_world_bounds`` and
+# ``streamline_plane_limits`` live once in ``csttool.viz.geometry`` and are
+# called here as ``_geo.*``. The verbatim private copies that used to live in
+# this module were removed to keep one definition of each geometry helper.
 
 def plot_streamlines_2d(
     streamlines,
@@ -379,7 +306,7 @@ def plot_streamlines_2d(
 
     for col, (name, fa_slice) in enumerate(fa_views):
         ax = axes[0, col]
-        padded_slice, padded_extent = _pad_slice_to_square(
+        padded_slice, padded_extent = _geo.pad_slice_to_square(
             fa_slice,
             extent=(0, fa_slice.shape[1], 0, fa_slice.shape[0]),
             pad_value=0.0
@@ -407,11 +334,11 @@ def plot_streamlines_2d(
         ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)', _n),
     ]
 
-    volume_bounds = _volume_world_bounds(fa.shape, affine)
+    volume_bounds = _geo.volume_world_bounds(fa.shape, affine)
     plane_limits = {}
     for title, d1, d2, _, _, _ in streamline_views:
         fallback = (volume_bounds[d1], volume_bounds[d2])
-        plane_limits[title] = _streamline_plane_limits(vis_streamlines, d1, d2, fallback)
+        plane_limits[title] = _geo.streamline_plane_limits(vis_streamlines, d1, d2, fallback)
     
     for col, (title, d1, d2, xlabel, ylabel, color) in enumerate(streamline_views):
         ax = axes[1, col]
@@ -685,11 +612,11 @@ def create_tracking_summary(
             ('Axial', 0, 1, _n),
         ]
 
-        volume_bounds = _volume_world_bounds(fa.shape, affine)
+        volume_bounds = _geo.volume_world_bounds(fa.shape, affine)
         plane_limits = {}
         for title, d1, d2, _ in views_2d:
             fallback = (volume_bounds[d1], volume_bounds[d2])
-            plane_limits[title] = _streamline_plane_limits(vis_sl, d1, d2, fallback)
+            plane_limits[title] = _geo.streamline_plane_limits(vis_sl, d1, d2, fallback)
         
         for col, (title, d1, d2, color) in enumerate(views_2d):
             ax = fig.add_subplot(gs[1, col])

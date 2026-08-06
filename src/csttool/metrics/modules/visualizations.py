@@ -286,13 +286,67 @@ _RPT_LABEL_PT = 7.5     # axis labels
 _RPT_TICK_PT = 7.0      # tick labels
 _RPT_LEGEND_PT = 7.5    # shared legend
 _RPT_REGION_PT = 6.5    # anatomical region labels in the shared strip
+_RPT_BAND_NOTE_PT = 5.5  # the IQR clause in the shared strip
+
+# The per-node interquartile range drawn behind each profile line. The band is a
+# scientific claim (the bundle's spread at that node), so it is named on the
+# figure rather than left to the caller's caption.
+_BAND_CAPTION = 'shaded band = interquartile range across streamlines'
+
+# Fill opacity of one hemisphere's IQR band. Blue over orange composites to
+# ~0.36 combined alpha, which reads as a distinct third tint; the per-band edge
+# lines below are what keep each band's own extent traceable through the
+# overlap. Raising this is the documented remedy if a diffusivity band proves
+# invisible at print size — hence the per-scalar override rather than a constant.
+_BAND_ALPHA = 0.20
+_BAND_EDGE_ALPHA = 0.45
+_BAND_EDGE_LW = 0.5
+
+# Layering. The profile lines are the data and must never be occluded, so their
+# zorder is now explicit rather than relying on draw order.
+_Z_REGION_BAND = 0      # _shade_tract_regions (unchanged)
+_Z_IQR_BAND = 1
+_Z_GRID = 2             # Matplotlib's default gridline zorder (unchanged)
+_Z_PROFILE_LINE = 3
 
 # Final printed sizes of the two composite report figures, in millimetres.
+# The profile matrix is 94 mm rather than its original 97: the IQR bands make
+# each panel more legible, so a 3 mm reduction is affordable, and it is the
+# prescribed second step of the page-budget ladder.
 # The CSS places each image at exactly this width, and the figures are saved
 # with their own figure bbox so the rendered height is exactly the second value.
 # These two numbers are the whole figure half of the one-page A4 budget.
-PROFILE_MATRIX_SIZE_MM = (194.0, 97.0)
+PROFILE_MATRIX_SIZE_MM = (194.0, 94.0)
 QC_TRIPTYCH_SIZE_MM = (116.0, 38.0)
+
+# The 1x4 report QC strip that replaces the triptych. Full content width, so the
+# coronal panels are 48.5 mm rather than the triptych's 38.7 mm; because the
+# coronal world aspect is landscape (~1.33), four wider panels are only ~6 mm
+# taller than three narrow ones.
+#
+# The furniture below was trimmed from its first estimate (title row 3.5 -> 2.5
+# mm, caption 3.0 -> 2.5 mm) before anything touched panel size, which is the
+# prescribed order; that trim buys image height inside this 44 mm rather than
+# shrinking the strip, because the page budget was balanced elsewhere (profile
+# matrix 97 -> 94 mm, and the node-homology line moved onto the regional
+# table's existing caption row). Measured page use: 271.4 mm of 281.
+QC_STRIP_SIZE_MM = (194.0, 44.0)
+
+# Internal vertical budget of the strip, in millimetres. The image band takes
+# whatever is left, so shaving the furniture is the first mitigation available
+# to the page budget and does not touch panel size.
+_STRIP_TITLE_MM = 2.5      # row of 7 pt bold panel titles
+_STRIP_CBAR_MM = 1.5       # panel 2's horizontal colourbar, the bar itself
+_STRIP_CBAR_LABEL_MM = 2.2  # the line of type beneath that bar
+_STRIP_CAPTION_MM = 2.5    # the one shared caption/legend line
+_STRIP_GAP_MM = 0.6        # between panels, so two black letterboxes never merge
+
+_STRIP_TITLE_PT = 7.0
+_STRIP_CAPTION_PT = 5.5
+_STRIP_MARKER_PT = 6.0
+_STRIP_NOTE_PT = 6.0       # the italic "not produced" overlay on a degraded panel
+_STRIP_ROI_LINEWIDTH = 0.8
+_STRIP_GLYPH_IN = 0.24     # DEC direction-key glyph, edge length in inches
 
 
 def _blend_on_white(color, alpha):
@@ -307,7 +361,7 @@ def _blend_on_white(color, alpha):
     return (1 - alpha + alpha * r, 1 - alpha + alpha * g, 1 - alpha + alpha * b)
 
 
-def _draw_region_strip(ax):
+def _draw_region_strip(ax, band_note=False):
     """Draw the shared anatomical-region strip beneath the 2x2 profile matrix.
 
     One strip for the whole matrix, spanning both columns: a position rule from
@@ -315,6 +369,9 @@ def _draw_region_strip(ax):
     centred over their own intervals, and the shared position axis label. Region
     names are set at :data:`_RPT_REGION_PT` (smaller than the subplot titles) in
     the regular sans face — they are positional context, not headings.
+
+    ``band_note`` adds the right-aligned clause naming the IQR band, drawn once
+    for the whole matrix rather than per panel.
     """
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 1)
@@ -340,7 +397,22 @@ def _draw_region_strip(ax):
 
     ax.set_xlabel('Distance along tract (%)', fontsize=_RPT_LABEL_PT, labelpad=1)
 
+    if band_note:
+        # The IQR band is named here rather than in the figure legend: a fourth
+        # legend entry would push the three-entry row onto two lines, and the
+        # band qualifies both hemisphere lines rather than being a series of its
+        # own. It sits on the axis-label line, right-aligned — the region names
+        # occupy the row above and the rightmost of them ("Precentral Gyrus") is
+        # centred at 85 %, so a right-aligned note on that row would overlap it.
+        ax.text(1.0, -0.62, _BAND_CAPTION, transform=ax.transAxes,
+                ha='right', va='center', fontsize=_RPT_BAND_NOTE_PT,
+                color='#5f6b7a')
 
+
+# ``band_alpha`` is per-scalar so a diffusivity panel whose IQR proves too faint
+# at print size can be darkened without touching the FA panel — and, critically,
+# without changing any panel's fixed y-range, which would break cross-subject
+# comparability. Omitted keys fall back to _BAND_ALPHA.
 _PROFILE_MATRIX_CONFIG = [
     {'key': 'fa', 'title': 'Fractional Anisotropy', 'ylabel': 'FA',
      'ylim': (0, 0.8), 'scale': 1},
@@ -351,6 +423,32 @@ _PROFILE_MATRIX_CONFIG = [
     {'key': 'ad', 'title': 'Axial Diffusivity', 'ylabel': 'AD (×10⁻³)',
      'ylim': (0.8, 1.8), 'scale': 1000},
 ]
+
+
+def _draw_iqr_band(ax, x, block, color, scale, alpha):
+    """Fill one hemisphere's per-node IQR behind its profile line.
+
+    Returns the (p25, p75) arrays in display units, or None when the block
+    carries no dispersion — a metrics JSON written by an older version, or a
+    hemisphere with no contributing streamlines. In both cases the panel renders
+    the line alone: a band is never inferred, and its absence is never warned
+    about, because a legacy report is a legitimate input.
+
+    Each band's own p25 and p75 edges are stroked in the same hue so that where
+    the blue and orange bands overlap, a reader can still trace which extent
+    belongs to which hemisphere. Without the edges the composite tint is
+    ambiguous at 90 mm panel width.
+    """
+    if 'profile_p25' not in block or not block.get('profile_n'):
+        return None
+    p25 = np.asarray(block['profile_p25'], dtype=float) * scale
+    p75 = np.asarray(block['profile_p75'], dtype=float) * scale
+    ax.fill_between(x, p25, p75, color=color, alpha=alpha, linewidth=0,
+                    zorder=_Z_IQR_BAND)
+    for edge in (p25, p75):
+        ax.plot(x, edge, color=color, linewidth=_BAND_EDGE_LW,
+                alpha=_BAND_EDGE_ALPHA, zorder=_Z_IQR_BAND)
+    return p25, p75
 
 
 def plot_profile_matrix(
@@ -379,6 +477,21 @@ def plot_profile_matrix(
       are not drawn: they used to collide with the x tick labels and were set in
       large italics that competed with the subplot titles.
     - Missing scalars degrade to an explicit ``N/A`` placeholder panel.
+
+    Dispersion
+    ----------
+    Each hemisphere's per-node interquartile range is filled behind its line, so
+    a reader can tell a consensus from an average over dissent — two profiles
+    whose means separate while their IQRs overlap everywhere do not support the
+    difference the bare lines imply. The centre line stays the **mean**: the
+    twelve regional values and their laterality indices are derived from this
+    exact array, so switching it to the median would change every published
+    regional metric. Where mean and IQR diverge visibly, that divergence is the
+    finding.
+
+    A block without ``profile_p25`` (legacy metrics JSON) or with
+    ``profile_n == 0`` (empty hemisphere) simply gets no band; the other
+    hemisphere still gets one, and the figure is otherwise unchanged.
     """
     from matplotlib.patches import Patch
 
@@ -420,6 +533,7 @@ def plot_profile_matrix(
         handletextpad=0.6, borderpad=0.0,
     )
 
+    any_band = False
     for i, m in enumerate(available):
         ax = axes[i]
         key = m['key']
@@ -429,13 +543,30 @@ def plot_profile_matrix(
         n_points = len(left_profile)
         x = np.linspace(0, 100, n_points)
 
-        ax.plot(x, left_profile, color=_style.LEFT, linewidth=1.4, label='Left CST')
-        ax.plot(x, right_profile, color=_style.RIGHT, linewidth=1.4, label='Right CST')
+        # Bands first, and behind: the lines are the data and must stay legible
+        # wherever the two hemispheres' bands overlap.
+        alpha = m.get('band_alpha', _BAND_ALPHA)
+        band_extents = [
+            _draw_iqr_band(ax, x, left_metrics[key], _style.LEFT, scale, alpha),
+            _draw_iqr_band(ax, x, right_metrics[key], _style.RIGHT, scale, alpha),
+        ]
+        any_band = any_band or any(e is not None for e in band_extents)
+
+        ax.plot(x, left_profile, color=_style.LEFT, linewidth=1.4,
+                label='Left CST', zorder=_Z_PROFILE_LINE)
+        ax.plot(x, right_profile, color=_style.RIGHT, linewidth=1.4,
+                label='Right CST', zorder=_Z_PROFILE_LINE)
 
         ax.set_ylabel(m['ylabel'], fontsize=_RPT_LABEL_PT, labelpad=2)
 
-        # y-limits: existing fixed ranges with the existing auto-fallback.
-        all_data = np.concatenate([left_profile, right_profile])
+        # y-limits: existing fixed ranges with the existing auto-fallback, now
+        # measured over the band extents as well as the lines. A band that
+        # clipped at the axis edge would show a narrower spread than the bundle
+        # has, which is the one thing this figure must not do.
+        all_data = np.concatenate(
+            [left_profile, right_profile]
+            + [edge for extent in band_extents if extent for edge in extent]
+        )
         if np.min(all_data) < m['ylim'][0] or np.max(all_data) > m['ylim'][1]:
             margin = (np.max(all_data) - np.min(all_data)) * 0.1
             ax.set_ylim(max(0, np.min(all_data) - margin), np.max(all_data) + margin)
@@ -458,7 +589,7 @@ def plot_profile_matrix(
         axes[j].text(0.5, 0.5, 'N/A', transform=axes[j].transAxes,
                      ha='center', va='center', fontsize=9, color='#888888')
 
-    _draw_region_strip(fig.add_subplot(gs[2, :]))
+    _draw_region_strip(fig.add_subplot(gs[2, :]), band_note=any_band)
 
     fig_path = output_dir / f"{subject_id}_profile_matrix.png"
     # Save the exact figure canvas. The house style's savefig.bbox="tight" would
@@ -466,55 +597,529 @@ def plot_profile_matrix(
     # height, breaking the page budget; passing the figure's own bbox pins it.
     _style.save_figure(fig, fig_path, bbox_inches=fig.bbox_inches)
     plt.close(fig)
+    _write_profile_matrix_sidecar(
+        fig_path.with_suffix('.json'), subject_id, left_metrics, right_metrics,
+        available, any_band,
+    )
     print(f"✓ Profile matrix saved: {fig_path}")
     return fig_path
 
 
+def _write_profile_matrix_sidecar(path, subject_id, left_metrics, right_metrics,
+                                  available, band_drawn):
+    """Record what the profile matrix's band claims, beside the PNG.
+
+    The QC panels each carry a sidecar; the profile matrix did not, because until
+    now it drew only values already tabulated in the report. The band is a new
+    scientific claim — the spread of a population whose size is nowhere else on
+    the page — so ``profile_n`` is recorded per scalar per hemisphere.
+
+    Deliberately not `qc_figures._write_plot_sidecar`: that helper lives on the
+    QC side of the report/QC boundary and writes a ``Question`` field this figure
+    does not have.
+    """
+    import json
+
+    payload = {
+        'Subject': subject_id,
+        'Panel': 'profile-matrix',
+        'Band': 'interquartile range across contributing streamlines',
+        'BandDrawn': bool(band_drawn),
+        'ContributingStreamlines': {
+            m['key']: {
+                'left': left_metrics[m['key']].get('profile_n'),
+                'right': right_metrics[m['key']].get('profile_n'),
+            }
+            for m in available
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    return path
+
+
+# ---------------------------------------------------------------------------
+# The 1x4 report QC strip
+# ---------------------------------------------------------------------------
+
+def _require_fa_grid(img, fa_shape, fa_affine, name):
+    """Reject a volume that is not on the FA grid, rather than resampling it.
+
+    FA, the world-frame V1 field, the CST density volume and the ROI
+    segmentation are all produced on the FA grid, so the strip slices them
+    against one another with no resampling at all. A volume on a different grid
+    — a legacy original-orientation ROI file, say — would silently draw the
+    right shape in the wrong place, which is worse than not drawing it.
+
+    Grid transfer is a real operation with a right tool
+    (``nibabel.processing.resample_from_to`` with ``order=0`` for a label map),
+    but it belongs to the stage that owns the volume, not to a report figure.
+    """
+    if tuple(img.shape[:3]) != tuple(fa_shape[:3]):
+        raise ValueError(
+            f"{name} is not on the FA grid: shape {tuple(img.shape[:3])} vs "
+            f"FA {tuple(fa_shape[:3])}. The report does not resample; produce "
+            "the volume on the FA grid in the stage that owns it."
+        )
+    if not np.allclose(np.asarray(img.affine, dtype=float),
+                       np.asarray(fa_affine, dtype=float), atol=1e-4):
+        raise ValueError(
+            f"{name} is not on the FA grid: its affine differs from FA's. The "
+            "report does not resample; produce the volume on the FA grid in "
+            "the stage that owns it."
+        )
+
+
+def _slab_projected_volume(mask, affine, view, index, slab_mm):
+    """Project a 3-D mask through the display slab onto the displayed plane.
+
+    A coronal plane chosen for maximum *bundle* occupancy is chosen for the
+    bundle, not for the ROIs, and can miss a cortical ROI entirely. Projecting
+    each mask through the same 10 mm slab panel 4 draws its streamlines in makes
+    the ROI panel slab-consistent with the trajectory panel, and materially
+    raises the chance all three ROIs appear at all.
+
+    The projection is returned as a volume whose plane ``index`` holds the 2-D
+    result, so :func:`csttool.viz.render.render_mask_contour` can stay a dumb
+    primitive that slices a volume — no second contour implementation, and no
+    2-D-vs-3-D branch inside the renderer.
+
+    Returns ``(volume, n_voxels_in_slab)``.
+    """
+    mask = np.asarray(mask).astype(bool)
+    h_axis, v_axis = _geo.VIEW_AXES[view]
+    depth_axis = 3 - h_axis - v_axis
+
+    n_planes = mask.shape[depth_axis]
+    centres = np.zeros((n_planes, 3))
+    centres[:, depth_axis] = np.arange(n_planes)
+    world = centres @ np.asarray(affine)[:3, :3].T + np.asarray(affine)[:3, 3]
+    in_slab = _geo.slab_membership(world, affine, view, index, slab_mm)
+
+    slab = np.zeros_like(mask)
+    slab_index = [slice(None)] * 3
+    slab_index[depth_axis] = np.where(in_slab)[0]
+    slab[tuple(slab_index)] = mask[tuple(slab_index)]
+    projected = slab.any(axis=depth_axis)
+
+    volume = np.zeros(mask.shape, dtype=np.uint8)
+    plane_index = [slice(None)] * 3
+    plane_index[depth_axis] = index
+    volume[tuple(plane_index)] = projected.astype(np.uint8)
+    return volume, int(np.count_nonzero(slab))
+
+
+def _load_optional(path, fa_shape, fa_affine, name):
+    """Load an optional strip input, or return None if it is not there.
+
+    A missing product is a normal state (older derivatives, a skipped stage) and
+    degrades its panel. A *present* product on the wrong grid is a defect and
+    raises — the two must not be conflated.
+    """
+    import nibabel as nib
+
+    if path is None:
+        return None
+    path = Path(path)
+    if not path.exists():
+        return None
+    img = nib.load(str(path))
+    _require_fa_grid(img, fa_shape, fa_affine, name)
+    return img
+
+
+def _strip_caption_segments(slice_index, provenance, slab_mm, n_left, n_right,
+                            roi_available):
+    """The one shared caption/legend line, as coloured (text, colour) tokens.
+
+    Everything that would otherwise be repeated four times lives here: the
+    shared slice and the rule that chose it, the slab thickness, the hemisphere
+    counts, and the ROI colour key. The hemisphere counts double as the strip's
+    only legend, which is why there are no per-panel legends — and why the
+    density panel does not need per-hemisphere outlines to disclose an
+    imbalance: the two counts state it numerically, over an untouched
+    sequential map.
+    """
+    ink = '#333a45'
+    segments = [
+        (f"coronal slice {slice_index} · rule: {provenance.get('rule')} · "
+         f"slab {slab_mm:.1f} mm · ", ink),
+        (f"Left CST n={n_left}", _style.LEFT),
+        ("  ·  ", ink),
+        (f"Right CST n={n_right}", _style.RIGHT),
+    ]
+    if roi_available:
+        segments += [
+            ("  ·  ROI: ", ink),
+            ("brainstem", _style.BRAINSTEM),
+            (" / ", ink),
+            ("motor-L", _style.MOTOR_LEFT),
+            (" / ", ink),
+            ("motor-R", _style.MOTOR_RIGHT),
+        ]
+    return segments
+
+
+def _draw_caption_row(fig, ax, segments, fontsize):
+    """Lay out one centred line of differently-coloured tokens.
+
+    Matplotlib has no rich text, and the colour *is* the key here — it is what
+    ties the caption's ROI words to the contours in panel 3 and its hemisphere
+    counts to the trajectories in panel 4. So each token is measured and placed
+    in sequence. Measurement is a pure function of the text, the font and the
+    figure DPI, so the result is reproducible.
+    """
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    widths = []
+    for text, _ in segments:
+        probe = ax.text(0, 0, text, fontsize=fontsize)
+        widths.append(probe.get_window_extent(renderer).width)
+        probe.remove()
+
+    box = ax.get_window_extent(renderer)
+    x = max(0.0, (box.width - sum(widths)) / 2.0)
+    for (text, color), width in zip(segments, widths):
+        ax.text(x / box.width, 0.5, text, transform=ax.transAxes, color=color,
+                fontsize=fontsize, ha='left', va='center')
+        x += width
+
+
+def plot_report_qc_strip(
+    fa_path,
+    v1_path,
+    density_path,
+    roi_dseg_path,
+    cst_left_path,
+    cst_right_path,
+    output_dir,
+    subject_id,
+    *,
+    slab_mm=_geo.DEFAULT_SLAB_MM,
+    max_streamlines=500,
+    seed=None,
+):
+    """1x4 report QC strip: DEC-FA, CST density, extraction ROIs, CST over FA.
+
+    Replaces the 1x3 triptych, which showed the same information (streamlines
+    over FA) from three angles. These four panels answer four different
+    questions on **one** shared coronal slice:
+
+    1. does the local diffusion field support the expected CST orientation?
+    2. is the reconstructed bundle spatially coherent?
+    3. were the intended anatomical constraints applied?
+    4. is the final tract anatomically plausible?
+
+    One figure, one owner
+    ---------------------
+    The strip is a single PNG placed by CSS at exactly
+    :data:`QC_STRIP_SIZE_MM`, so this function creates the Figure and the four
+    Axes and draws into them with the ``csttool.viz.render`` primitives. It does
+    **not** call the standalone ``qc_figures.plot_*_panel`` functions: each of
+    those owns a Figure and saves it, which cannot be composed onto one canvas.
+    The cost is four render calls per panel; the alternative — refactoring five
+    reviewed standalone figures to accept an axes — is a larger change that
+    would touch tested figures for no benefit here.
+
+    One slice
+    ---------
+    The slice is chosen **once**, by :func:`csttool.viz.geometry.select_qc_slice`,
+    and every panel gets it. The standalone panels each select their own, and
+    two of them are called with ``density=None`` and so fall through to the
+    level-4 anatomical fallback while a third gets level 1 — meaning the
+    "shared slice" has never actually held outside a prototype driver. It holds
+    here.
+
+    ``density_left`` / ``density_right`` are deliberately not plumbed. Level 2
+    (``surviving_hemisphere``) exists for the case where exactly one hemisphere
+    is non-empty — but then the *bilateral* density volume is, by construction,
+    identical to the surviving hemisphere's, so level 1 already selects the
+    correct plane. Passing per-hemisphere volumes would add two persisted
+    products to reach an unreachable branch. Please do not "fix" this.
+
+    Degradation
+    -----------
+    Every missing input degrades its own panel to a labelled grayscale-FA slot.
+    The strip always renders four panels: it never reflows to three, because a
+    reader must be able to see *which* question went unanswered.
+
+    Parameters
+    ----------
+    fa_path : path
+        Required. Supplies the grid, the backgrounds and the level-4 slice
+        fallback.
+    v1_path, density_path, roi_dseg_path : path or None
+        Optional persisted products, each on the FA grid. A volume that is
+        present but on a different grid raises ``ValueError`` rather than being
+        resampled silently.
+    cst_left_path, cst_right_path : path or None
+        The two persisted tractograms.
+    slab_mm : float
+        Physical slab thickness for panels 3 and 4.
+    max_streamlines : int
+        Per-hemisphere subsample cap for panel 4.
+    seed : int, optional
+        Seed for that subsample. Defaults to
+        :data:`csttool.reproducibility.context.DEFAULT_SEED` — never
+        ``viz.utils.viz_rng``, whose ``VIZ_SEED`` derives from Python's builtin
+        ``hash`` of a string and is randomised per process unless
+        ``PYTHONHASHSEED`` is set, which made the legacy panel irreproducible
+        across runs.
+
+    Returns
+    -------
+    pathlib.Path
+        The saved PNG. A JSON sidecar beside it records the slice, the rule that
+        chose it, the slab, the counts, the density ``vmax``, the per-ROI slab
+        voxel counts and which panels degraded.
+    """
+    import json
+
+    import nibabel as nib
+    from dipy.io.streamline import load_tractogram
+
+    from csttool.reproducibility.context import DEFAULT_SEED
+    from csttool.viz import render as _render
+
+    if seed is None:
+        seed = DEFAULT_SEED
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    fa_img = nib.load(str(fa_path))
+    affine = fa_img.affine
+    fa = fa_img.get_fdata().astype(np.float32)
+
+    v1_img = _load_optional(v1_path, fa.shape, affine, "V1 field")
+    density_img = _load_optional(density_path, fa.shape, affine, "CST density")
+    dseg_img = _load_optional(roi_dseg_path, fa.shape, affine, "ROI segmentation")
+
+    density = density_img.get_fdata().astype(np.float32) if density_img is not None else None
+    dseg = np.asarray(dseg_img.dataobj) if dseg_img is not None else None
+
+    def _load_streamlines(path):
+        if path is None or not Path(path).exists():
+            return []
+        try:
+            return list(load_tractogram(str(path), 'same').streamlines)
+        except Exception:
+            return []
+
+    left = _load_streamlines(cst_left_path)
+    right = _load_streamlines(cst_right_path)
+
+    # One slice for all four panels. The ROI dseg feeds the level-3 fallback, so
+    # a run whose extraction produced no streamlines at all is still shown at a
+    # plane its own targets occupy.
+    roi_masks = None
+    if dseg is not None:
+        roi_masks = [dseg == value for value in (1, 2, 3)]
+    slice_index, provenance = _geo.select_qc_slice(
+        density=density, roi_masks=roi_masks,
+        brain_mask=(fa > 0).astype(np.uint8), affine=affine, view="coronal",
+    )
+
+    # ---- canvas ----------------------------------------------------------
+    width_mm, height_mm = QC_STRIP_SIZE_MM
+    fig = plt.figure(figsize=(width_mm / 25.4, height_mm / 25.4))
+
+    furniture_mm = (_STRIP_TITLE_MM + _STRIP_CBAR_MM + _STRIP_CBAR_LABEL_MM
+                    + _STRIP_CAPTION_MM)
+    image_mm = height_mm - furniture_mm
+    image_y0 = (_STRIP_CAPTION_MM + _STRIP_CBAR_MM + _STRIP_CBAR_LABEL_MM) / height_mm
+    image_h = image_mm / height_mm
+    panel_mm = (width_mm - 3 * _STRIP_GAP_MM) / 4.0
+
+    axes = []
+    for column in range(4):
+        x0 = column * (panel_mm + _STRIP_GAP_MM) / width_mm
+        axes.append(fig.add_axes([x0, image_y0, panel_mm / width_mm, image_h]))
+
+    degraded = []
+
+    def _background(ax):
+        return _render.render_scalar_slice(
+            ax, fa, affine, "coronal", slice_index,
+            cmap=_style.ANATOMY_BG, norm=plt.Normalize(0, 1), markers=False,
+        )
+
+    def _unavailable(ax, title, note):
+        _background(ax)
+        ax.set_title(title, fontsize=_STRIP_TITLE_PT, fontweight='bold', pad=1.5)
+        ax.text(0.5, 0.06, note, transform=ax.transAxes, ha='center', va='bottom',
+                fontsize=_STRIP_NOTE_PT, style='italic', color='#dddddd')
+
+    # ---- panel 1: DEC-FA -------------------------------------------------
+    if v1_img is not None:
+        v1 = v1_img.get_fdata(dtype=np.float32)
+        if v1.ndim == 5:  # the stored product is (X, Y, Z, 1, 3)
+            v1 = v1.squeeze(axis=3)
+        # |V1_world| * clip(FA, 0, 1) — dipy.reconst.dti.color_fa's formula
+        # applied to the already-rotated field. Calling color_fa directly would
+        # re-apply its voxel-frame assumption. No gamma and no percentile
+        # stretch: brightness *is* FA, so a dark panel is a real finding.
+        dec = np.abs(v1) * np.clip(fa, 0, 1)[..., None]
+        dec = np.clip(dec, 0.0, 1.0).astype(np.float32)
+        _render.render_rgb_slice(axes[0], dec, affine, "coronal", slice_index,
+                                 markers=False)
+        # The only per-panel key in the strip, and it is not a legend: it states
+        # which world axis each colour channel is, which is the whole content of
+        # a DEC image and cannot be moved to a shared caption.
+        # 0.24 in (6 mm), not the 0.16 in first specified: the print review
+        # showed three 3-character labels cannot be set legibly inside a 4 mm
+        # box, and an unreadable key is dead ink on a one-page report.
+        _render.add_direction_legend(axes[0], loc='lower right',
+                                     size=_STRIP_GLYPH_IN)
+        axes[0].set_title("DEC-FA", fontsize=_STRIP_TITLE_PT, fontweight='bold',
+                          pad=1.5)
+    else:
+        _unavailable(axes[0], "DEC-FA — V1 unavailable", "world-frame V1 not produced")
+        degraded.append("dec_fa")
+
+    # ---- panel 2: CST density -------------------------------------------
+    vmax = None
+    if density is not None:
+        nonzero = density[density > 0]
+        # Subject-adaptive: measured maxima are ~0.10 and ~0.29 on the two
+        # validation subjects, so a fixed [0, 1] scale would render both panels
+        # nearly uniformly dark. The value is printed in the colourbar label, so
+        # the scale is never anonymous. No log or power stretch: that would be a
+        # second normalization on top of the persisted definition and would make
+        # two subjects incomparable.
+        vmax = float(np.percentile(nonzero, 99)) if nonzero.size else 1.0
+        _background(axes[1])
+        density_image = _render.render_density_overlay(
+            axes[1], density, affine, "coronal", slice_index,
+            cmap=_style.DENSITY_CMAP, vmax=vmax,
+        )
+        axes[1].set_title("CST density", fontsize=_STRIP_TITLE_PT,
+                          fontweight='bold', pad=1.5)
+        cbar_ax = fig.add_axes([
+            axes[1].get_position().x0 + 0.015,
+            (_STRIP_CAPTION_MM + _STRIP_CBAR_LABEL_MM) / height_mm,
+            panel_mm / width_mm - 0.03,
+            _STRIP_CBAR_MM / height_mm,
+        ])
+        cbar = fig.colorbar(density_image, cax=cbar_ax, orientation='horizontal',
+                            ticks=[])
+        cbar.set_label(f"fraction of bundle streamlines (vmax={vmax:.4f})",
+                       fontsize=_STRIP_CAPTION_PT, labelpad=1.5)
+        cbar.outline.set_linewidth(0.4)
+    else:
+        _unavailable(axes[1], "CST density — unavailable", "density map not produced")
+        degraded.append("density")
+
+    # ---- panel 3: extraction ROIs ---------------------------------------
+    roi_slab_voxels = {}
+    if dseg is not None:
+        _background(axes[2])
+        roi_colors = (
+            (1, "brainstem", _style.BRAINSTEM),
+            (2, "motor_left", _style.MOTOR_LEFT),
+            (3, "motor_right", _style.MOTOR_RIGHT),
+        )
+        for value, name, color in roi_colors:
+            projected, n_voxels = _slab_projected_volume(
+                dseg == value, affine, "coronal", slice_index, slab_mm
+            )
+            roi_slab_voxels[name] = n_voxels
+            if n_voxels:
+                # Contours, not fills: three opaque blobs on a 48 mm panel would
+                # hide the anatomy they exist to be checked against.
+                _render.render_mask_contour(
+                    axes[2], projected, affine, "coronal", slice_index,
+                    color=color, linewidth=_STRIP_ROI_LINEWIDTH,
+                )
+        axes[2].set_title("Extraction ROIs", fontsize=_STRIP_TITLE_PT,
+                          fontweight='bold', pad=1.5)
+    else:
+        _unavailable(axes[2], "Extraction ROIs — unavailable",
+                     "ROI segmentation not produced")
+        degraded.append("roi_dseg")
+
+    # ---- panel 4: final CST over FA -------------------------------------
+    _background(axes[3])
+    rng = np.random.default_rng(seed)
+    for streamlines, color in ((left, _style.LEFT), (right, _style.RIGHT)):
+        _render.render_streamline_overlay(
+            axes[3], streamlines, affine, "coronal", slice_index, color=color,
+            thickness_mm=slab_mm, max_streamlines=max_streamlines, rng=rng,
+        )
+    axes[3].set_title("CST over FA", fontsize=_STRIP_TITLE_PT, fontweight='bold',
+                      pad=1.5)
+    if not left and not right:
+        degraded.append("streamlines")
+
+    # ---- shared geometry -------------------------------------------------
+    # Every panel is the same view of the same grid, so one canvas gives all
+    # four identical world limits: 1 mm of brain is 1 mm of paper everywhere,
+    # and the four are directly comparable by eye.
+    canvas_h, canvas_w = _geo.slice_2d(fa, "coronal", slice_index).shape
+    for ax in axes:
+        _geo.pad_axes_to_canvas(ax, canvas_w, canvas_h)
+        # Markers, not legends: a reader must not have to look at a neighbouring
+        # panel to orient the one they are reading.
+        _geo.add_lr_markers(ax, fontsize=_STRIP_MARKER_PT)
+
+    # ---- shared caption --------------------------------------------------
+    caption_ax = fig.add_axes([0.0, 0.0, 1.0, _STRIP_CAPTION_MM / height_mm])
+    _draw_caption_row(
+        fig, caption_ax,
+        _strip_caption_segments(slice_index, provenance, slab_mm,
+                                len(left), len(right), dseg is not None),
+        _STRIP_CAPTION_PT,
+    )
+
+    fig_path = output_dir / f"{subject_id}_report_qc_strip.png"
+    # Exact canvas, not a tight bbox — see plot_profile_matrix.
+    _style.save_figure(fig, fig_path, bbox_inches=fig.bbox_inches)
+    plt.close(fig)
+
+    sidecar = {
+        "Subject": str(subject_id),
+        "Panel": "report-qc-strip",
+        "Panels": ["DEC-FA", "CST density", "Extraction ROIs", "CST over FA"],
+        "SliceIndex": int(slice_index),
+        "SliceSelectionRule": provenance.get("rule"),
+        "SliceSelectionProvenance": provenance,
+        "SlabThicknessMm": float(slab_mm),
+        "StreamlineCounts": {"left": len(left), "right": len(right)},
+        "StreamlinesDrawn": {"left": min(len(left), max_streamlines),
+                             "right": min(len(right), max_streamlines)},
+        "DensityVmax": vmax,
+        "RoiSlabVoxelCounts": roi_slab_voxels,
+        "DegradedPanels": degraded,
+        "Seed": int(seed),
+    }
+    fig_path.with_suffix('.json').write_text(
+        json.dumps(sidecar, indent=2) + "\n", encoding='utf-8'
+    )
+    print(f"✓ Report QC strip saved: {fig_path}")
+    return fig_path
+
+
 def _qc_slice_index(background_image, slice_type):
-    """Center slice index for a QC view (axial slightly above center for IC)."""
+    """Center slice index for a QC view (axial slightly above center for IC).
+
+    .. deprecated::
+        Magic-constant slice selection retained **only** for the legacy
+        :func:`plot_tractogram_qc_triptych` / :func:`plot_tractogram_qc_preview`
+        path, which must keep producing byte-identical figures until the
+        replacement panels pass scientific review (visualization-refactoring-plan
+        §2.9). New figures use :func:`viz.geometry.select_qc_slice`, which makes a
+        data-driven choice with disclosed provenance. Do **not** call this from
+        new code.
+    """
     shape = background_image.shape
     if slice_type == 'axial':
         return shape[2] // 2 + 5
     if slice_type == 'sagittal':
         return shape[0] // 2
     return shape[1] // 2  # coronal
-
-
-def _qc_slice_2d(background_image, slice_type, slice_idx):
-    """The 2D display slice (already transposed for ``origin='lower'``)."""
-    if slice_type == 'axial':
-        return background_image[:, :, slice_idx].T
-    if slice_type == 'sagittal':
-        return background_image[slice_idx, :, :].T
-    return background_image[:, slice_idx, :].T  # coronal
-
-
-def _apply_common_canvas(ax, canvas_w, canvas_h):
-    """Centre the axis's current view inside a common ``canvas_w x canvas_h`` box.
-
-    Equivalent to padding the 2D slice to a common canvas before ``imshow``, but
-    without touching the data or the voxel coordinates the streamline overlay is
-    drawn in. Combined with ``aspect='equal'`` this gives every QC panel the same
-    physical size and the same scale, letterboxed in black, with no anatomical
-    distortion. Any x-axis inversion applied for the radiological convention is
-    preserved.
-    """
-    x_lo, x_hi = ax.get_xlim()
-    y_lo, y_hi = ax.get_ylim()
-    cx, cy = (x_lo + x_hi) / 2.0, (y_lo + y_hi) / 2.0
-    x_sign = 1.0 if x_hi >= x_lo else -1.0
-    y_sign = 1.0 if y_hi >= y_lo else -1.0
-    ax.set_xlim(cx - x_sign * canvas_w / 2.0, cx + x_sign * canvas_w / 2.0)
-    ax.set_ylim(cy - y_sign * canvas_h / 2.0, cy + y_sign * canvas_h / 2.0)
-    # The axes background patch is not painted while the axis is off, so the
-    # letterbox is drawn explicitly: an axes-spanning black rectangle behind the
-    # image. Without it the padding reads as white and the three panels look
-    # like different sizes even though their boxes are identical.
-    from matplotlib.patches import Rectangle
-    ax.add_patch(Rectangle(
-        (0, 0), 1, 1, transform=ax.transAxes, facecolor='black',
-        edgecolor='none', zorder=-10, clip_on=False,
-    ))
 
 
 def _render_qc_slice(
@@ -543,7 +1148,7 @@ def _render_qc_slice(
     """
     if slice_idx is None:
         slice_idx = _qc_slice_index(background_image, slice_type)
-    bg_slice = _qc_slice_2d(background_image, slice_type, slice_idx)
+    bg_slice = _geo.slice_2d(background_image, slice_type, slice_idx)
 
     im = ax.imshow(
         bg_slice, cmap='gray', origin='lower', aspect='equal', norm=norm,
@@ -616,7 +1221,7 @@ def plot_tractogram_qc_preview(
     # whitespace (the slice is already drawn at correct pixel aspect via
     # aspect='equal').
     slice_idx = _qc_slice_index(background_image, slice_type)
-    bg_slice = _qc_slice_2d(background_image, slice_type, slice_idx)
+    bg_slice = _geo.slice_2d(background_image, slice_type, slice_idx)
     data_ratio = bg_slice.shape[0] / bg_slice.shape[1]
     fig.set_size_inches(4, 4 * data_ratio)
 
@@ -650,7 +1255,15 @@ def plot_tractogram_qc_triptych(
     slice_indices=None,
 ):
     """
-    Composite 1x3 tractogram QC figure for the one-page PDF report.
+    Composite 1x3 tractogram QC figure.
+
+    .. deprecated::
+        Superseded in the PDF report by :func:`plot_report_qc_strip`, which
+        answers four different questions on one shared slice instead of the same
+        question (streamlines over FA) from three angles. This function is
+        **not** removed: it stays exported and tested, and `generate_complete_report`
+        still falls back to it for a caller that supplies no product paths. New
+        code should use the strip.
 
     Geometry
     --------
@@ -718,7 +1331,7 @@ def plot_tractogram_qc_triptych(
     canvas_h, canvas_w = 0, 0
     for view in views:
         idx = (slice_indices or {}).get(view, _qc_slice_index(background_image, view))
-        h, w = _qc_slice_2d(background_image, view, idx).shape
+        h, w = _geo.slice_2d(background_image, view, idx).shape
         canvas_h, canvas_w = max(canvas_h, h), max(canvas_w, w)
 
     last_im = None
@@ -728,7 +1341,7 @@ def plot_tractogram_qc_triptych(
             view, max_streamlines=max_streamlines, norm=norm, rng=rng,
             slice_idx=(slice_indices or {}).get(view),
         )
-        _apply_common_canvas(ax, canvas_w, canvas_h)
+        _geo.pad_axes_to_canvas(ax, canvas_w, canvas_h)
         ax.set_title(view.capitalize(), fontsize=_RPT_TICK_PT, pad=1.5)
 
     if show_colorbar and last_im is not None:

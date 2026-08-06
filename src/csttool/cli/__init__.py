@@ -312,6 +312,12 @@ def main() -> None:
         help="Enable QC plots for segmentation and tractography.",
     )
     p_track.add_argument(
+        "--save-visualizations",
+        action="store_true",
+        help="Save standalone QC visualizations (tensor maps, streamline "
+             "projections, DEC-FA panel) under <out>/tracking/visualizations/.",
+    )
+    p_track.add_argument(
         "--verbose",
         action="store_true",
         help="Print detailed processing information."
@@ -473,6 +479,28 @@ def main() -> None:
         help="AD (axial diffusivity) map for microstructural analysis"
     )
     p_metrics.add_argument(
+        "--v1",
+        type=Path,
+        help="World-frame principal eigenvector map (*_v1.nii.gz) for the "
+             "streamline-vs-tensor angle QC panel. If omitted it is looked for "
+             "beside the FA map."
+    )
+    p_metrics.add_argument(
+        "--density",
+        type=Path,
+        help="CST streamline density map (*_cst_density.nii.gz) for the "
+             "tissue-plausibility QC panel. If omitted it is looked for in the "
+             "extraction stage's scalar_maps/ beside the tractograms."
+    )
+    p_metrics.add_argument(
+        "--roi-dseg",
+        type=Path,
+        help="FA-grid extraction ROI label map (*_desc-CSTroi_dseg.nii.gz, "
+             "1=brainstem 2=motor-left 3=motor-right) for the report QC "
+             "strip's ROI panel. If omitted it is looked for in BIDS dwi/ and "
+             "in the extraction stage's nifti/ beside the tractograms."
+    )
+    p_metrics.add_argument(
         "--subject-id",
         type=str,
         default="subject",
@@ -488,6 +516,15 @@ def main() -> None:
         "--generate-pdf",
         action="store_true",
         help="Generate PDF clinical report"
+    )
+    p_metrics.add_argument(
+        "--save-visualizations",
+        action="store_true",
+        help="Save standalone QC visualizations (tract profiles, tractogram QC "
+             "previews, CST-over-FA panel, and the trust-chain panels: tissue "
+             "plausibility, V1 angle, profile dispersion, sampling saturation, "
+             "profile attrition, node homology) under "
+             "<out>/metrics/visualizations/.",
     )
     p_metrics.add_argument(
         "--verbose",

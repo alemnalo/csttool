@@ -20,94 +20,10 @@ from matplotlib.colors import to_rgba
 # =============================================================================
 # SHARED HELPERS
 # =============================================================================
-
-def _pad_slice_to_square(image_slice, extent=None, pad_value=0.0):
-    """
-    Pad a 2D slice to a square shape.
-
-    Returns the padded slice and an updated display extent that preserves
-    the original pixel spacing.
-    """
-    height, width = image_slice.shape
-    target_size = max(height, width)
-    pad_y = target_size - height
-    pad_x = target_size - width
-    pad_y_before = pad_y // 2
-    pad_y_after = pad_y - pad_y_before
-    pad_x_before = pad_x // 2
-    pad_x_after = pad_x - pad_x_before
-
-    padded = np.pad(
-        image_slice,
-        ((pad_y_before, pad_y_after), (pad_x_before, pad_x_after)),
-        mode='constant',
-        constant_values=pad_value
-    )
-
-    if extent is None:
-        extent = (0, width, 0, height)
-
-    x_min, x_max, y_min, y_max = extent
-    dx = (x_max - x_min) / width if width else 1.0
-    dy = (y_max - y_min) / height if height else 1.0
-    padded_extent = (
-        x_min - pad_x_before * dx,
-        x_max + pad_x_after * dx,
-        y_min - pad_y_before * dy,
-        y_max + pad_y_after * dy
-    )
-
-    return padded, padded_extent
-
-
-def _volume_world_bounds(volume_shape, affine):
-    corners = np.array([
-        [0, 0, 0],
-        [volume_shape[0], 0, 0],
-        [0, volume_shape[1], 0],
-        [0, 0, volume_shape[2]],
-        [volume_shape[0], volume_shape[1], 0],
-        [volume_shape[0], 0, volume_shape[2]],
-        [0, volume_shape[1], volume_shape[2]],
-        [volume_shape[0], volume_shape[1], volume_shape[2]],
-    ])
-    corners_h = np.hstack([corners, np.ones((corners.shape[0], 1))])
-    world = corners_h @ affine.T
-    bounds = []
-    for dim in range(3):
-        bounds.append((world[:, dim].min(), world[:, dim].max()))
-    return bounds
-
-
-def _streamline_plane_limits(streamlines, d1, d2, fallback_bounds):
-    min_d1 = None
-    max_d1 = None
-    min_d2 = None
-    max_d2 = None
-    for sl in streamlines:
-        if sl.size == 0:
-            continue
-        sl_d1 = sl[:, d1]
-        sl_d2 = sl[:, d2]
-        sl_min_d1 = sl_d1.min()
-        sl_max_d1 = sl_d1.max()
-        sl_min_d2 = sl_d2.min()
-        sl_max_d2 = sl_d2.max()
-        min_d1 = sl_min_d1 if min_d1 is None else min(min_d1, sl_min_d1)
-        max_d1 = sl_max_d1 if max_d1 is None else max(max_d1, sl_max_d1)
-        min_d2 = sl_min_d2 if min_d2 is None else min(min_d2, sl_min_d2)
-        max_d2 = sl_max_d2 if max_d2 is None else max(max_d2, sl_max_d2)
-
-    if min_d1 is None or min_d2 is None:
-        (min_d1, max_d1), (min_d2, max_d2) = fallback_bounds
-
-    range_d1 = max_d1 - min_d1
-    range_d2 = max_d2 - min_d2
-    pad_d1 = range_d1 * 0.05 if range_d1 else 1.0
-    pad_d2 = range_d2 * 0.05 if range_d2 else 1.0
-
-    return (min_d1 - pad_d1, max_d1 + pad_d1), (min_d2 - pad_d2, max_d2 + pad_d2)
-
+# Note: ``pad_slice_to_square``, ``volume_world_bounds`` and
+# ``streamline_plane_limits`` live once in ``csttool.viz.geometry`` and are
+# called here as ``_geo.*``. The verbatim private copies that used to live in
+# this module were removed to keep one definition of each geometry helper.
 
 # =============================================================================
 # REGISTRATION QC VISUALIZATION
@@ -150,12 +66,12 @@ def plot_registration_comparison(
     ]
     
     for row, (view_name, fa_slice, mni_slice) in enumerate(views):
-        padded_fa, padded_extent = _pad_slice_to_square(
+        padded_fa, padded_extent = _geo.pad_slice_to_square(
             fa_slice.T,
             extent=(0, fa_slice.T.shape[1], 0, fa_slice.T.shape[0]),
             pad_value=0.0
         )
-        padded_mni, _ = _pad_slice_to_square(
+        padded_mni, _ = _geo.pad_slice_to_square(
             mni_slice.T,
             extent=(0, mni_slice.T.shape[1], 0, mni_slice.T.shape[0]),
             pad_value=0.0
@@ -283,22 +199,22 @@ def plot_roi_masks(
     ]
     
     for col, (view_name, fa_slice, ml_slice, mr_slice, bs_slice) in enumerate(views):
-        padded_fa, padded_extent = _pad_slice_to_square(
+        padded_fa, padded_extent = _geo.pad_slice_to_square(
             fa_slice.T,
             extent=(0, fa_slice.T.shape[1], 0, fa_slice.T.shape[0]),
             pad_value=0.0
         )
-        padded_ml, _ = _pad_slice_to_square(
+        padded_ml, _ = _geo.pad_slice_to_square(
             ml_slice.T,
             extent=(0, ml_slice.T.shape[1], 0, ml_slice.T.shape[0]),
             pad_value=0.0
         )
-        padded_mr, _ = _pad_slice_to_square(
+        padded_mr, _ = _geo.pad_slice_to_square(
             mr_slice.T,
             extent=(0, mr_slice.T.shape[1], 0, mr_slice.T.shape[0]),
             pad_value=0.0
         )
-        padded_bs, _ = _pad_slice_to_square(
+        padded_bs, _ = _geo.pad_slice_to_square(
             bs_slice.T,
             extent=(0, bs_slice.T.shape[1], 0, bs_slice.T.shape[0]),
             pad_value=0.0
@@ -428,12 +344,12 @@ def plot_jacobian_map(
     ]
 
     for col, (name, fa_slice, jac_slice) in enumerate(views):
-        padded_fa, padded_extent = _pad_slice_to_square(
+        padded_fa, padded_extent = _geo.pad_slice_to_square(
             fa_slice,
             extent=(0, fa_slice.shape[1], 0, fa_slice.shape[0]),
             pad_value=0.0
         )
-        padded_jac, _ = _pad_slice_to_square(
+        padded_jac, _ = _geo.pad_slice_to_square(
             jac_slice,
             extent=(0, jac_slice.shape[1], 0, jac_slice.shape[0]),
             pad_value=1.0  # Neutral Jacobian value
@@ -504,13 +420,11 @@ def plot_cst_extraction(
     cst_right = cst_result['cst_right']
     stats = cst_result['stats']
     
-    # Subsample if needed
-    def subsample(streamlines, max_n):
-        # Deterministic (seeded) subsample; no global RNG mutation.
-        return deterministic_subsample(streamlines, max_n)
-    
-    left_vis = subsample(cst_left, max_streamlines)
-    right_vis = subsample(cst_right, max_streamlines)
+    # Deterministic (seeded) subsample; no global RNG mutation.
+    # Calls viz.utils.deterministic_subsample directly (the local closure that
+    # only forwarded to it was removed to keep one subsampling path).
+    left_vis = deterministic_subsample(cst_left, max_streamlines)
+    right_vis = deterministic_subsample(cst_right, max_streamlines)
     
     # Get slice indices
     mid_ax = fa.shape[2] // 2
@@ -533,7 +447,7 @@ def plot_cst_extraction(
     
     for col, (name, fa_slice) in enumerate(views_fa):
         ax = axes[0, col]
-        padded_slice, padded_extent = _pad_slice_to_square(
+        padded_slice, padded_extent = _geo.pad_slice_to_square(
             fa_slice,
             extent=(0, fa_slice.shape[1], 0, fa_slice.shape[0]),
             pad_value=0.0
@@ -558,11 +472,11 @@ def plot_cst_extraction(
         ('Axial (X-Y)', 0, 1, 'X (mm)', 'Y (mm)'),      # X vs Y
     ]
     
-    volume_bounds = _volume_world_bounds(fa.shape, affine)
+    volume_bounds = _geo.volume_world_bounds(fa.shape, affine)
     plane_limits = {}
     for title, d1, d2, _, _ in views_sl:
         fallback = (volume_bounds[d1], volume_bounds[d2])
-        plane_limits[title] = _streamline_plane_limits(
+        plane_limits[title] = _geo.streamline_plane_limits(
             left_vis + right_vis,
             d1,
             d2,
@@ -678,13 +592,9 @@ def plot_hemisphere_separation(
     cst_right = cst_result['cst_right']
     stats = cst_result['stats']
 
-    # Subsample for visualization
-    def subsample(streamlines, max_n):
-        # Deterministic (seeded) subsample; no global RNG mutation.
-        return deterministic_subsample(streamlines, max_n)
-
-    left_vis = subsample(cst_left, max_streamlines)
-    right_vis = subsample(cst_right, max_streamlines)
+    # Deterministic (seeded) subsample via viz.utils.deterministic_subsample.
+    left_vis = deterministic_subsample(cst_left, max_streamlines)
+    right_vis = deterministic_subsample(cst_right, max_streamlines)
 
     # Compute anatomical midline in world coordinates
     # X=0 in RAS space is the midsagittal plane
@@ -715,11 +625,11 @@ def plot_hemisphere_separation(
     ]
 
     # Compute axis limits from all streamlines
-    volume_bounds = _volume_world_bounds(fa.shape, affine)
+    volume_bounds = _geo.volume_world_bounds(fa.shape, affine)
 
     for row, (view_name, d1, d2, xlabel, ylabel) in enumerate(views):
         fallback = (volume_bounds[d1], volume_bounds[d2])
-        (xlim, ylim) = _streamline_plane_limits(
+        (xlim, ylim) = _geo.streamline_plane_limits(
             left_vis + right_vis, d1, d2, fallback
         )
 
@@ -860,13 +770,9 @@ def create_extraction_summary(
     left_lengths = np.array([length(s) for s in cst_left]) if len(cst_left) > 0 else np.array([])
     right_lengths = np.array([length(s) for s in cst_right]) if len(cst_right) > 0 else np.array([])
     
-    # Subsample for visualization
-    def subsample(streamlines, max_n):
-        # Deterministic (seeded) subsample; no global RNG mutation.
-        return deterministic_subsample(streamlines, max_n)
-    
-    left_vis = subsample(cst_left, max_streamlines)
-    right_vis = subsample(cst_right, max_streamlines)
+    # Deterministic (seeded) subsample via viz.utils.deterministic_subsample.
+    left_vis = deterministic_subsample(cst_left, max_streamlines)
+    right_vis = deterministic_subsample(cst_right, max_streamlines)
     
     # Get slice indices
     mid_ax = fa.shape[2] // 2
@@ -904,7 +810,7 @@ def create_extraction_summary(
         ax = fig.add_subplot(gs[0, col])
         
         # FA background
-        padded_fa, padded_extent = _pad_slice_to_square(
+        padded_fa, padded_extent = _geo.pad_slice_to_square(
             fa_slice.T,
             extent=(0, fa_slice.T.shape[1], 0, fa_slice.T.shape[0]),
             pad_value=0.0
@@ -913,9 +819,9 @@ def create_extraction_summary(
                  vmin=0, vmax=0.8, extent=padded_extent)
         
         # Create combined overlay
-        padded_ml, _ = _pad_slice_to_square(ml_slice.T)
-        padded_mr, _ = _pad_slice_to_square(mr_slice.T)
-        padded_bs, _ = _pad_slice_to_square(bs_slice.T)
+        padded_ml, _ = _geo.pad_slice_to_square(ml_slice.T)
+        padded_mr, _ = _geo.pad_slice_to_square(mr_slice.T)
+        padded_bs, _ = _geo.pad_slice_to_square(bs_slice.T)
         
         # Create a single RGBA overlay for all ROIs
         overlay = np.zeros((*padded_fa.shape, 4))
@@ -950,11 +856,11 @@ def create_extraction_summary(
         ('Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)'),
     ]
     
-    volume_bounds = _volume_world_bounds(fa.shape, affine)
+    volume_bounds = _geo.volume_world_bounds(fa.shape, affine)
     plane_limits = {}
     for title, d1, d2, _, _ in streamline_views:
         fallback = (volume_bounds[d1], volume_bounds[d2])
-        plane_limits[title] = _streamline_plane_limits(
+        plane_limits[title] = _geo.streamline_plane_limits(
             left_vis + right_vis,
             d1,
             d2,

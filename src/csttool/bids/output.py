@@ -297,6 +297,7 @@ def write_derivative_sidecar(
     description: str,
     command_line: Optional[str] = None,
     software_versions: Optional[Dict[str, str]] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Write a minimal BIDS-compliant JSON sidecar for a derived NIfTI.
@@ -314,6 +315,14 @@ def write_derivative_sidecar(
         Full CLI command used.
     software_versions : dict, optional
         {'dipy': '1.9.0', ...}
+    extra : dict, optional
+        Additional scientific keys merged in after the standard keys. Used by
+        the visualization refactor to record the vector frame of the stored V1
+        field (``VectorFrame``, ``AffineDeterminant``, ...) and the density
+        denominator, so those products are self-describing. ``extra`` cannot
+        overwrite the reserved standard keys ``Sources``, ``SpatialReference``,
+        ``Description`` or ``GeneratedAt``; a collision raises ``ValueError`` so
+        a silently-drifted sidecar can never be produced.
 
     Returns
     -------
@@ -334,6 +343,15 @@ def write_derivative_sidecar(
         "Description": description,
         "GeneratedAt": datetime.now().isoformat(),
     }
+
+    if extra:
+        reserved = {"Sources", "SpatialReference", "Description", "GeneratedAt"}
+        collisions = reserved & set(extra)
+        if collisions:
+            raise ValueError(
+                f"extra sidecar keys collide with reserved standard keys: {sorted(collisions)}"
+            )
+        content.update(extra)
     if command_line:
         content["CommandLine"] = command_line
     if software_versions:

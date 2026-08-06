@@ -264,3 +264,315 @@ def streamline_plane_limits(streamlines, d1, d2, fallback_bounds):
     pad_d1 = range_d1 * 0.05 if range_d1 else 1.0
     pad_d2 = range_d2 * 0.05 if range_d2 else 1.0
     return (min_d1 - pad_d1, max_d1 + pad_d1), (min_d2 - pad_d2, max_d2 + pad_d2)
+
+
+# ---------------------------------------------------------------------------
+# Slice extraction and common-canvas letterboxing.
+#
+# These were the private ``_qc_slice_2d`` / ``_apply_common_canvas`` helpers in
+# ``metrics/modules/visualizations.py``. They are promoted to public API so the
+# legacy triptych and the three new QC panels (DEC-FA, CST density, CST over FA)
+# share the exact code that already produces the accepted A4 geometry. Behaviour
+# is byte-identical to the originals; ``slice_2d`` only replaces its if/else
+# chain with a validated lookup against :data:`VIEW_AXES`.
+# ---------------------------------------------------------------------------
+def slice_2d(volume, view, index):
+    """Return the 2D display slice of ``volume`` for ``view`` at voxel ``index``.
+
+    The returned array is already transposed for display with
+    ``matplotlib.pyplot.imshow(..., origin='lower')``: its rows run along the
+    view's vertical voxel axis and its columns along the horizontal voxel axis,
+    matching :data:`VIEW_AXES`. This is the same convention the legacy triptych
+    used, preserved so the existing report figures stay byte-identical.
+
+    Parameters
+    ----------
+    volume : ndarray, shape (X, Y, Z)
+    view : {"axial", "coronal", "sagittal"}
+        Validated against :data:`VIEW_AXES`; any other value raises
+        ``ValueError`` rather than silently falling through an ``else`` branch.
+    index : int
+        Voxel index along the view's depth (slice) axis.
+
+    Returns
+    -------
+    ndarray
+        2D slice with the depth axis removed and the two in-plane axes
+        transposed for ``origin='lower'`` display.
+    """
+    if view not in VIEW_AXES:
+        raise ValueError(
+            f"unknown view {view!r}; expected one of {sorted(VIEW_AXES)}"
+        )
+    h_axis, v_axis = VIEW_AXES[view]
+    depth_axis = 3 - h_axis - v_axis  # the axis not present in the plane
+    return np.take(volume, index, axis=depth_axis).T
+
+
+def pad_axes_to_canvas(ax, canvas_w, canvas_h):
+    """Centre the axis's current view inside a common ``canvas_w x canvas_h`` box.
+
+    Equivalent to padding a 2D slice to a common canvas before ``imshow``, but
+    without touching the data or the voxel coordinates a streamline overlay is
+    drawn in. Combined with ``aspect='equal'`` this gives every QC panel the
+    same physical size and the same scale, letterboxed in black, with no
+    anatomical distortion. Any x-axis inversion applied for the radiological
+    convention is preserved.
+
+    The axes background patch is not painted while the axis is off, so the
+    letterbox is drawn explicitly as an axes-spanning black rectangle behind the
+    image — without it the padding reads as white and panels of differing slice
+    shapes look like different sizes even though their boxes are identical.
+    """
+    x_lo, x_hi = ax.get_xlim()
+    y_lo, y_hi = ax.get_ylim()
+    cx, cy = (x_lo + x_hi) / 2.0, (y_lo + y_hi) / 2.0
+    x_sign = 1.0 if x_hi >= x_lo else -1.0
+    y_sign = 1.0 if y_hi >= y_lo else -1.0
+    ax.set_xlim(cx - x_sign * canvas_w / 2.0, cx + x_sign * canvas_w / 2.0)
+    ax.set_ylim(cy - y_sign * canvas_h / 2.0, cy + y_sign * canvas_h / 2.0)
+    from matplotlib.patches import Rectangle
+    ax.add_patch(Rectangle(
+        (0, 0), 1, 1, transform=ax.transAxes, facecolor='black',
+        edgecolor='none', zorder=-10, clip_on=False,
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Data-driven QC slice selection and physical slab membership
+# (visualization-refactoring-plan §6.4, §6.5).
+#
+# These replace the legacy magic-constant slice index and the voxel-measured
+# ±5-voxel slab with a data-driven, deterministic choice whose provenance is
+# disclosed on the figure, and a physical (millimetre) inclusion criterion
+# whose rendered thickness is invariant under anisotropic voxels. Both are
+# pure geometry (no Figure, no save) so they are unit-testable in isolation.
+# ---------------------------------------------------------------------------
+
+# Physical slab thickness in millimetres for the CST-over-FA streamline overlay.
+# ±5 mm matches the visual density of the legacy ±5-voxel rule at 2 mm
+# isotropic (the appearance the report was designed around) while being
+# physically defined, so the same figure shows the same physical slab on
+# 2 mm isotropic, 1.5 mm isotropic and 2×2×6 mm data (plan §6.5, R-2).
+DEFAULT_SLAB_MM = 10.0
+
+
+def select_qc_slice(density=None, density_left=None, density_right=None,
+                   roi_masks=None, brain_mask=None, affine=None,
+                   view="coronal"):
+    """Deterministically choose the shared QC slice index for the report panels.
+
+    All three report QC panels (DEC-FA, CST density, final CST over FA) share
+    the single slice this returns, so the reader sees the same plane across the
+    three complementary questions. The rule degrades in four documented levels,
+    each one step away from the thing being QC'd and using only inputs the
+    figure already requires (plan §6.4):
+
+    1. ``bilateral_occupancy`` — the coronal plane with the most voxels the
+       extracted bundle visits (count, not summed density — robust to one
+       dense core voxel).
+    2. ``surviving_hemisphere`` — when exactly one hemisphere's density is
+       non-empty, that hemisphere's occupancy. A real extracted bundle shown
+       when one side failed.
+    3. ``roi_occupancy`` — the union of the warped extraction ROI masks' best
+       plane, so a total extraction failure is diagnosable from its targets.
+    4. ``anatomical_centroid`` — the plane whose world coordinate is nearest the
+       brain-mask centre of mass. Always available; can never fail.
+
+    Parameters
+    ----------
+    density, density_left, density_right : ndarray, optional
+        Combined / per-hemisphere CST density volumes on the FA grid.
+    roi_masks : sequence of ndarray, optional
+        Warped extraction ROI masks to combine for the level-3 fallback.
+    brain_mask : ndarray
+        Brain mask for the always-available level-4 fallback.
+    affine : (4,4) ndarray
+        Voxel->RASMM affine (needed for the level-4 world-coordinate centroid).
+    view : {"coronal", "axial", "sagittal"}
+        View whose slice axis is selected.
+
+    Returns
+    -------
+    index : int
+        The chosen voxel slice index along the view's depth axis.
+    provenance : dict
+        ``rule`` (one of the four names above), ``occupancy`` (the count that
+        won), ``n_candidates`` (planes with non-zero occupancy), ``tie_break``
+        (a short description of how a tie, if any, was resolved).
+
+    Notes
+    -----
+    Tie-breaking is deterministic, in order: highest occupancy → nearest to the
+    density-weighted centre of mass along the view axis → lowest index. So the
+    result is a pure function of the inputs (no RNG).
+    """
+    if view not in VIEW_AXES:
+        raise ValueError(f"unknown view {view!r}; expected one of {sorted(VIEW_AXES)}")
+    h_axis, v_axis = VIEW_AXES[view]
+    depth_axis = 3 - h_axis - v_axis
+    n_slices = None
+    weights = None  # density-weighted centre of mass reference (for ties)
+
+    def _occupancy_per_plane(vol):
+        if vol is None:
+            return None
+        vol = np.asarray(vol)
+        if vol.shape == () or vol.max() == 0:
+            return None
+        # Count of voxels with density > 0 in each plane (robust to a single
+        # dense core voxel — a sum would not be).
+        nonzero = vol > 0
+        counts = nonzero.sum(axis=tuple(i for i in range(3) if i != depth_axis))
+        return counts.astype(np.int64)
+
+    def _depth_centroid(vol):
+        if vol is None or np.asarray(vol).max() == 0:
+            return None
+        vol = np.asarray(vol)
+        # density-weighted index centroid along the depth axis
+        idx = np.arange(vol.shape[depth_axis])
+        shape = [1, 1, 1]; shape[depth_axis] = vol.shape[depth_axis]
+        idx = idx.reshape(shape)
+        weights_ = (vol * idx).sum(axis=tuple(i for i in range(3) if i != depth_axis))
+        total = vol.sum()
+        if total == 0:
+            return None
+        return float(weights_.sum() / total)
+
+    def _best(counts, centroid):
+        # Deterministic tie-break: highest count -> nearest centroid -> lowest idx.
+        if counts is None or counts.max() == 0:
+            return None
+        max_c = counts.max()
+        candidates = np.where(counts == max_c)[0]
+        if len(candidates) == 1:
+            return int(candidates[0]), int(max_c), "single max-occupancy plane"
+        if centroid is None:
+            idx = int(candidates.min())
+            return idx, int(max_c), f"tie of {len(candidates)} planes resolved to lowest index"
+        nearest = int(min(candidates, key=lambda j: abs(j - centroid)))
+        return nearest, int(max_c), f"tie of {len(candidates)} planes resolved to nearest density-weighted centroid"
+
+    # Level 1: bilateral occupancy.
+    counts = _occupancy_per_plane(density)
+    if counts is not None and counts.max() > 0:
+        centroid = _depth_centroid(density)
+        idx, occ, tb = _best(counts, centroid)
+        return idx, {"rule": "bilateral_occupancy", "occupancy": occ,
+                     "n_candidates": int((counts > 0).sum()), "tie_break": tb}
+
+    # Level 2: surviving hemisphere.
+    cL = _occupancy_per_plane(density_left)
+    cR = _occupancy_per_plane(density_right)
+    if cL is not None and cR is None:
+        centroid = _depth_centroid(density_left)
+        idx, occ, tb = _best(cL, centroid)
+        return idx, {"rule": "surviving_hemisphere", "occupancy": occ,
+                     "n_candidates": int((cL > 0).sum()), "tie_break": tb + " (left)"}
+    if cR is not None and cL is None:
+        centroid = _depth_centroid(density_right)
+        idx, occ, tb = _best(cR, centroid)
+        return idx, {"rule": "surviving_hemisphere", "occupancy": occ,
+                     "n_candidates": int((cR > 0).sum()), "tie_break": tb + " (right)"}
+
+    # Level 3: combined ROI occupancy.
+    if roi_masks:
+        combined = None
+        for m in roi_masks:
+            m = np.asarray(m)
+            if m.shape == ():
+                continue
+            combined = m.astype(bool) if combined is None else (combined | m.astype(bool))
+        if combined is not None and combined.max() > 0:
+            counts = _occupancy_per_plane(combined.astype(np.float32))
+            if counts is not None and counts.max() > 0:
+                idx, occ, tb = _best(counts, None)
+                return idx, {"rule": "roi_occupancy", "occupancy": occ,
+                             "n_candidates": int((counts > 0).sum()), "tie_break": tb}
+
+    # Level 4: anatomical fallback (brain-mask centroid in world mm).
+    if brain_mask is None:
+        raise ValueError(
+            "select_qc_slice exhausted all fallback levels: density, "
+            "density_left/right, and roi_masks all empty and brain_mask is None. "
+            "brain_mask is required so the anatomical fallback can always succeed."
+        )
+    bm = np.asarray(brain_mask)
+    if bm.max() == 0:
+        # Nothing at all in the brain mask: choose the middle slice so the figure
+        # still renders (cannot fail). Disclose this plainly.
+        idx = bm.shape[depth_axis] // 2
+        return idx, {"rule": "anatomical_centroid", "occupancy": 0,
+                     "n_candidates": 0,
+                     "tie_break": "empty brain mask; middle slice chosen"}
+    if affine is None:
+        raise ValueError("affine is required for the anatomical_centroid fallback")
+    affine = np.asarray(affine, dtype=float)
+    # Centre of mass in voxel coords, then world.
+    coords = np.argwhere(bm > 0)
+    com_vox = coords.mean(axis=0)
+    com_world = (affine[:3, :3] @ com_vox) + affine[:3, 3]
+    # Project every plane centre (world coord of voxel-plane centre) to the
+    # view's depth world axis and pick the nearest.
+    depth_world_axis = depth_axis
+    plane_centres = []
+    for j in range(bm.shape[depth_axis]):
+        vox = [0.0, 0.0, 0.0]; vox[depth_axis] = float(j)
+        world = (affine[:3, :3] @ np.asarray(vox)) + affine[:3, 3]
+        plane_centres.append(world[depth_world_axis])
+    plane_centres = np.asarray(plane_centres)
+    target = com_world[depth_world_axis]
+    idx = int(np.argmin(np.abs(plane_centres - target)))
+    return idx, {"rule": "anatomical_centroid", "occupancy": 0,
+                 "n_candidates": int((bm > 0).sum()),
+                 "tie_break": f"plane nearest brain-mask centroid (world {depth_world_axis}-axis)"}
+
+
+def slab_membership(points_world, affine, view, slice_index, thickness_mm):
+    """Boolean membership of world-space points in a physical slab.
+
+    The slab is centred on voxel plane ``slice_index`` and has half-thickness
+    ``thickness_mm / 2`` along the view's depth axis **in world millimetres**.
+    Using the unit world normal ``n̂`` of the voxel axis (not the array axis with
+    its voxel scaling) makes the rendered physical thickness identical for
+    isotropic and anisotropic voxels (plan §6.5, R-2): the legacy ±5-voxel rule
+    would show a 10/7.5/30 mm slab on 2 mm iso / 1.5 mm iso / 2×2×6 mm data; this
+    shows 10 mm on all three.
+
+    Parameters
+    ----------
+    points_world : ndarray, shape (N, 3)
+        Streamline points in RASMM world coordinates.
+    affine : (4,4) ndarray
+        Voxel->RASMM affine.
+    view : {"coronal", "axial", "sagittal"}
+    slice_index : int
+        Centre voxel plane of the slab.
+    thickness_mm : float
+        Full slab thickness in millimetres.
+
+    Returns
+    -------
+    ndarray, shape (N,), bool
+        ``True`` where the point lies within the slab.
+    """
+    if view not in VIEW_AXES:
+        raise ValueError(f"unknown view {view!r}; expected one of {sorted(VIEW_AXES)}")
+    affine = np.asarray(affine, dtype=float)
+    h_axis, v_axis = VIEW_AXES[view]
+    depth_axis = 3 - h_axis - v_axis
+    # Unit world normal of the voxel depth axis (scale discarded).
+    col = affine[:3, depth_axis]
+    norm = np.linalg.norm(col)
+    if norm == 0:
+        raise ValueError(f"affine depth-axis column is zero for view {view!r}")
+    n_hat = col / norm
+    # World coordinate of the centre of voxel plane slice_index.
+    vox = np.zeros(3); vox[depth_axis] = float(slice_index)
+    centre = (affine[:3, :3] @ vox) + affine[:3, 3]
+    pts = np.asarray(points_world, dtype=float)
+    if pts.ndim == 1:
+        pts = pts[None, :]
+    proj = (pts - centre) @ n_hat
+    return np.abs(proj) <= (thickness_mm / 2.0)

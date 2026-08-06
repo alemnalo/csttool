@@ -14,6 +14,6 @@ These modules contain no pipeline logic and must not import from the pipeline
 packages, to keep the dependency graph acyclic.
 """
 
-from . import style, geometry, utils
+from . import style, geometry, utils, render
 
-__all__ = ["style", "geometry", "utils"]
+__all__ = ["style", "geometry", "utils", "render"]

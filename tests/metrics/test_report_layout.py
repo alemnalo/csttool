@@ -37,17 +37,40 @@ from csttool.viz.geometry import orientation_code
 RAS_AFFINE = np.diag([2.0, 2.0, 2.0, 1.0])
 
 
+DISPERSION_KEYS = ("profile_p25", "profile_p75", "profile_n")
+
+
 def _scalar_block(seed):
     rng = np.random.default_rng(seed)
+    profile = rng.uniform(0.3, 0.7, 20)
+    # A band straddling the mean by a known, per-node-varying half-width, so a
+    # test can assert the drawn extents against the emitted numbers rather than
+    # against a constant it could also get from a bug.
+    half = rng.uniform(0.02, 0.06, 20)
     return {
         "mean": 0.45 + seed * 0.001, "std": 0.08, "median": 0.44,
         "min": 0.31, "max": 0.72, "n_streamlines": 100,
+        "bootstrap_se": 0.008,
         "mean_point_weighted": 0.45, "std_point_weighted": 0.1,
         "median_point_weighted": 0.44, "min_point_weighted": 0.3,
         "max_point_weighted": 0.7, "n_samples": 5000,
-        "profile": rng.uniform(0.3, 0.7, 20).tolist(),
+        "profile": profile.tolist(),
+        "profile_p25": (profile - half).tolist(),
+        "profile_p75": (profile + half).tolist(),
+        "profile_n": 97,
         "pontine": 0.4, "plic": 0.5, "precentral": 0.45,
+        "pontine_se": 0.004, "plic_se": 0.004, "precentral_se": 0.004,
     }
+
+
+def strip_dispersion(metrics):
+    """The same metrics as a pre-milestone (legacy) JSON would carry."""
+    out = {}
+    for key, block in metrics.items():
+        if isinstance(block, dict):
+            block = {k: v for k, v in block.items() if k not in DISPERSION_KEYS}
+        out[key] = block
+    return out
 
 
 def _morphology(median_len=84.0, n=100, mean=85.0, std=12.0,
@@ -81,6 +104,38 @@ def make_comparison(with_median=True, with_all_scalars=True):
         "ad": {"laterality_index": 0.0},
     }
     return {"left": left, "right": right, "asymmetry": asym}
+
+
+NODE_HOMOLOGY = {
+    "max_abs_z_difference_mm": 6.42, "length_difference_mm": -7.94,
+    "z_difference_mm": [0.1] * 20, "arc_difference_mm": [0.2] * 20,
+    "left_length_mean": 120.0, "right_length_mean": 127.94,
+    "left_n_streamlines": 192, "right_n_streamlines": 264, "n_points": 20,
+}
+
+
+def make_qc_strip(tmp_path, subject_id):
+    """Build the 1x4 QC strip the report now embeds.
+
+    Reuses the strip suite's synthetic products rather than inventing a second
+    set, so the two suites cannot drift apart about what a valid input looks
+    like.
+    """
+    from .test_report_qc_strip import (
+        RAS_AFFINE as STRIP_AFFINE, _bundle, _density, _dseg, _fa,
+        _v1_superior, _write_nifti, _write_trk,
+    )
+    from csttool.metrics.modules.visualizations import plot_report_qc_strip
+
+    return plot_report_qc_strip(
+        fa_path=_write_nifti(tmp_path / "s_fa.nii.gz", _fa(), STRIP_AFFINE),
+        v1_path=_write_nifti(tmp_path / "s_v1.nii.gz", _v1_superior(), STRIP_AFFINE),
+        density_path=_write_nifti(tmp_path / "s_d.nii.gz", _density(), STRIP_AFFINE),
+        roi_dseg_path=_write_nifti(tmp_path / "s_s.nii.gz", _dseg(), STRIP_AFFINE),
+        cst_left_path=_write_trk(tmp_path / "s_l.trk", _bundle(-8.0), STRIP_AFFINE),
+        cst_right_path=_write_trk(tmp_path / "s_r.trk", _bundle(8.0), STRIP_AFFINE),
+        output_dir=tmp_path, subject_id=subject_id,
+    )
 
 
 def make_fa_background():
@@ -127,15 +182,10 @@ def full_metadata():
 @pytest.fixture
 def rendered_html(tmp_path):
     comparison = make_comparison()
-    fa = make_fa_background()
+    comparison["node_homology"] = NODE_HOMOLOGY
     aff = RAS_AFFINE
-    sl_l = make_streamlines(20, 42)
-    sl_r = make_streamlines(20, 7)
     pm = plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-x")
-    tri = plot_tractogram_qc_triptych(
-        sl_l, sl_r, fa, aff, tmp_path, "sub-x", background_kind="fa"
-    )
-    viz = {"profile_matrix": pm, "tractogram_qc_triptych": tri}
+    viz = {"profile_matrix": pm, "qc_strip": make_qc_strip(tmp_path, "sub-x")}
     html = save_html_report(
         comparison, viz, tmp_path, "sub-x", version="0.5.0",
         space="Native Space", metadata=full_metadata(), fa_affine=aff,
@@ -174,8 +224,13 @@ class TestHtmlStructure:
     def test_exactly_one_profile_matrix_image(self, rendered_html):
         assert rendered_html.count('class="profile-matrix"') == 1
 
-    def test_exactly_one_qc_triptych_image(self, rendered_html):
-        assert rendered_html.count('class="qc-triptych"') == 1
+    def test_exactly_one_qc_strip_image(self, rendered_html):
+        assert rendered_html.count('class="qc-strip"') == 1
+
+    def test_no_triptych_remains_in_the_report(self, rendered_html):
+        """The 1x3 triptych is gone from the report path (the function itself is
+        kept, exported and tested — only the report no longer uses it)."""
+        assert "qc-triptych" not in rendered_html
 
     def test_orientation_label_dynamic_and_once(self, rendered_html):
         # The orientation code derived from RAS_AFFINE is "RAS".
@@ -185,13 +240,17 @@ class TestHtmlStructure:
         assert rendered_html.count(">RAS<") == 1
 
     def test_qc_is_single_composite_image(self, rendered_html):
-        # The QC section is one composite triptych image (the Sagittal/Coronal/
-        # Axial panel titles live inside the figure, not as separate HTML labels),
-        # and no per-panel orientation code is repeated in the HTML.
-        assert rendered_html.count('class="qc-triptych"') == 1
+        # The QC section is one composite strip image (the four panel titles live
+        # inside the figure, not as separate HTML labels), and no per-panel
+        # orientation code is repeated in the HTML.
+        assert rendered_html.count('class="qc-strip"') == 1
         assert "Sagittal (RAS)" not in rendered_html
         assert "Coronal (RAS)" not in rendered_html
         assert "Axial (RAS)" not in rendered_html
+
+    def test_qc_alt_text_names_all_four_panels(self, rendered_html):
+        alt = "Report QC strip (DEC-FA, CST density, extraction ROIs, CST over FA)"
+        assert alt in rendered_html
 
     def test_li_classes_by_sign(self, rendered_html):
         # asymmetry.fa LI is +0.043 (li-left/blue); md is -0.052 (li-right/orange).
@@ -228,6 +287,106 @@ class TestHtmlStructure:
     def test_hardware_visible_in_footer(self, rendered_html):
         assert "Test CPU" in rendered_html
         assert "16.0" in rendered_html and "GB" in rendered_html
+
+
+class TestNodeHomologyLine:
+    """The status line under the regional table (plan §8).
+
+    Descriptive only: it must never gate, colour or suppress a regional value.
+    """
+
+    def _html(self, tmp_path, node_homology, name="sub-nh"):
+        comparison = make_comparison()
+        if node_homology is not None:
+            comparison["node_homology"] = node_homology
+        return save_html_report(
+            comparison, {}, tmp_path, name, version="0.5.0", space="Native Space",
+            metadata=full_metadata(), fa_affine=RAS_AFFINE,
+        ).read_text()
+
+    AVAILABLE = {
+        "max_abs_z_difference_mm": 6.42, "length_difference_mm": -7.94,
+        "z_difference_mm": [0.1] * 20, "arc_difference_mm": [0.2] * 20,
+        "left_length_mean": 120.0, "right_length_mean": 127.94,
+        "left_n_streamlines": 192, "right_n_streamlines": 264, "n_points": 20,
+    }
+    UNAVAILABLE = {
+        "max_abs_z_difference_mm": None, "length_difference_mm": None,
+        "z_difference_mm": None, "arc_difference_mm": None,
+        "left_length_mean": None, "right_length_mean": 127.9,
+        "left_n_streamlines": 0, "right_n_streamlines": 264, "n_points": 20,
+    }
+
+    def test_line_states_both_numbers_when_available(self, tmp_path):
+        html = self._html(tmp_path, self.AVAILABLE)
+        assert "Node homology" in html
+        assert "6.4 mm" in html
+        assert "-7.9 mm" in html   # signed: which side is longer is the point
+
+    def test_length_difference_carries_an_explicit_sign(self, tmp_path):
+        positive = dict(self.AVAILABLE, length_difference_mm=0.11)
+        assert "+0.1 mm" in self._html(tmp_path, positive, "sub-nh-pos")
+
+    def test_note_rides_on_the_regional_caption_row(self, tmp_path):
+        """It costs no vertical block of its own: it is the <small> on the
+        Regional metrics section title, which already existed."""
+        html = self._html(tmp_path, self.AVAILABLE)
+        # Split on the section, not the words: the stylesheet comment above
+        # explains the same thing in prose.
+        section = html.split('class="regional-metrics"', 1)[1]
+        title = section.split("</h2>", 1)[0]
+        assert 'class="homology-note"' in title
+        assert "Node homology" in title
+
+    def test_no_verdict_no_threshold_no_icon(self, tmp_path):
+        # Scoped to the rendered section, not the whole document: the stylesheet
+        # comment legitimately explains *why* no threshold is shipped.
+        html = self._html(tmp_path, self.AVAILABLE)
+        section = html.split('class="regional-metrics"', 1)[1].split("</section>", 1)[0]
+        for forbidden in ("PASS", "FAIL", "⚠", "threshold", "homology-fail",
+                          "homology-pass"):
+            assert forbidden not in section
+
+    def test_unavailable_states_so_plainly(self, tmp_path):
+        html = self._html(tmp_path, self.UNAVAILABLE)
+        assert "unavailable (one hemisphere has no streamlines)" in html
+        assert "max L–R node offset" not in html
+
+    def test_absent_block_degrades_like_an_empty_hemisphere(self, tmp_path):
+        """A metrics dict from an older version carries no node_homology at all."""
+        html = self._html(tmp_path, None)
+        assert "Node homology" in html
+        assert "unavailable" in html
+
+    @pytest.mark.parametrize("homology", [AVAILABLE, UNAVAILABLE, None])
+    def test_regional_cells_are_never_suppressed(self, tmp_path, homology):
+        """The no-suppression guarantee: every regional value stays visible and
+        unmodified whatever the homology says."""
+        html = self._html(tmp_path, homology, "sub-nh-cells")
+        for region in ("Pontine", "PLIC", "Precentral"):
+            assert f'class="region-label">{region}<' in html
+        # Four scalar columns of real values, three rows, in every case.
+        assert html.count('<td class="region-label">') == 3
+
+    def test_line_lives_inside_the_regional_section(self, tmp_path):
+        html = self._html(tmp_path, self.AVAILABLE)
+        section = html.split('class="regional-metrics"', 1)[1].split("</section>", 1)[0]
+        assert "Node homology" in section
+
+    def test_note_never_wraps(self, tmp_path):
+        """It shares a row with the section title, so it must stay on one line —
+        a wrap would silently reintroduce the 3 mm the page cannot afford."""
+        html = self._html(tmp_path, self.AVAILABLE)
+        css = html.split("</style>", 1)[0]
+        block = css.split(".homology-note", 1)[1][:200]
+        assert "nowrap" in block
+
+    def test_note_uses_the_muted_footnote_style(self, tmp_path):
+        html = self._html(tmp_path, self.AVAILABLE)
+        assert 'class="homology-note"' in html
+        css = html.split("</style>", 1)[0]
+        assert ".homology-note" in css
+        assert "var(--muted)" in css.split(".homology-note", 1)[1][:220]
 
 
 class TestHtmlBackwardCompat:
@@ -353,6 +512,9 @@ def figure_probe(monkeypatch):
                 "title_pt": ax.title.get_fontsize(),
                 "texts": [(t.get_text(), t.get_fontsize()) for t in ax.texts],
                 "images": list(ax.images),
+                "collections": list(ax.collections),
+                "lines": list(ax.lines),
+                "ylim": ax.get_ylim(),
             }
             for ax in fig.axes
         ]
@@ -417,6 +579,144 @@ class TestProfileMatrixLayout:
         # The strip spans both columns and sits below every panel.
         assert strip["position"].width > max(p["position"].width for p in panels)
         assert strip["position"].y1 <= min(p["position"].y0 for p in panels)
+
+
+class TestProfileMatrixIqrBands:
+    """The IQR band drawn behind each profile line (plan §6).
+
+    The band is a scientific claim about the bundle's spread, so these assert
+    the *drawn* extents against the emitted ``profile_p25``/``profile_p75`` —
+    a band that renders but does not match the numbers would be worse than none.
+    """
+
+    def _panels(self, probe):
+        """The four scalar panels, in _PROFILE_MATRIX_CONFIG order."""
+        return [ax for ax in probe["axes"] if ax["title"]]
+
+    def test_two_band_artists_per_populated_panel(self, tmp_path, figure_probe):
+        comparison = make_comparison()
+        plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-band")
+        panels = self._panels(figure_probe)
+        assert len(panels) == 4
+        for panel in panels:
+            assert len(panel["collections"]) == 2, "one filled band per hemisphere"
+
+    def test_band_extents_equal_the_emitted_quartiles(self, tmp_path, figure_probe):
+        from csttool.metrics.modules.visualizations import _PROFILE_MATRIX_CONFIG
+
+        comparison = make_comparison()
+        plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-ext")
+        for panel, cfg in zip(self._panels(figure_probe), _PROFILE_MATRIX_CONFIG):
+            scale = cfg["scale"]
+            for collection, side in zip(panel["collections"], ("left", "right")):
+                block = comparison[side][cfg["key"]]
+                drawn = collection.get_paths()[0].vertices[:, 1]
+                expected = np.concatenate([
+                    np.array(block["profile_p25"]) * scale,
+                    np.array(block["profile_p75"]) * scale,
+                ])
+                # fill_between traces p25 forward then p75 back, plus closing
+                # vertices; compare the value sets rather than the traversal.
+                np.testing.assert_allclose(
+                    np.sort(np.unique(np.round(drawn, 12))),
+                    np.sort(np.unique(np.round(expected, 12))),
+                    rtol=1e-9,
+                )
+
+    def test_profile_lines_are_drawn_above_the_bands(self, tmp_path, figure_probe):
+        """The lines are the data; a band must never occlude one."""
+        comparison = make_comparison()
+        plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-z")
+        for panel in self._panels(figure_probe):
+            band_z = max(c.get_zorder() for c in panel["collections"])
+            line_z = max(line.get_zorder() for line in panel["lines"][-2:])
+            assert line_z > band_z
+
+    def test_ylim_contains_the_whole_band(self, tmp_path, figure_probe):
+        """A band clipped at the axis edge would understate the bundle's spread."""
+        from csttool.metrics.modules.visualizations import _PROFILE_MATRIX_CONFIG
+
+        comparison = make_comparison()
+        # Push the right hemisphere's band well outside every fixed y-range, so
+        # the auto-fallback has to notice the band and not just the line.
+        for cfg in _PROFILE_MATRIX_CONFIG:
+            block = comparison["right"][cfg["key"]]
+            block["profile_p75"] = [v + 5.0 for v in block["profile_p75"]]
+        plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-ylim")
+        for panel, cfg in zip(self._panels(figure_probe), _PROFILE_MATRIX_CONFIG):
+            top = max(comparison["right"][cfg["key"]]["profile_p75"]) * cfg["scale"]
+            assert panel["ylim"][1] >= top
+
+    def test_legacy_metrics_without_dispersion_draw_no_band(self, tmp_path, figure_probe):
+        """An older metrics JSON is a legitimate input: lines only, no warning,
+        and no fabricated band."""
+        comparison = make_comparison()
+        path = plot_profile_matrix(
+            strip_dispersion(comparison["left"]), strip_dispersion(comparison["right"]),
+            tmp_path, "sub-legacy",
+        )
+        assert path is not None and path.exists()
+        for panel in self._panels(figure_probe):
+            assert panel["collections"] == []
+
+    def test_empty_hemisphere_loses_only_its_own_band(self, tmp_path, figure_probe):
+        comparison = make_comparison()
+        for key in ("fa", "md", "rd", "ad"):
+            comparison["right"][key]["profile_n"] = 0
+        plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-half")
+        for panel in self._panels(figure_probe):
+            assert len(panel["collections"]) == 1
+
+    def test_band_caption_appears_once_and_only_when_a_band_is_drawn(self, tmp_path,
+                                                                    figure_probe):
+        from csttool.metrics.modules.visualizations import _BAND_CAPTION
+
+        comparison = make_comparison()
+        plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-cap")
+        captions = [t for ax in figure_probe["axes"] for t, _ in ax["texts"]
+                    if t == _BAND_CAPTION]
+        assert len(captions) == 1
+
+        plot_profile_matrix(
+            strip_dispersion(comparison["left"]), strip_dispersion(comparison["right"]),
+            tmp_path, "sub-nocap",
+        )
+        captions = [t for ax in figure_probe["axes"] for t, _ in ax["texts"]
+                    if t == _BAND_CAPTION]
+        assert captions == []
+
+    def test_bands_do_not_change_the_printed_size(self, tmp_path, figure_probe):
+        from csttool.metrics.modules.visualizations import PROFILE_MATRIX_SIZE_MM
+
+        comparison = make_comparison()
+        path = plot_profile_matrix(
+            comparison["left"], comparison["right"], tmp_path, "sub-size2"
+        )
+        w_mm, h_mm = PROFILE_MATRIX_SIZE_MM
+        np.testing.assert_allclose(
+            figure_probe["size_in"], (w_mm / 25.4, h_mm / 25.4), rtol=1e-9
+        )
+        arr = _decoded(path)
+        np.testing.assert_allclose(arr.shape[0] / arr.shape[1], h_mm / w_mm, rtol=2e-3)
+
+    def test_sidecar_records_the_band_and_its_population(self, tmp_path):
+        import json
+
+        comparison = make_comparison()
+        path = plot_profile_matrix(
+            comparison["left"], comparison["right"], tmp_path, "sub-side"
+        )
+        sidecar = json.loads(path.with_suffix(".json").read_text())
+        assert sidecar["Panel"] == "profile-matrix"
+        assert sidecar["Band"] == "interquartile range across contributing streamlines"
+        assert sidecar["BandDrawn"] is True
+        assert sidecar["ContributingStreamlines"]["fa"]["left"] == 97
+
+    def test_banded_figure_is_reproducible(self, tmp_path):
+        comparison = make_comparison()
+        p1 = plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "r1")
+        p2 = plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "r2")
+        np.testing.assert_array_equal(_decoded(p1), _decoded(p2))
 
 
 class TestQcTriptychGeometry:
@@ -484,12 +784,16 @@ class TestReportFiguresMatchCss:
     def test_css_widths_match_figure_sizes(self):
         from csttool.metrics.modules.reports import _TEMPLATE_DIR
         from csttool.metrics.modules.visualizations import (
-            PROFILE_MATRIX_SIZE_MM, QC_TRIPTYCH_SIZE_MM,
+            PROFILE_MATRIX_SIZE_MM, QC_STRIP_SIZE_MM,
         )
 
         css = (_TEMPLATE_DIR / "report.css").read_text()
+        assert f".profile-matrix" in css
         assert f"width: {PROFILE_MATRIX_SIZE_MM[0]:g}mm" in css
-        assert f"width: {QC_TRIPTYCH_SIZE_MM[0]:g}mm" in css
+        assert f".qc-strip" in css
+        assert f"width: {QC_STRIP_SIZE_MM[0]:g}mm" in css
+        # The figures are placed at the width they were drawn at, never resized.
+        assert ".qc-triptych" not in css
 
 
 class TestReproducibilityFooter:
@@ -619,18 +923,13 @@ class TestVisualRegressionGolden:
         d = _hamming(_phash(_decoded(gold)), _phash(_decoded(p)))
         assert d <= 12, f"profile matrix pHash distance {d} exceeds tolerance 12"
 
-    def test_qc_triptych_matches_golden(self, tmp_path):
-        gold = self.golden_dir / "tractogram_qc_triptych.png"
+    def test_qc_strip_matches_golden(self, tmp_path):
+        gold = self.golden_dir / "report_qc_strip.png"
         if not gold.exists():
-            pytest.skip("golden triptych not committed; run generate_golden.py")
-        fa = make_fa_background()
-        sl_l = make_streamlines(20, 42)
-        sl_r = make_streamlines(20, 7)
-        p = plot_tractogram_qc_triptych(
-            sl_l, sl_r, fa, RAS_AFFINE, tmp_path, "x", background_kind="fa"
-        )
+            pytest.skip("golden QC strip not committed; run generate_golden.py")
+        p = make_qc_strip(tmp_path, "x")
         d = _hamming(_phash(_decoded(gold)), _phash(_decoded(p)))
-        assert d <= 12, f"QC triptych pHash distance {d} exceeds tolerance 12"
+        assert d <= 12, f"QC strip pHash distance {d} exceeds tolerance 12"
 
 
 # ---------------------------------------------------------------------------
@@ -644,14 +943,9 @@ def _render_pdf(tmp_path, subject_id, metadata, comparison=None, with_median=Tru
     import pypdf
 
     comparison = comparison or make_comparison(with_median=with_median)
-    fa = make_fa_background()
-    sl_l = make_streamlines(20, 42)
-    sl_r = make_streamlines(20, 7)
+    comparison.setdefault("node_homology", NODE_HOMOLOGY)
     pm = plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, subject_id)
-    tri = plot_tractogram_qc_triptych(
-        sl_l, sl_r, fa, RAS_AFFINE, tmp_path, subject_id, background_kind="fa"
-    )
-    viz = {"profile_matrix": pm, "tractogram_qc_triptych": tri}
+    viz = {"profile_matrix": pm, "qc_strip": make_qc_strip(tmp_path, subject_id)}
     html = save_html_report(
         comparison, viz, tmp_path, subject_id, version="0.5.0",
         space="Native Space", metadata=metadata, fa_affine=RAS_AFFINE,
@@ -694,15 +988,13 @@ class TestPdfOnePage:
         """
         pytest.importorskip("weasyprint")
         comparison = make_comparison()
+        comparison["node_homology"] = NODE_HOMOLOGY
         pm = plot_profile_matrix(
             comparison["left"], comparison["right"], tmp_path, "sub-budget"
         )
-        tri = plot_tractogram_qc_triptych(
-            make_streamlines(20, 42), make_streamlines(20, 7), make_fa_background(),
-            RAS_AFFINE, tmp_path, "sub-budget", background_kind="fa",
-        )
         html = save_html_report(
-            comparison, {"profile_matrix": pm, "tractogram_qc_triptych": tri},
+            comparison, {"profile_matrix": pm,
+                         "qc_strip": make_qc_strip(tmp_path, "sub-budget")},
             tmp_path, "sub-budget", version="0.5.0", space="Native Space",
             metadata=full_metadata(), fa_affine=RAS_AFFINE,
         )

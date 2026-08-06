@@ -316,3 +316,14 @@ def test_full_run_command(synthetic_dicom_dir, tmp_path):
     assert reports_dir.exists(), f"BIDS reports dir not found: {reports_dir}"
     metrics_files = list(reports_dir.glob("*metrics*.json"))
     assert len(metrics_files) > 0, f"No metrics JSON found in {reports_dir}"
+
+    # Visualization-refactor M6 (P-1): the two new unconditional scientific
+    # NIfTI data products — the world-frame V1 field and the CST density volume
+    # — must survive the BIDS reorganiser and land under sub-*/dwi/. The legacy
+    # file set is otherwise unchanged (P-4).
+    dwi_dir = out_dir / "sub-test_subj" / "dwi"
+    if dwi_dir.exists():
+        assert list(dwi_dir.glob("*desc-V1_dwimap.nii.gz")), \
+            "V1 NIfTI not written under BIDS by csttool run"
+        assert list(dwi_dir.glob("*desc-CSTdensity_dwimap.nii.gz")), \
+            "CST density NIfTI not written under BIDS by csttool run"
