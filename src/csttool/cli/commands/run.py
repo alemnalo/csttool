@@ -34,6 +34,12 @@ from csttool.bids.output import (
 from .doctor import cmd_doctor as cmd_check
 from .import_cmd import cmd_import
 from .preprocess import cmd_preprocess
+from ...preprocess.modules.external_declaration import (
+    DEFAULT_EXTERNAL_CORRECTION,
+    declaration_record,
+    motion_correction_conflict_warning,
+    passthrough_advisory,
+)
 from .track import cmd_track
 from .extract import cmd_extract, run_roi_seeded_extraction, run_bidirectional_extraction
 from .metrics import cmd_metrics
@@ -219,13 +225,30 @@ def cmd_run(args: argparse.Namespace) -> None:
     # STEP 3: PREPROCESS
     # =========================================================================
     
+    # What the user declares about the input's correction history. A
+    # declaration, never a verified fact: it is recorded in both branches
+    # (it describes the input either way) and changes no processing decision
+    # apart from the advisory warning below.
+    external_correction = getattr(
+        args, 'input_corrected', DEFAULT_EXTERNAL_CORRECTION
+    )
+    preprocessing_warnings = []
+    conflict = motion_correction_conflict_warning(
+        external_correction,
+        getattr(args, 'preprocess', False)
+        and getattr(args, 'perform_motion_correction', False),
+    )
+    if conflict:
+        print(f"\n  ⚠️  {conflict}")
+        preprocessing_warnings.append(conflict)
+
     if getattr(args, 'preprocess', False):
         if not quiet:
             print(f"\n[Step 3/6] Preprocessing...")
         t0 = time()
-        
+
         preproc_path = None
-        
+
         try:
             if nifti_path is None:
                 raise RuntimeError("No NIfTI available from import step")
@@ -244,6 +267,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 unring=getattr(args, 'unring', False),
                 perform_motion_correction=getattr(args, 'perform_motion_correction', False),
                 target_voxel_size=getattr(args, 'target_voxel_size', None),
+                input_corrected=external_correction,
                 verbose=verbose
             )
             
@@ -268,11 +292,14 @@ def cmd_run(args: argparse.Namespace) -> None:
         # Record metadata for report
         pipeline_metadata['preprocessing'] = {
             'status': 'Executed',
+            'performed_by_csttool': True,
             'method': getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
             'unring': getattr(args, 'unring', False),
-            'motion_correction': getattr(args, 'perform_motion_correction', False)
+            'motion_correction': getattr(args, 'perform_motion_correction', False),
+            'external_correction': declaration_record(external_correction),
+            'warnings': preprocessing_warnings,
         }
-        
+
     else:
         if not quiet:
             print(f"\n[Step 3/6] Preprocessing... ⚠️ skipped (pass-through)")
@@ -281,10 +308,23 @@ def cmd_run(args: argparse.Namespace) -> None:
         preproc_path = nifti_path
         step_results['preprocess'] = {'success': True, 'skipped': True, 'passthrough_path': str(preproc_path)}
         step_times['preprocess'] = time() - t0
-        
-        # Record metadata for report
+
+        advisory = passthrough_advisory(external_correction)
+        if advisory:
+            print(f"  ⚠️  {advisory}")
+
+        # Record metadata for report.
+        #
+        # The status says only what csttool did — it skipped its own
+        # preprocessing. What happened to the data before csttool saw it is a
+        # separate, explicitly *declared* fact. The previous single string,
+        # "Skipped (External Preprocessing Used)", conflated the two and
+        # asserted the second one even when nobody had claimed it.
         pipeline_metadata['preprocessing'] = {
-            'status': 'Skipped (External Preprocessing Used)'
+            'status': 'Skipped',
+            'performed_by_csttool': False,
+            'external_correction': declaration_record(external_correction),
+            'warnings': preprocessing_warnings,
         }
     
     # =========================================================================

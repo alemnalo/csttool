@@ -10,6 +10,10 @@ from pathlib import Path
 import numpy as np
 
 from ..defaults import DEFAULT_B0_THRESHOLD, DEFAULT_DENOISE_METHOD
+from .modules.external_declaration import (
+    DEFAULT_EXTERNAL_CORRECTION,
+    declaration_record,
+)
 from .modules.load_dataset import load_dataset
 from .modules.denoise import denoise
 from .modules.gibbs_unringing import gibbs_unringing
@@ -30,6 +34,8 @@ def run_preprocessing(
     *,
     # Gradient handling
     b0_threshold: float = DEFAULT_B0_THRESHOLD,
+    # Provenance
+    external_correction: str = DEFAULT_EXTERNAL_CORRECTION,
     # Denoising options
     denoise_method: str = DEFAULT_DENOISE_METHOD,
     coil_count: int = 4,
@@ -67,6 +73,11 @@ def run_preprocessing(
         authoritative threshold for this execution: it builds the gradient
         table, and the resulting ``gtab.b0s_mask`` is what brain masking and
         Patch2Self read.
+    external_correction : str, default="unknown"
+        User declaration of what correction was applied to the input *before*
+        csttool received it. Recorded in the report as a declaration; never
+        verified, and it changes no processing decision. See
+        ``modules/external_declaration.py``.
     denoise_method : str, default="mppca"
         Denoising method: "nlmeans", "patch2self", or "mppca".
         - "nlmeans" uses PIESNO for sigma estimation; requires coil_count.
@@ -255,6 +266,7 @@ def run_preprocessing(
         processing_params={
             'denoise_method': denoise_method,
             'b0_threshold': b0_threshold,
+            'external_correction': declaration_record(external_correction),
             'gibbs_correction': apply_gibbs_correction,
             # requested vs applied: a failed motion correction used to be
             # distinguishable only by the output filename suffix.

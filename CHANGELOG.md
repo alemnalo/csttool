@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--input-corrected {unknown,none,topup-eddy,eddy-only,other}` on `run` and
+  `preprocess`.** csttool skips its own preprocessing by default, so most runs
+  operate on data some other tool has already corrected — and there was no way to
+  say so. The flag records what was done to the input *before* csttool received it,
+  as a user declaration: `{"declared": …, "verified_by_csttool": false, "source":
+  "user-declaration"}`. csttool never inspects the data to confirm it, never infers
+  it from BIDS metadata, and never lets it change a processing decision. Default
+  `unknown`, which is deliberately distinct from `none` ("nobody said" is not
+  "nothing was done"). The declaration lands in the preprocessing report JSON and,
+  through the existing metadata channel, in the bilateral metrics JSON.
+  Batch inherits it through the documented per-subject manifest
+  `"options": {"input_corrected": …}`.
+  - Declaring `topup-eddy`/`eddy-only` together with `--perform-motion-correction`
+    prints a high-visibility **warning** about likely double motion correction and
+    records it in the provenance — it does not block. An unverified declaration
+    must not be able to veto an explicit flag.
+  - A pass-through run with no declaration now prints a two-line advisory saying
+    the results assume externally corrected input. Console only; no file changes.
+
 - **Report enrichment: dispersion, uncertainty, node homology, and a 1×4 QC strip.**
   The one-page A4 report now says more per millimetre, and says what it does not
   know.
@@ -260,6 +279,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously-impossible label-loss and hemisphere-swap detector paths.
 
 ### Changed
+
+- **Metadata-schema correction: the pass-through preprocessing status no longer
+  asserts external preprocessing.** `pipeline_metadata['preprocessing']['status']`
+  read `"Skipped (External Preprocessing Used)"` on every default run — stating as
+  fact something nobody had declared and csttool cannot check. The status now says
+  only what csttool did (`"Skipped"`, plus `performed_by_csttool: false`), and what
+  happened to the input beforehand lives in the new, explicitly declared
+  `external_correction` block. The two facts are separate because they have
+  different epistemic status. The old string is not retained anywhere: keeping a
+  misleading claim alongside the honest one would just be a contradiction with two
+  spellings. Consumers should read `status` plus `external_correction.declared`.
 
 - **`warp_atlas_to_subject` now returns an assertable QC dict (AU33).** The
   atlas-warp QC checks (label-set preservation, motor-centroid world

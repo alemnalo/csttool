@@ -70,7 +70,18 @@ def test_optional_preprocessing(mock_metrics, mock_extract, mock_track, mock_imp
     metrics_args = mock_metrics.call_args[0][0]
     # Check if pipeline_metadata exists in the args namespace
     assert hasattr(metrics_args, 'pipeline_metadata')
-    assert metrics_args.pipeline_metadata['preprocessing']['status'] == 'Skipped (External Preprocessing Used)'
+    # M4 metadata-schema correction: the status says only what csttool did.
+    # It used to read 'Skipped (External Preprocessing Used)', which asserted
+    # something about the input that nobody had declared and csttool cannot
+    # verify. That claim is now a separate, explicitly declared field.
+    preproc_meta = metrics_args.pipeline_metadata['preprocessing']
+    assert preproc_meta['status'] == 'Skipped'
+    assert preproc_meta['performed_by_csttool'] is False
+    assert preproc_meta['external_correction'] == {
+        'declared': 'unknown',
+        'verified_by_csttool': False,
+        'source': 'user-declaration',
+    }
     
     # Reset mocks
     mock_preprocess.reset_mock()

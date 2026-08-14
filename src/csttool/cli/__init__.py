@@ -254,6 +254,17 @@ def main() -> None:
              f"(default: {DEFAULT_B0_THRESHOLD}). Sets the gradient table's b0 "
              f"partition, which also drives brain masking and Patch2Self."
     )
+    p_preproc.add_argument(
+        "--input-corrected",
+        type=str,
+        default="unknown",
+        choices=["unknown", "none", "topup-eddy", "eddy-only", "other"],
+        help="Declare what correction was applied to the input BEFORE csttool "
+             "received it: 'none' (nothing was), 'topup-eddy', 'eddy-only', "
+             "'other', or 'unknown' (default, no declaration). Recorded as a "
+             "user declaration in the provenance; csttool never verifies it and "
+             "never acts on it."
+    )
     p_preproc.set_defaults(func=cmd_preprocess)
 
     # -------------------------------------------------------------------------
@@ -610,6 +621,17 @@ def main() -> None:
         "--preprocess",
         action="store_true",
         help="Enable preprocessing step (only denoising and brain masking by default). Default: Skipped."
+    )
+    p_run.add_argument(
+        "--input-corrected",
+        type=str,
+        default="unknown",
+        choices=["unknown", "none", "topup-eddy", "eddy-only", "other"],
+        help="Declare what correction was applied to the input BEFORE csttool "
+             "received it: 'none' (nothing was), 'topup-eddy', 'eddy-only', "
+             "'other', or 'unknown' (default, no declaration). Recorded as a "
+             "user declaration in the provenance; csttool never verifies it and "
+             "never acts on it."
     )
     p_run.add_argument(
         "--coil-count",

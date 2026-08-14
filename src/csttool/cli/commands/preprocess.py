@@ -3,11 +3,25 @@ import argparse
 from pathlib import Path
 from ...defaults import DEFAULT_B0_THRESHOLD, DEFAULT_DENOISE_METHOD
 from ..utils import resolve_nifti
+from ...preprocess.modules.external_declaration import (
+    DEFAULT_EXTERNAL_CORRECTION,
+    motion_correction_conflict_warning,
+)
 
 def cmd_preprocess(args: argparse.Namespace) -> dict | None:
     """Run the preprocessing pipeline on the input data."""
     from csttool.preprocess import run_preprocessing
-    
+
+    external_correction = getattr(
+        args, 'input_corrected', DEFAULT_EXTERNAL_CORRECTION
+    )
+    conflict = motion_correction_conflict_warning(
+        external_correction,
+        getattr(args, 'perform_motion_correction', False),
+    )
+    if conflict:
+        print(f"  ⚠️  {conflict}")
+
     try:
         nii = resolve_nifti(args)
     except FileNotFoundError as e:
@@ -30,6 +44,7 @@ def cmd_preprocess(args: argparse.Namespace) -> dict | None:
         denoise_method=getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
         apply_gibbs_correction=getattr(args, 'unring', False),
         apply_motion_correction=getattr(args, 'perform_motion_correction', False),
+        external_correction=external_correction,
         target_voxel_size=tuple(args.target_voxel_size) if args.target_voxel_size else None,
         save_visualizations=getattr(args, 'save_visualizations', False),
         title_id=getattr(args, 'subject_id', None),
