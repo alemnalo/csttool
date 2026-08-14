@@ -20,7 +20,12 @@ from csttool.preprocess.modules.gradient_validation import (
     reorient_dwi_to_ras,
 )
 
-def load_dataset(dir_path: str, fname: str):
+def load_dataset(
+    dir_path: str,
+    fname: str,
+    *,
+    b0_threshold: float = DEFAULT_B0_THRESHOLD,
+):
     """
     Load dataset from DICOM directory or NIfTI file and build gradient table.
 
@@ -30,7 +35,12 @@ def load_dataset(dir_path: str, fname: str):
         Path to the directory containing the dataset.
     fname : str
         Name of the file to load.
-    
+    b0_threshold : float, optional
+        b-value at or below which a volume counts as a b0, in s/mm². This is
+        the execution's single authoritative threshold (``--b0-threshold``);
+        it decides ``gtab.b0s_mask``, which in turn drives brain masking and
+        Patch2Self.
+
     Returns
     -------
     nii : Nifti1Image
@@ -103,7 +113,7 @@ def load_dataset(dir_path: str, fname: str):
     # corrupting the tensor fit.
     bvals, bvecs = read_bvals_bvecs(bval_path, bvec_path)
     gtab = validate_gradient_table(
-        bvals, bvecs, b0_threshold=DEFAULT_B0_THRESHOLD
+        bvals, bvecs, b0_threshold=b0_threshold
     )
     num_of_gradients = len(gtab)
 

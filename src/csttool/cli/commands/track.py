@@ -4,7 +4,12 @@ from pathlib import Path
 
 from dipy.io.image import load_nifti
 from ..utils import extract_stem_from_filename, get_gtab_for_preproc
-from csttool.defaults import DEFAULT_FA_THRESHOLD, DEFAULT_RNG_SEED, DEFAULT_FIT_METHOD
+from csttool.defaults import (
+    DEFAULT_B0_THRESHOLD,
+    DEFAULT_FA_THRESHOLD,
+    DEFAULT_RNG_SEED,
+    DEFAULT_FIT_METHOD,
+)
 
 from csttool.tracking.modules import (
     fit_tensors,
@@ -60,7 +65,10 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
 
     print(f"  → Building gradient table...")
     try:
-        gtab = get_gtab_for_preproc(preproc_nii)
+        gtab = get_gtab_for_preproc(
+            preproc_nii,
+            b0_threshold=getattr(args, 'b0_threshold', DEFAULT_B0_THRESHOLD),
+        )
     except FileNotFoundError as e:
         print(f"  ✗ {e}")
         return None

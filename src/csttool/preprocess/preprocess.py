@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..defaults import DEFAULT_DENOISE_METHOD
+from ..defaults import DEFAULT_B0_THRESHOLD, DEFAULT_DENOISE_METHOD
 from .modules.load_dataset import load_dataset
 from .modules.denoise import denoise
 from .modules.gibbs_unringing import gibbs_unringing
@@ -24,6 +24,8 @@ def run_preprocessing(
     output_dir: str | Path,
     filename: str,
     *,
+    # Gradient handling
+    b0_threshold: float = DEFAULT_B0_THRESHOLD,
     # Denoising options
     denoise_method: str = DEFAULT_DENOISE_METHOD,
     coil_count: int = 4,
@@ -56,6 +58,11 @@ def run_preprocessing(
         Output directory for preprocessed files.
     filename : str
         Base filename without extension (e.g., "sub01_dwi").
+    b0_threshold : float, default=50
+        b-value at or below which a volume counts as a b0, in s/mm². The one
+        authoritative threshold for this execution: it builds the gradient
+        table, and the resulting ``gtab.b0s_mask`` is what brain masking and
+        Patch2Self read.
     denoise_method : str, default="mppca"
         Denoising method: "nlmeans", "patch2self", or "mppca".
         - "nlmeans" uses PIESNO for sigma estimation; requires coil_count.
@@ -98,7 +105,9 @@ def run_preprocessing(
     if verbose:
         print(f"Loading dataset from {input_dir}")
     
-    nii, gtab, nifti_dir, metadata = load_dataset(str(input_dir), filename)
+    nii, gtab, nifti_dir, metadata = load_dataset(
+        str(input_dir), filename, b0_threshold=b0_threshold
+    )
     data = np.asarray(nii.dataobj) if hasattr(nii, 'dataobj') else nii
     affine = nii.affine if hasattr(nii, 'affine') else np.eye(4)
     
@@ -130,7 +139,8 @@ def run_preprocessing(
         bvals=gtab.bvals,
         brain_mask=None,
         denoise_method=denoise_method,
-        N=coil_count
+        N=coil_count,
+        b0_threshold=b0_threshold,
     )
     print(f"PREPROCESSING: Denoising complete ({denoise_method})")
 

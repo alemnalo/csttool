@@ -246,7 +246,9 @@ def main() -> None:
         "--b0-threshold",
         type=float,
         default=DEFAULT_B0_THRESHOLD,
-        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)."
+        help=f"B-value at or below which a volume counts as b=0, in s/mm² "
+             f"(default: {DEFAULT_B0_THRESHOLD}). Sets the gradient table's b0 "
+             f"partition, which also drives brain masking and Patch2Self."
     )
     p_preproc.set_defaults(func=cmd_preprocess)
 
@@ -304,7 +306,9 @@ def main() -> None:
         "--b0-threshold",
         type=float,
         default=DEFAULT_B0_THRESHOLD,
-        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)."
+        help=f"B-value at or below which a volume counts as b=0, in s/mm² "
+             f"(default: {DEFAULT_B0_THRESHOLD}). Sets the gradient table's b0 "
+             f"partition, which also drives brain masking and Patch2Self."
     )
     p_track.add_argument(
         "--show-plots",
@@ -683,7 +687,9 @@ def main() -> None:
         "--b0-threshold",
         type=float,
         default=DEFAULT_B0_THRESHOLD,
-        help=f"B-value threshold for b=0 volumes (default: {DEFAULT_B0_THRESHOLD} s/mm²)."
+        help=f"B-value at or below which a volume counts as b=0, in s/mm² "
+             f"(default: {DEFAULT_B0_THRESHOLD}). Sets the gradient table's b0 "
+             f"partition, which also drives brain masking and Patch2Self."
     )
 
     # Extraction options

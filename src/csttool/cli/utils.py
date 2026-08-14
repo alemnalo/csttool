@@ -121,7 +121,7 @@ def resolve_nifti(args: argparse.Namespace) -> Path:
     return nii
 
 
-def load_with_preproc(nii: Path):
+def load_with_preproc(nii: Path, *, b0_threshold: float = DEFAULT_B0_THRESHOLD):
     """Load data and gradients using modules.load_dataset."""
     nifti_dir = str(nii.parent)
     name = nii.name
@@ -139,7 +139,8 @@ def load_with_preproc(nii: Path):
     
     nii_img, gtab, _, metadata = load_dataset_module(
         dir_path=nifti_dir,
-        fname=fname
+        fname=fname,
+        b0_threshold=b0_threshold,
     )
     
     data = nii_img.get_fdata()
@@ -149,12 +150,18 @@ def load_with_preproc(nii: Path):
     return data, affine, hdr, gtab, metadata
 
 
-def get_gtab_for_preproc(preproc_nii: Path):
+def get_gtab_for_preproc(
+    preproc_nii: Path, *, b0_threshold: float = DEFAULT_B0_THRESHOLD
+):
     """
     Given a preprocessed NIfTI path like <stem>_preproc.nii.gz,
-    find the original .bval and .bvec next to it and build gtab.
-    
+    find the .bval and .bvec next to it and build gtab.
+
     Supports both .bval/.bvec and .bvals/.bvecs extensions.
+
+    ``b0_threshold`` is the execution's authoritative b0 threshold
+    (``--b0-threshold``); it must match the one preprocessing used, so that
+    ``gtab.b0s_mask`` partitions the series identically on both sides.
     """
     name = preproc_nii.name
 
@@ -197,7 +204,7 @@ def get_gtab_for_preproc(preproc_nii: Path):
     # table silently corrupt the tensor fit. Uses the single-source-of-truth
     # b0 threshold so the gtab's b0s_mask matches the rest of the pipeline.
     gtab = validate_gradient_table(
-        bvals, bvecs, b0_threshold=DEFAULT_B0_THRESHOLD
+        bvals, bvecs, b0_threshold=b0_threshold
     )
     return gtab
 

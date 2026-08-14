@@ -23,6 +23,7 @@ def denoise(
     denoise_method: str = DEFAULT_DENOISE_METHOD,
     N: int = 4,
     patch_radius: int = 2,
+    b0_threshold: float = DEFAULT_B0_THRESHOLD,
 ):
     """
     Denoise DWI data.
@@ -61,9 +62,14 @@ def denoise(
 
     patch_radius : int
         Patch radius for MPPCA local-PCA neighbourhood. Default 2 gives
-        a 7×7×7 voxel patch (343 voxels). Larger patches increase
-        smoothing but reduce spatial specificity. Ignored by NLMeans
-        and Patch2Self.
+        a 5×5×5 voxel patch (125 voxels) — DIPY sizes the patch as
+        2·radius+1 per side. Larger patches increase smoothing but reduce
+        spatial specificity. Ignored by NLMeans and Patch2Self.
+
+    b0_threshold : float
+        b-value at or below which a volume counts as a b0, in s/mm². Only
+        used by Patch2Self, which partitions the series on it. Must be the
+        same threshold the gradient table was built with.
 
     Returns
     -------
@@ -127,7 +133,7 @@ def denoise(
             model="ols",
             shift_intensity=True,
             clip_negative_vals=False,
-            b0_threshold=DEFAULT_B0_THRESHOLD,
+            b0_threshold=b0_threshold,
         )
 
     # ==================================================================

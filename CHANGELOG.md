@@ -277,6 +277,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`--b0-threshold` was parsed and thrown away.** The flag is advertised on
+  `preprocess`, `track` and `run`, but only `check-dataset` ever read it — every
+  gradient-table construction site used the hard-coded default instead, so a
+  non-default value silently did nothing on the three commands that matter. The
+  parsed value now reaches `load_dataset` → `validate_gradient_table`,
+  `get_gtab_for_preproc`, Patch2Self, and (via `run`) both the preprocess and track
+  sub-namespaces, so one execution has exactly one b0 threshold. The default is
+  unchanged at 50 s/mm², so runs that do not pass the flag are unaffected.
+- **Brain masking re-derived its own b0 set.** `background_segmentation` thresholded
+  `gtab.bvals` against the module-level constant with a strict `<`, while the
+  gradient table was built with `<=` and the execution's threshold. It now reads
+  `gtab.b0s_mask`, so masking and the tensor fit cannot disagree about which volumes
+  are b0. Affects only runs passing a non-default `--b0-threshold` — at the default,
+  `gradient_table` rewrites sub-threshold b-values to 0 and the two rules happened to
+  coincide.
+
 - **`csttool batch` never actually preprocessed anything.** ⚠️ **Output-changing.**
   `BatchConfig.preprocessing` (documented default: enabled) was flattened onto the
   worker's argument namespace under the name `preprocessing`, but `cmd_run` reads

@@ -3,6 +3,7 @@ import argparse
 import json
 
 from csttool.defaults import (
+    DEFAULT_B0_THRESHOLD,
     DEFAULT_FA_THRESHOLD,
     DEFAULT_SEED_DENSITY,
     DEFAULT_STEP_SIZE,
@@ -149,7 +150,10 @@ def cmd_run(args: argparse.Namespace) -> None:
                 from ..utils import load_with_preproc
                 from csttool.ingest import extract_acquisition_metadata
                 
-                _, _, hdr, gtab, bids_json = load_with_preproc(nifti_path)
+                _, _, hdr, gtab, bids_json = load_with_preproc(
+                    nifti_path,
+                    b0_threshold=getattr(args, 'b0_threshold', DEFAULT_B0_THRESHOLD),
+                )
                 voxel_size = tuple(float(v) for v in hdr.get_zooms()[:3])
                 
                 # Build CLI overrides
@@ -233,6 +237,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 out=preproc_out,
                 subject_id=subject_id,
                 coil_count=getattr(args, 'coil_count', 4),
+                b0_threshold=getattr(args, 'b0_threshold', DEFAULT_B0_THRESHOLD),
                 denoise_method=getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
                 show_plots=getattr(args, 'show_plots', False),
                 save_visualizations=getattr(args, 'save_visualizations', False),
@@ -306,6 +311,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         track_args = argparse.Namespace(
             nifti=preproc_path,
             subject_id=subject_id,
+            b0_threshold=getattr(args, 'b0_threshold', DEFAULT_B0_THRESHOLD),
             fa_thr=getattr(args, 'fa_thr', DEFAULT_FA_THRESHOLD),
             seed_density=getattr(args, 'seed_density', DEFAULT_SEED_DENSITY),
             step_size=getattr(args, 'step_size', DEFAULT_STEP_SIZE),
