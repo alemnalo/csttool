@@ -18,6 +18,7 @@ from csttool.defaults import DEFAULT_B0_THRESHOLD
 from csttool.preprocess.modules.gradient_validation import (
     validate_gradient_table,
     reorient_dwi_to_ras,
+    correct_dicom2nifti_bvecs,
 )
 
 def is_dicom_directory(dir_path) -> bool:
@@ -99,6 +100,14 @@ def load_dataset(
         # .bval file is left untouched.
         raw_img = nib.load(nii_path)
         _bvals, raw_bvecs = read_bvals_bvecs(bval_path, bvec_path)
+        # dicom2nifti's b-vectors are in a vendor-specific frame that is not the
+        # voxel frame of the NIfTI it wrote (Siemens inverts the phase axis).
+        # Undo that before reorienting, or the RAS pair is silently mirrored.
+        from csttool.ingest.modules.convert_series import _read_manufacturer
+        raw_bvecs, bvec_note = correct_dicom2nifti_bvecs(
+            raw_bvecs, _read_manufacturer(dir_path)
+        )
+        print(f"  → gradients: {bvec_note}")
         ras_img, ras_bvecs = reorient_dwi_to_ras(raw_img, raw_bvecs)
         nib.save(ras_img, nii_path)
         # bvecs are stored transposed (3, N) per FSL/dicom2nifti convention.

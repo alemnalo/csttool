@@ -267,3 +267,87 @@ def reorient_dwi_to_ras(img, bvecs):
     reoriented_bvecs[nonzero] = reoriented_bvecs[nonzero] / norms[nonzero]
 
     return reoriented_img, reoriented_bvecs
+
+
+# dicom2nifti's b-vector convention differs *per vendor*, and differs from the
+# voxel frame of the NIfTI it writes. Correcting it requires knowing which
+# vendor path produced the file, so the correction is keyed on the manufacturer.
+_SIEMENS_MANUFACTURERS = ("siemens",)
+
+
+def correct_dicom2nifti_bvecs(bvecs, manufacturer: str | None):
+    """Bring dicom2nifti's b-vectors into the voxel frame of the image it wrote.
+
+    **Siemens.** ``dicom2nifti/convert_siemens.py:_create_bvecs`` projects the
+    CSA gradient direction onto the image axes as::
+
+        (bvec·read, -bvec·phase, bvec·slice)
+
+    — note the explicit sign inversion on the phase axis (the library's own
+    comment reads "project the bvec and invert the y direction"). The affine it
+    writes, however, is built from ``(read, phase, slice)`` *unflipped*, so the
+    b-vector's second component is negated relative to the voxel frame of its
+    own NIfTI. DIPY requires b-vectors in that voxel frame, so the ``j``
+    component must be negated back.
+
+    This is a **reflection**, which is why it escaped every existing check: FA
+    and MD are invariant under any global orthogonal transform of the gradient
+    table (``D → Q D Qᵀ`` preserves eigenvalues), so scalar maps, the unit-norm
+    and b0 validators, and even per-axis ``|V1|`` summaries are all identical
+    with and without it. Only the *signed* direction field changes — and with it
+    tractography. Measured on a 71-direction Siemens acquisition: uncorrected,
+    whole-brain streamlines had mean length 23.4 mm and CST extraction yielded
+    8 left / 1 right; corrected, 45.3 mm and results matching the dcm2niix
+    reference (44.9 mm, 637/649).
+
+    **Other vendors.** dicom2nifti's GE path reads patient-frame private tags
+    with an *x* inversion, and Philips has its own path again; neither matches
+    the Siemens convention, and neither has been validated here. Their
+    b-vectors are therefore returned **unchanged** with a warning rather than
+    guessed at — applying the Siemens correction blindly would corrupt them.
+    Install ``dcm2niix`` for those vendors.
+
+    Parameters
+    ----------
+    bvecs : ndarray of shape (N, 3)
+        b-vectors exactly as dicom2nifti wrote them.
+    manufacturer : str or None
+        DICOM ``Manufacturer`` (0008,0070). ``None``/empty means unknown.
+
+    Returns
+    -------
+    corrected : ndarray of shape (N, 3)
+    note : str
+        Human-readable description of what was or was not done, for provenance.
+    """
+    bvecs = np.asarray(bvecs, dtype=float)
+    if bvecs.ndim != 2 or bvecs.shape[1] != 3:
+        raise GradientTableValidationError(
+            f"bvecs must be (N, 3), got shape {bvecs.shape}"
+        )
+
+    vendor = (manufacturer or "").strip().lower()
+
+    if any(v in vendor for v in _SIEMENS_MANUFACTURERS):
+        corrected = bvecs.copy()
+        corrected[:, 1] *= -1.0
+        return corrected, (
+            "Siemens: negated the b-vector phase (j) component to undo "
+            "dicom2nifti's built-in y inversion, bringing the gradients into "
+            "the voxel frame of the image it wrote."
+        )
+
+    if not vendor:
+        return bvecs.copy(), (
+            "Unknown scanner manufacturer: dicom2nifti's b-vector convention "
+            "could not be determined and no correction was applied. The "
+            "gradients may be reflected relative to the image, which no scalar "
+            "QC metric can detect. Install dcm2niix."
+        )
+
+    return bvecs.copy(), (
+        f"Manufacturer '{manufacturer}': dicom2nifti's b-vector convention for "
+        "this vendor is not validated in csttool and no correction was applied. "
+        "The gradients may be reflected relative to the image, which no scalar "
+        "QC metric can detect. Install dcm2niix."
+    )

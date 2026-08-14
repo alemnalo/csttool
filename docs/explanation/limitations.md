@@ -200,6 +200,19 @@ When `--perform-motion-correction` is used:
   and the report records `motion_correction_requested: true` alongside
   `motion_correction: false`.
 
+### DICOM import: install `dcm2niix`
+
+`dcm2niix` is the primary, validated converter. When it is absent csttool falls back to
+`dicom2nifti`, whose b-vector convention is **vendor-specific and differs from the voxel
+frame of the NIfTI it writes**. csttool corrects the Siemens case (dicom2nifti negates
+the phase axis); GE, Philips and Hitachi are passed through unchanged with a warning,
+because their conventions differ again and are not validated here.
+
+This class of error is undetectable from the outputs. A reflected gradient table leaves
+FA, MD and every other scalar map exactly invariant — only the signed direction field,
+and therefore tractography, is affected. Do not rely on scalar QC to catch it. If your
+data is not Siemens and `dcm2niix` is unavailable, treat the tractography as unverified.
+
 ### Batch preprocessing in v0.5.0 and earlier
 
 `csttool batch` documented preprocessing as enabled by default, but the setting never

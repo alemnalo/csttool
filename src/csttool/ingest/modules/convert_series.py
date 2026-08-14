@@ -24,6 +24,29 @@ except ImportError:
 _UNRELIABLE_FALLBACK_VENDORS = {"philips", "ge", "ge medical systems", "hitachi"}
 
 
+def _read_manufacturer(dicom_dir: Path) -> Optional[str]:
+    """DICOM Manufacturer (0008,0070) from the first readable file, or None.
+
+    Needed because dicom2nifti's b-vector convention is vendor-specific; the
+    caller-supplied ``vendor`` argument is optional and often unset.
+    """
+    try:
+        import pydicom
+    except ImportError:
+        return None
+    for path in sorted(Path(dicom_dir).rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            ds = pydicom.dcmread(str(path), stop_before_pixels=True, force=True)
+        except Exception:
+            continue
+        value = getattr(ds, "Manufacturer", None)
+        if value:
+            return str(value)
+    return None
+
+
 def convert_dicom_to_nifti(
     dicom_dir: Path,
     output_dir: Path,
@@ -222,7 +245,10 @@ def _run_dicom2nifti(
     import nibabel as nib
     import numpy as np
     from dipy.io import read_bvals_bvecs
-    from csttool.preprocess.modules.gradient_validation import reorient_dwi_to_ras
+    from csttool.preprocess.modules.gradient_validation import (
+        correct_dicom2nifti_bvecs,
+        reorient_dwi_to_ras,
+    )
 
     if verbose:
         print("    → Converting via dicom2nifti...")
@@ -250,6 +276,16 @@ def _run_dicom2nifti(
         try:
             raw_img = nib.load(str(nii_path))
             _bvals, raw_bvecs = read_bvals_bvecs(str(bval_path), str(bvec_path))
+            # dicom2nifti writes b-vectors in a vendor-specific frame that is
+            # NOT the voxel frame of the NIfTI it wrote (Siemens: the phase axis
+            # is inverted). Undo that first, so the RAS reorientation below
+            # carries a gradient table that already matches its image.
+            raw_bvecs, bvec_note = correct_dicom2nifti_bvecs(
+                raw_bvecs, _read_manufacturer(dicom_dir)
+            )
+            result["warnings"].append(f"dicom2nifti gradients — {bvec_note}")
+            if verbose:
+                print(f"    → gradients: {bvec_note}")
             ras_img, ras_bvecs = reorient_dwi_to_ras(raw_img, raw_bvecs)
             nib.save(ras_img, str(nii_path))
             np.savetxt(str(bvec_path), ras_bvecs.T, fmt="%.8f")

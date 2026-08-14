@@ -322,6 +322,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The dicom2nifti fallback silently mirrored the b-vectors on Siemens data.** ⚠️
+  **Output-changing; affects every run imported without `dcm2niix` on PATH.**
+  `dicom2nifti`'s Siemens path projects the gradient direction onto the image axes as
+  `(bvec·read, −bvec·phase, bvec·slice)` — negating the phase axis — while the affine
+  it writes uses `(read, phase, slice)` unflipped. Its b-vectors are therefore
+  reflected relative to the voxel frame of its own NIfTI. csttool now negates the
+  phase component back before reorienting to RAS.
+  - **Nothing could see it.** A reflection of the gradient table leaves FA and MD
+    exactly invariant (`D → Q D Qᵀ` preserves eigenvalues), so the scalar maps, the
+    unit-norm/count/b0 validators, and per-axis `|V1|` summaries were all bit-identical
+    with the bug present. Only the *signed* direction field was wrong. Measured on a
+    71-direction Siemens acquisition: whole-brain mean streamline length 23.4 mm and
+    CST extraction of 8 left / 1 right, versus 45.3 mm and 637 / 649 once corrected —
+    the latter matching the `dcm2niix` reference exactly.
+  - **Other vendors are deliberately not "fixed".** dicom2nifti's GE path reads
+    patient-frame private tags with an *x* inversion and Philips has its own path
+    again; neither matches the Siemens convention and neither is validated here.
+    Their gradients are passed through unchanged with an explicit warning rather
+    than guessed at. Install `dcm2niix` for those vendors.
+  - Any tractography produced through the dicom2nifti fallback on Siemens data
+    should be regenerated.
+- **The motion-correction QC figure reported nonsense.** `dipy.align.motion_correction`
+  returns a `(4, 4, n_volumes)` array, but `plot_motion_correction_summary` called
+  `len()` on it (→ 4) and iterated the first axis, so each "affine" was a `(4, n)`
+  slice and every plotted translation and rotation was garbage. A 71-volume run was
+  titled "4 volumes" and reported a 284° maximum rotation where the true value was
+  0.47°. It now normalises the stack, derives angles from the orthonormal rotation
+  component, and reports the same geodesic `max_rotation_deg` the preprocessing report
+  records — so the figure and the ledger can no longer disagree.
+
 - **`--perform-motion-correction` shipped unrotated b-vectors.** ⚠️ **Output-changing,
   and previous motion-corrected outputs were wrong.** Motion correction resampled
   every DWI volume onto the reference pose but the original `.bvec` was copied

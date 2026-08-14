@@ -20,6 +20,11 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize, to_rgba
 from pathlib import Path
 
+from csttool.preprocess.modules.reorient_gradients import (
+    _as_affine_stack,
+    max_rotation_angle_deg,
+    rotation_part,
+)
 from csttool.viz import geometry as _geo
 from csttool.viz import style as _style
 from csttool.viz.utils import viz_rng
@@ -399,19 +404,28 @@ def plot_motion_correction_summary(
     viz_dir = output_dir / "visualizations"
     viz_dir.mkdir(parents=True, exist_ok=True)
     
-    n_vols = len(reg_affines)
-    
+    # dipy.align.motion_correction returns a (4, 4, n_volumes) *array*, not a
+    # list of 4x4 matrices. len() on that gives 4, and iterating it yields
+    # (4, n) slices rather than affines — so every parameter plotted here used
+    # to be a slice of a single matrix. On a 71-volume series that produced a
+    # figure titled "4 volumes" reporting a 284° maximum rotation for a run
+    # whose true maximum was 0.47°. Normalise the stack first.
+    affines = _as_affine_stack(reg_affines)
+    n_vols = affines.shape[-1]
+
     # Extract translation and rotation parameters
     translations = np.zeros((n_vols, 3))
     rotations = np.zeros((n_vols, 3))
-    
-    for i, affine in enumerate(reg_affines):
+
+    for i in range(n_vols):
+        affine = affines[..., i]
         # Translation is in the last column
         translations[i] = affine[:3, 3]
-        
-        # Approximate rotation angles from rotation matrix
-        # Using small angle approximation for simplicity
-        R = affine[:3, :3]
+
+        # Euler angles from the orthonormal rotation component. Polar
+        # decomposition discards the scale/shear the affine stage picks up, so
+        # the reported angles are rotations rather than a mix.
+        R = rotation_part(affine)
         rotations[i, 0] = np.arctan2(R[2, 1], R[2, 2]) * 180 / np.pi  # Roll (x)
         rotations[i, 1] = np.arctan2(-R[2, 0], np.sqrt(R[2, 1]**2 + R[2, 2]**2)) * 180 / np.pi  # Pitch (y)
         rotations[i, 2] = np.arctan2(R[1, 0], R[0, 0]) * 180 / np.pi  # Yaw (z)
@@ -473,10 +487,12 @@ def plot_motion_correction_summary(
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
     
-    # Add summary statistics
+    # Add summary statistics. The rotation figure is the geodesic angle of each
+    # volume's rotation, i.e. the same quantity the preprocessing report records
+    # as `max_rotation_deg` — the two must not be able to disagree.
     max_trans = np.max(np.abs(translations_rel))
-    max_rot = np.max(np.abs(rotations_rel))
-    
+    max_rot = max_rotation_angle_deg(affines)
+
     fig.text(0.5, 0.02, 
              f"Max displacement: {max_trans:.2f} mm | Max rotation: {max_rot:.2f}°",
              ha='center', fontsize=11, style='italic')
