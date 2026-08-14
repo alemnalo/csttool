@@ -229,6 +229,34 @@ def test_no_advisory_when_external_correction_declared(mocked_pipeline, capsys):
 
 
 # ---------------------------------------------------------------------------
+# Run-level summary (M5): reports what happened, not what was asked for
+# ---------------------------------------------------------------------------
+
+def test_run_summary_reports_applied_not_merely_requested_motion_correction(
+    mocked_pipeline,
+):
+    """The report's "Motion correction" row must not claim a correction that
+    was requested but failed."""
+    mocked_pipeline["preprocess"].return_value = {
+        "preprocessed_path": str(mocked_pipeline["out"] / "p.nii.gz"),
+        "motion_correction": False,          # requested, but it failed
+        "bvecs_rotated": False,
+        "warnings": ["Motion correction was requested but failed (RuntimeError: x)"],
+    }
+    assert run_cli([
+        "run", "--nifti", str(mocked_pipeline["nifti"]),
+        "--out", str(mocked_pipeline["out"] / "m"), "--skip-check",
+        "--preprocess", "--perform-motion-correction",
+    ])
+
+    meta = preprocessing_metadata(mocked_pipeline)
+    assert meta["motion_correction_requested"] is True
+    assert meta["motion_correction"] is False
+    assert meta["bvecs_rotated"] is False
+    assert any("failed" in w for w in meta["warnings"])
+
+
+# ---------------------------------------------------------------------------
 # T4.6 — batch reaches it through the documented per-subject manifest options
 # ---------------------------------------------------------------------------
 

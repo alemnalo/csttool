@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from ..defaults import DEFAULT_B0_THRESHOLD, DEFAULT_DENOISE_METHOD
+from ..reproducibility.provenance import get_provenance_dict
 from .modules.external_declaration import (
     DEFAULT_EXTERNAL_CORRECTION,
     declaration_record,
@@ -25,6 +26,75 @@ from .modules.reorient_gradients import (
 )
 from .modules.reslice_voxels import reslice_voxels
 from .modules.save_preprocessed import save_preprocessed
+
+
+#: Closed status vocabulary for ledger entries. Anything outside this set is a
+#: bug: a reader must be able to switch on it exhaustively.
+_LEDGER_STATUSES = (
+    "executed",         # csttool ran this stage
+    "not_requested",    # optional stage the caller did not ask for
+    "failed_continued", # requested, raised, run continued without it
+    "declared_external",# user-declared work that preceded csttool
+)
+
+
+def _geometry(data, affine) -> dict:
+    """Shape, voxel sizes and axis orientation of an array + affine pair."""
+    import nibabel as nib
+
+    affine = np.asarray(affine, dtype=float)
+    zooms = np.sqrt(np.sum(affine[:3, :3] ** 2, axis=0))
+    return {
+        "shape": [int(s) for s in np.shape(data)],
+        "zooms": [float(z) for z in zooms],
+        "axis_codes": "".join(nib.aff2axcodes(affine)),
+    }
+
+
+def _stage(
+    name,
+    *,
+    status,
+    requested=True,
+    performed_by="csttool",
+    method=None,
+    backend=None,
+    parameters=None,
+    input_geometry=None,
+    output_geometry=None,
+    gradient_transform_status="none",
+    n_volumes_rotated=0,
+    max_rotation_deg=None,
+    warnings=None,
+    skip_reason=None,
+) -> dict:
+    """One ledger entry.
+
+    Every stage carries the same key set, present even when empty, so a
+    consumer never has to test for a key's existence — only for its value.
+    Versions deliberately do not appear here: they live once, in the report's
+    shared ``provenance`` block.
+    """
+    if status not in _LEDGER_STATUSES:
+        raise ValueError(f"unknown ledger status {status!r}")
+    return {
+        "stage": name,
+        "performed_by": performed_by,
+        "requested": requested,
+        "status": status,
+        "method": method,
+        "backend": backend,
+        "parameters": parameters or {},
+        "input_geometry": input_geometry,
+        "output_geometry": output_geometry,
+        "gradient_transform": {
+            "status": gradient_transform_status,
+            "n_volumes_rotated": int(n_volumes_rotated),
+            "max_rotation_deg": max_rotation_deg,
+        },
+        "warnings": list(warnings or []),
+        "skip_reason": skip_reason,
+    }
 
 
 def run_preprocessing(
@@ -114,26 +184,63 @@ def run_preprocessing(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # The ledger is built as the run proceeds, so its order *is* the order
+    # things happened. Externally declared work is prepended below, because it
+    # happened before csttool ever saw the data.
+    declaration = declaration_record(external_correction)
+    stages: list[dict] = []
+    if declaration["declared"] != DEFAULT_EXTERNAL_CORRECTION:
+        stages.append(_stage(
+            "external_correction",
+            performed_by="external",
+            status="declared_external",
+            requested=False,
+            method=declaration["declared"],
+            parameters=declaration,
+            skip_reason=(
+                "Performed outside csttool, before the data was received; "
+                "recorded as a user declaration and not verified."
+            ),
+        ))
+
     # -------------------------------------------------------------------------
     # Step 1: Load dataset
     # -------------------------------------------------------------------------
     if verbose:
         print(f"Loading dataset from {input_dir}")
-    
+
     nii, gtab, nifti_dir, metadata = load_dataset(
         str(input_dir), filename, b0_threshold=b0_threshold
     )
     data = np.asarray(nii.dataobj) if hasattr(nii, 'dataobj') else nii
     affine = nii.affine if hasattr(nii, 'affine') else np.eye(4)
-    
+
     # Get current voxel size from the NIfTI header
     current_voxel_size = nii.header.get_zooms()[:3]
     print(f"PREPROCESSING: Loaded data with shape {data.shape}")
     print(f"PREPROCESSING: Current voxel size: {current_voxel_size} mm")
 
+    loaded_geometry = _geometry(data, affine)
+    stages.append(_stage(
+        "load",
+        status="executed",
+        method="nibabel/dicom2nifti + validated gradient table",
+        backend="csttool",
+        parameters={
+            "input_dir": str(input_dir),
+            "filename": filename,
+            "b0_threshold": b0_threshold,
+            "n_volumes": int(len(gtab.bvals)),
+            "n_b0": int(np.count_nonzero(gtab.b0s_mask)),
+        },
+        input_geometry=loaded_geometry,
+        output_geometry=loaded_geometry,
+    ))
+
     # -------------------------------------------------------------------------
     # Step 2: Reslice to target voxel size (optional)
     # -------------------------------------------------------------------------
+    reslice_input_geometry = _geometry(data, affine)
     if target_voxel_size is not None:
         print(f"PREPROCESSING: Reslicing to target voxel size: {target_voxel_size} mm")
         data, affine = reslice_voxels(
@@ -145,6 +252,22 @@ def run_preprocessing(
         print(f"PREPROCESSING: Reslicing complete. New shape: {data.shape}")
     elif verbose:
         print("PREPROCESSING: Reslicing skipped")
+
+    stages.append(_stage(
+        "reslice",
+        requested=target_voxel_size is not None,
+        status="executed" if target_voxel_size is not None else "not_requested",
+        method="trilinear resampling" if target_voxel_size is not None else None,
+        backend="dipy" if target_voxel_size is not None else None,
+        parameters={"target_voxel_size": list(target_voxel_size)}
+        if target_voxel_size is not None else {},
+        input_geometry=reslice_input_geometry,
+        output_geometry=_geometry(data, affine),
+        # Changing voxel size does not move the physical gradient frame.
+        gradient_transform_status="not_required",
+        skip_reason=None if target_voxel_size is not None
+        else "No --target-voxel-size given",
+    ))
 
     # -------------------------------------------------------------------------
     # Step 3: Denoise
@@ -159,11 +282,39 @@ def run_preprocessing(
     )
     print(f"PREPROCESSING: Denoising complete ({denoise_method})")
 
+    stages.append(_stage(
+        "denoise",
+        status="executed",
+        method=denoise_method,
+        backend="dipy",
+        parameters={
+            "coil_count": coil_count if denoise_method == "nlmeans" else None,
+            "b0_threshold": b0_threshold,
+        },
+        input_geometry=_geometry(data, affine),
+        output_geometry=_geometry(denoised, affine),
+    ))
+
     # -------------------------------------------------------------------------
     # Step 4: Brain masking
     # -------------------------------------------------------------------------
     masked_data, brain_mask = background_segmentation(denoised, gtab)
     print("PREPROCESSING: Brain masking complete")
+
+    stages.append(_stage(
+        "mask",
+        status="executed",
+        method="median_otsu",
+        backend="dipy",
+        parameters={
+            "median_radius": 2,
+            "numpass": 1,
+            "autocrop": False,
+            "b0_volumes_used": int(np.count_nonzero(gtab.b0s_mask)),
+        },
+        input_geometry=_geometry(denoised, affine),
+        output_geometry=_geometry(masked_data, affine),
+    ))
 
     # -------------------------------------------------------------------------
     # Step 5: Gibbs unringing (optional)
@@ -176,6 +327,17 @@ def run_preprocessing(
         data_for_motion = masked_data
         if verbose:
             print("PREPROCESSING: Gibbs ringing correction skipped")
+
+    stages.append(_stage(
+        "gibbs",
+        requested=apply_gibbs_correction,
+        status="executed" if apply_gibbs_correction else "not_requested",
+        method="gibbs_removal (local subvoxel-shift)" if apply_gibbs_correction else None,
+        backend="dipy" if apply_gibbs_correction else None,
+        input_geometry=_geometry(masked_data, affine),
+        output_geometry=_geometry(data_for_motion, affine),
+        skip_reason=None if apply_gibbs_correction else "--unring not given",
+    ))
 
     # -------------------------------------------------------------------------
     # Step 6: Motion correction (optional)
@@ -234,6 +396,40 @@ def run_preprocessing(
         if verbose:
             print("PREPROCESSING: Motion correction skipped")
 
+    n_dwi = int(np.count_nonzero(~gtab.b0s_mask))
+    if not apply_motion_correction:
+        motion_status = "not_requested"
+    elif motion_correction_applied:
+        motion_status = "executed"
+    else:
+        motion_status = "failed_continued"
+
+    stages.append(_stage(
+        "motion_correction",
+        requested=apply_motion_correction,
+        status=motion_status,
+        method="register_dwi_series [center_of_mass, translation, rigid, affine]"
+        if apply_motion_correction else None,
+        backend="dipy" if apply_motion_correction else None,
+        parameters={
+            "scope": "between-volume affine motion correction only; no "
+                     "eddy-current, outlier or susceptibility correction",
+            "reference": "mean of registered b0 volumes",
+        } if apply_motion_correction else {},
+        input_geometry=_geometry(data_for_motion, affine),
+        output_geometry=_geometry(preprocessed, affine),
+        gradient_transform_status=(
+            "bvecs_rotated" if rotated_bvecs is not None
+            else "not_required" if not apply_motion_correction
+            else "none"
+        ),
+        n_volumes_rotated=n_dwi if rotated_bvecs is not None else 0,
+        max_rotation_deg=max_rotation_deg,
+        warnings=warnings,
+        skip_reason=None if apply_motion_correction
+        else "--perform-motion-correction not given",
+    ))
+
     # -------------------------------------------------------------------------
     # Step 7: Save outputs
     # -------------------------------------------------------------------------
@@ -255,6 +451,26 @@ def run_preprocessing(
     if bvec_path.exists():
         gradient_files['bvec'] = bvec_path
 
+    final_geometry = _geometry(preprocessed, affine)
+    stages.append(_stage(
+        "save",
+        status="executed",
+        method="NIfTI + FSL-style gradient sidecars",
+        backend="nibabel",
+        parameters={
+            "filename_stem": output_stem,
+            "bvec_source": "rotated by csttool" if rotated_bvecs is not None
+            else "copied from input",
+            "bval_source": "copied from input",
+        },
+        input_geometry=final_geometry,
+        output_geometry=final_geometry,
+        gradient_transform_status=(
+            "bvecs_rotated" if rotated_bvecs is not None else "none"
+        ),
+        n_volumes_rotated=n_dwi if rotated_bvecs is not None else 0,
+    ))
+
     output_paths = save_preprocessed(
         data=preprocessed,
         affine=affine,
@@ -263,6 +479,8 @@ def run_preprocessing(
         gradient_files=gradient_files if gradient_files else None,
         bvecs=rotated_bvecs,
         brain_mask=brain_mask,
+        ledger=stages,
+        provenance=get_provenance_dict(),
         processing_params={
             'denoise_method': denoise_method,
             'b0_threshold': b0_threshold,
@@ -317,5 +535,8 @@ def run_preprocessing(
         'output_paths': output_paths,
         'brain_mask': brain_mask,
         'motion_correction_applied': motion_correction_applied,
+        'bvecs_rotated': rotated_bvecs is not None,
+        'max_rotation_deg': max_rotation_deg,
+        'warnings': warnings,
         'gtab': gtab,
     }

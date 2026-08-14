@@ -289,15 +289,26 @@ def cmd_run(args: argparse.Namespace) -> None:
         
         step_times['preprocess'] = time() - t0
         
-        # Record metadata for report
+        # Record metadata for report. This is the run-level *summary*; the full
+        # ordered stage ledger lives in the preprocessing report JSON.
+        preproc_result = step_results.get('preprocess', {}).get('result') or {}
         pipeline_metadata['preprocessing'] = {
             'status': 'Executed',
             'performed_by_csttool': True,
             'method': getattr(args, 'denoise_method', DEFAULT_DENOISE_METHOD),
             'unring': getattr(args, 'unring', False),
-            'motion_correction': getattr(args, 'perform_motion_correction', False),
+            'motion_correction_requested': getattr(
+                args, 'perform_motion_correction', False
+            ),
+            'motion_correction': preproc_result.get(
+                'motion_correction',
+                getattr(args, 'perform_motion_correction', False),
+            ),
+            'bvecs_rotated': preproc_result.get('bvecs_rotated', False),
             'external_correction': declaration_record(external_correction),
-            'warnings': preprocessing_warnings,
+            'warnings': preprocessing_warnings + list(
+                preproc_result.get('warnings', [])
+            ),
         }
 
     else:

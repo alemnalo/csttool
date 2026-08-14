@@ -57,5 +57,9 @@ def cmd_preprocess(args: argparse.Namespace) -> dict | None:
     return {
         'preprocessed_path': result['output_paths'].get('data'),
         'motion_correction': result['motion_correction_applied'],
+        'bvecs_rotated': result.get('bvecs_rotated', False),
+        'max_rotation_deg': result.get('max_rotation_deg'),
+        'warnings': result.get('warnings', []),
+        'report_path': result['output_paths'].get('report'),
         'stem': stem
     }

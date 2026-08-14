@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Preprocessing provenance ledger.** The preprocessing report JSON gains
+  `schema_version`, a `provenance` block (the same `get_provenance_dict()` output
+  the tracking and metrics reports already carry: git commit, Python and dependency
+  versions, platform, hardware, thread environment) and `stages` — an **ordered**
+  list of what actually happened, in the order it happened. Each entry records the
+  stage, who performed it, whether it was requested, its status, method, backend,
+  parameters, input and output geometry (shape, zooms, axis codes), gradient-transform
+  status, warnings and skip reason. The status vocabulary is closed: `executed`,
+  `not_requested`, `failed_continued`, `declared_external` — so "we didn't ask for
+  it" is finally distinguishable from "we asked and it failed". Declared external
+  correction is *prepended*, because it happened before csttool received the data:
+  a thesis-style run serialises as external TOPUP/EDDY → csttool denoise → mask.
+  Versions live in the shared provenance block only, never duplicated per stage.
+  Purely additive — every previous key is unchanged, and `save_preprocessed` called
+  without the new keyword arguments writes exactly the old report.
 - **`--input-corrected {unknown,none,topup-eddy,eddy-only,other}` on `run` and
   `preprocess`.** csttool skips its own preprocessing by default, so most runs
   operate on data some other tool has already corrected — and there was no way to

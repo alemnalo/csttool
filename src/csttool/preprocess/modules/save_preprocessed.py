@@ -24,6 +24,8 @@ def save_preprocessed(
     brain_mask: np.ndarray | None = None,
     metadata: dict | None = None,
     processing_params: dict | None = None,
+    ledger: list[dict] | None = None,
+    provenance: dict | None = None,
     create_report: bool = True,
 ) -> dict[str, Path]:
     """
@@ -58,6 +60,15 @@ def save_preprocessed(
         Custom metadata to include in report (e.g., subject ID, session).
     processing_params : dict or None, optional
         Processing parameters used (e.g., denoising method, motion correction).
+        Retained as a flat summary; the per-stage detail lives in ``ledger``.
+    ledger : list[dict] or None, optional
+        Ordered per-stage provenance entries, chronological, with externally
+        declared work first. Serialized under the top-level ``stages`` key
+        together with a ``schema_version``.
+    provenance : dict or None, optional
+        Output of ``get_provenance_dict()`` — git commit, Python and dependency
+        versions, platform, hardware, thread environment. Serialized under
+        ``provenance``. Versions live here once rather than per stage.
     create_report : bool, default=True
         Whether to generate a JSON processing report.
     
@@ -145,9 +156,17 @@ def save_preprocessed(
         
         if processing_params is not None:
             report['processing_params'] = processing_params
-        
+
         if metadata is not None:
             report['metadata'] = metadata
+
+        # Additive: callers that pass neither get exactly the previous report.
+        if ledger is not None:
+            report['schema_version'] = 1
+            report['stages'] = ledger
+
+        if provenance is not None:
+            report['provenance'] = provenance
         
         report_path = output_dir / f"{filename_stem}_report.json"
         with open(report_path, 'w') as f:
