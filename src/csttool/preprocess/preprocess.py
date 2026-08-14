@@ -14,8 +14,9 @@ from ..reproducibility.provenance import get_provenance_dict
 from .modules.external_declaration import (
     DEFAULT_EXTERNAL_CORRECTION,
     declaration_record,
+    declares_external_work,
 )
-from .modules.load_dataset import load_dataset
+from .modules.load_dataset import is_dicom_directory, load_dataset
 from .modules.denoise import denoise
 from .modules.gibbs_unringing import gibbs_unringing
 from .modules.background_segmentation import background_segmentation
@@ -189,7 +190,7 @@ def run_preprocessing(
     # happened before csttool ever saw the data.
     declaration = declaration_record(external_correction)
     stages: list[dict] = []
-    if declaration["declared"] != DEFAULT_EXTERNAL_CORRECTION:
+    if declares_external_work(declaration["declared"]):
         stages.append(_stage(
             "external_correction",
             performed_by="external",
@@ -221,20 +222,28 @@ def run_preprocessing(
     print(f"PREPROCESSING: Current voxel size: {current_voxel_size} mm")
 
     loaded_geometry = _geometry(data, affine)
+    # The DICOM branch converts with dicom2nifti and reorients the image *and*
+    # its b-vectors to RAS together (AU21); the NIfTI branch touches neither.
+    loaded_from_dicom = is_dicom_directory(input_dir)
     stages.append(_stage(
         "load",
         status="executed",
-        method="nibabel/dicom2nifti + validated gradient table",
+        method="dicom2nifti + validated gradient table" if loaded_from_dicom
+        else "nibabel + validated gradient table",
         backend="csttool",
         parameters={
             "input_dir": str(input_dir),
             "filename": filename,
+            "source": "dicom" if loaded_from_dicom else "nifti",
             "b0_threshold": b0_threshold,
             "n_volumes": int(len(gtab.bvals)),
             "n_b0": int(np.count_nonzero(gtab.b0s_mask)),
         },
         input_geometry=loaded_geometry,
         output_geometry=loaded_geometry,
+        gradient_transform_status=(
+            "reoriented_to_ras" if loaded_from_dicom else "none"
+        ),
     ))
 
     # -------------------------------------------------------------------------
@@ -469,6 +478,7 @@ def run_preprocessing(
             "bvecs_rotated" if rotated_bvecs is not None else "none"
         ),
         n_volumes_rotated=n_dwi if rotated_bvecs is not None else 0,
+        max_rotation_deg=max_rotation_deg,
     ))
 
     output_paths = save_preprocessed(

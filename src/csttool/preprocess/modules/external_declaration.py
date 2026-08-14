@@ -32,6 +32,18 @@ _DECLARES_MOTION_CORRECTION = ("topup-eddy", "eddy-only")
 DEFAULT_EXTERNAL_CORRECTION = "unknown"
 
 
+def declares_external_work(declared: str | None) -> bool:
+    """Does this declaration assert that external correction actually happened?
+
+    `none` and `unknown` do not: one says nothing was done, the other says
+    nothing was claimed. Neither describes a step that occurred, so neither
+    belongs in a ledger of steps that occurred — the declaration itself is
+    still recorded unconditionally in the report's `external_correction` field.
+    """
+    value = declared or DEFAULT_EXTERNAL_CORRECTION
+    return value not in ("unknown", "none")
+
+
 def declaration_record(declared: str | None) -> dict:
     """Build the provenance record for an external-correction declaration.
 

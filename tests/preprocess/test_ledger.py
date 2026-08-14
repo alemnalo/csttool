@@ -132,6 +132,26 @@ def test_no_external_stage_when_nothing_is_declared(dataset, tmp_path):
     assert report["stages"][0]["stage"] == "load"
 
 
+@pytest.mark.parametrize("declaration", ["unknown", "none"])
+def test_declaring_no_external_work_adds_no_stage(dataset, tmp_path, declaration):
+    """`none` means nothing happened; it must not appear as a stage that did.
+
+    Found on a real run: `--input-corrected none` produced a stage with
+    status `declared_external` and a skip_reason reading "Performed outside
+    csttool, before the data was received" — for a declaration stating that
+    no external correction was performed. The stage list records steps that
+    occurred; the declaration is recorded regardless, in processing_params.
+    """
+    report = run(dataset, tmp_path / "out", external_correction=declaration)
+
+    assert all(s["stage"] != "external_correction" for s in report["stages"])
+    assert report["processing_params"]["external_correction"] == {
+        "declared": declaration,
+        "verified_by_csttool": False,
+        "source": "user-declaration",
+    }
+
+
 def test_stage_order_matches_execution_order(dataset, tmp_path):
     report = run(dataset, tmp_path / "out", apply_gibbs_correction=True)
     names = [s["stage"] for s in report["stages"]]
@@ -193,7 +213,39 @@ def test_gradient_transform_records_the_rotation(dataset, tmp_path):
     assert gt["status"] == "bvecs_rotated"
     assert gt["n_volumes_rotated"] == 6  # all DWI volumes, b0 excluded
     assert gt["max_rotation_deg"] is not None
-    assert stage(report, "save")["gradient_transform"]["status"] == "bvecs_rotated"
+    save_gt = stage(report, "save")["gradient_transform"]
+    assert save_gt["status"] == "bvecs_rotated"
+    # The save stage reports the same rotation it wrote out, not a bare count.
+    assert save_gt["n_volumes_rotated"] == gt["n_volumes_rotated"]
+    assert save_gt["max_rotation_deg"] == gt["max_rotation_deg"]
+
+
+def test_load_stage_reports_ras_reorientation_for_dicom_input(dataset, tmp_path):
+    """The DICOM branch reorients image + b-vectors to RAS; the ledger says so.
+
+    NIfTI input reorients nothing, so it reports `none`. Pinned in both
+    directions because the two branches are otherwise indistinguishable in
+    the report.
+    """
+    from csttool.preprocess.modules import load_dataset as ld
+
+    report = run(dataset, tmp_path / "nifti_in")
+    assert stage(report, "load")["gradient_transform"]["status"] == "none"
+    assert stage(report, "load")["parameters"]["source"] == "nifti"
+
+    # Same dataset, but make the loader take its DICOM branch.
+    import csttool.preprocess.preprocess as preproc_mod
+
+    monkey = tmp_path / "dicom_out"
+    orig = preproc_mod.is_dicom_directory
+    try:
+        preproc_mod.is_dicom_directory = lambda p: True
+        report = run(dataset, monkey)
+    finally:
+        preproc_mod.is_dicom_directory = orig
+
+    assert stage(report, "load")["gradient_transform"]["status"] == "reoriented_to_ras"
+    assert stage(report, "load")["parameters"]["source"] == "dicom"
 
 
 # ---------------------------------------------------------------------------

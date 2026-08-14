@@ -20,6 +20,19 @@ from csttool.preprocess.modules.gradient_validation import (
     reorient_dwi_to_ras,
 )
 
+def is_dicom_directory(dir_path) -> bool:
+    """Would :func:`load_dataset` take its DICOM branch for this directory?
+
+    Exposed so callers can report what the load stage did without duplicating
+    the predicate (the DICOM branch reorients image *and* b-vectors to RAS;
+    the NIfTI branch touches neither).
+    """
+    dir_path = Path(dir_path)
+    if not dir_path.is_dir():
+        return False
+    return any(f.suffix == ".dcm" for f in dir_path.iterdir())
+
+
 def load_dataset(
     dir_path: str,
     fname: str,
@@ -58,7 +71,7 @@ def load_dataset(
         raise ValueError(f"Directory {dir_path} does not exist")
 
     # Check if DICOM directory
-    if any(f.suffix == ".dcm" for f in dir_path.iterdir()):
+    if is_dicom_directory(dir_path):
         print(f"DICOM directory detected: {dir_path}")
         # Convert DICOM to NIfTI.
         # AU21: dicom2nifti's ``reorient_nifti=True`` reorients the *image* to
