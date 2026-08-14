@@ -539,3 +539,99 @@ there is no PASS/FAIL, no colour, no icon, no suppression of any regional value,
 and — deliberately — **no `homology_flag` key in the JSON schema** for a consumer
 to start depending on. Adding one later is not a breaking change; removing one
 would be. Establishing a threshold needs ≥20 subjects and is future work.
+
+## Why b-vector rotation accompanies motion correction
+
+Motion correction resamples every DWI volume onto the reference volume's pose. The
+diffusion-encoding direction recorded for volume *k*, however, is the one that applied
+*before* the head moved. Ship the resampled volumes with the original `.bvec` and the
+image and its gradient table describe different anatomies — which biases FA and MD and
+tilts the principal eigenvector, silently, because nothing about the files looks wrong.
+This is Leemans & Jones (2009); the fix is to apply the inverse of each volume's
+estimated rotation to its b-vector.
+
+Three conventions have to line up, and each one is settled from source rather than
+assumed:
+
+**Which direction the transforms point.** DIPY's `motion_correction` returns one
+`AffineMap` affine per volume, operating in **world** coordinates and mapping
+static-world → moving-world — the pull transform used for resampling, which numerically
+equals that volume's forward head motion. Verified empirically as well as from the
+docstring: planting a +10° world rotation into a synthetic volume and running the
+correction returns `polar(reg_affine) ≈ Rz(+10°)`, not its inverse.
+
+**How a b-vector responds.** `dipy.core.gradients.reorient_bvecs` applies the *inverse*
+polar rotation of each affine to the corresponding non-b0 b-vector. That is exactly the
+Leemans & Jones rule for a forward-motion affine, and it is DIPY's own convention,
+pinned by DIPY's own test. csttool calls the primitive rather than re-deriving the
+rotation direction — a sign error here is invisible in the output and doubles the
+error instead of removing it.
+
+**Which frame the b-vectors live in.** This is the part the library does not do for
+you. DIPY's affines are world-space; b-vectors follow the DIPY/FSL convention and are
+expressed in the frame of the **voxel axes**. A world rotation must therefore be
+conjugated into that frame:
+
+    g' = normalise( V⁻¹ · R_world⁻¹ · V · g )
+
+It matters. For LAS-stored data (`V = diag(-1, 1, 1)`, the common dcm2niix output),
+`V⁻¹ Rz(-θ) V = Rz(+θ)` — applying the world rotation directly would rotate the
+b-vector the wrong way. For RAS+ data `V = I` and the conjugation is a no-op, which is
+exactly why a test suite built only on RAS fixtures would never catch the error.
+
+### Why `V` is the orientation only, not the full affine
+
+`V = polar(image_affine[:3, :3])[0]` — the orthonormal rotation, with voxel scaling
+discarded.
+
+A b-vector is a physical unit direction whose components happen to be given in the
+frame of the voxel axes. Voxel size is a property of the sampling grid, not of the
+direction: `(1, 0, 0)` means "along the +i voxel axis in physical space" whether the
+voxel is 1 mm or 6 mm. Using the full 3×3 would treat the b-vector as a displacement in
+index space, which is a different object.
+
+The decisive consequence is testable. With an axis-aligned affine the ground truth is
+unambiguous — the corrected b-vector is `R_world⁻¹ g` — and it cannot depend on the
+zooms. `A⁻¹ R⁻¹ A` violates that for anisotropic voxels; `V⁻¹ R⁻¹ V` satisfies it
+exactly. The test suite asserts the invariance directly, and separately asserts that
+the rejected formula would give a different answer, so the choice cannot be silently
+reverted. DIPY takes the same position one level down: `reorient_bvecs` strips scale
+from the motion affines by the same polar decomposition.
+
+## Why external correction is declared, not verified
+
+csttool skips its own preprocessing by default, so most runs operate on data another
+tool has already corrected. That was previously an implicit assumption written into a
+metadata string — `"Skipped (External Preprocessing Used)"` — which asserted, as fact,
+something nobody had stated and csttool cannot check.
+
+csttool cannot check it. Whether a DWI has been through TOPUP and EDDY is not
+recoverable from the image and its sidecars: distortion correction leaves no signature
+a tool can reliably detect, and BIDS metadata records the acquisition, not the
+processing that followed. Any inference would be a guess presented as provenance.
+
+So the mechanism is a declaration. `--input-corrected` records what the user says was
+done, always as `{"declared": …, "verified_by_csttool": false, "source":
+"user-declaration"}`. There is no code path that can set `verified_by_csttool` true —
+a field that is always false is more honest than one that looks settable. The
+declaration changes no processing decision.
+
+Three design points follow:
+
+**`unknown` is the default, and is not the same as `none`.** "Nobody said" and "the
+user declared that nothing was done" are different states with different consequences
+for how a result should be read. Collapsing them is what made the old string
+misleading.
+
+**A conflicting declaration warns; it does not block.** Declaring `topup-eddy` together
+with `--perform-motion-correction` is usually a mistake, so it prints a high-visibility
+warning and records it in the provenance. It does not error. An unverified declaration
+must not be able to veto an explicit flag — a mistyped or over-broad declaration would
+otherwise block a legitimate run, and running motion correction on already-corrected
+data is undesirable rather than invalid (a user may legitimately want to measure the
+residual motion an external tool left behind).
+
+**Chronology is preserved.** In the stage ledger, declared external work is *prepended*
+to csttool's own stages, because it happened before csttool received the data. A
+thesis-style run serialises as external TOPUP/EDDY → csttool denoise → mask, so no
+report can imply csttool denoised before corrections that preceded it.

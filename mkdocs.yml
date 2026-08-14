@@ -107,6 +107,7 @@ nav:
   - How-To Guides:
       - Multiple Subjects: how-to/multiple-subjects.md
       - Data Formats: how-to/data-formats.md
+      - Reproducing the Thesis Pipeline: how-to/reproduce-thesis-pipeline.md
       - Troubleshooting: how-to/troubleshooting.md
   - Reference:
       - CLI Commands:

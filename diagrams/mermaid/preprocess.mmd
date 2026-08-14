@@ -18,7 +18,9 @@ flowchart TD
     %% Step 3: Denoise
     denoise_method{Denoise<br/>Method}
 
-    denoise_patch2self["Patch2Self Denoising<br/>Self-supervised method<br/>No noise model needed<br/>Default method"]
+    denoise_mppca["MPPCA Denoising<br/>Marchenko-Pastur PCA<br/>Self-adaptive noise estimate<br/>Default method"]
+
+    denoise_patch2self["Patch2Self Denoising<br/>Self-supervised method<br/>No noise model needed"]
 
     denoise_nlmeans["NLMeans Denoising<br/>Non-local means<br/>Requires coil count (--coil-count)<br/>Noise estimation from background"]
 
@@ -35,12 +37,12 @@ flowchart TD
     %% Step 6: Motion Correction (Optional)
     motion_check{Apply Motion<br/>Correction?}
 
-    motion["Motion Correction<br/>perform_motion_correction<br/>Volume-to-volume registration<br/>Affine transforms<br/>Generate motion parameters"]
+    motion["Motion Correction<br/>perform_motion_correction<br/>Volume-to-reference registration<br/>Affine transforms<br/>b-vectors rotated (reorient_gradients)"]
 
     motion_skip["Skip Motion Correction"]
 
     %% Step 7: Save Outputs
-    save["Save Preprocessed Data<br/>save_preprocessed<br/>Output: *_dwi_preproc_[mc/nomc].nii.gz<br/>Copy gradient files<br/>Save brain mask<br/>Save processing report (JSON)"]
+    save["Save Preprocessed Data<br/>save_preprocessed<br/>Output: *_dwi_preproc_[mc/nomc].nii.gz<br/>Copy .bval; copy or write rotated .bvec<br/>Save brain mask<br/>Save report JSON (stage ledger + provenance)"]
 
     %% Step 8: Visualizations (Optional)
     viz_check{Save<br/>Visualizations?}
@@ -61,9 +63,11 @@ flowchart TD
     reslice --> denoise_method
     reslice_skip --> denoise_method
 
-    denoise_method -->|patch2self<br/>default| denoise_patch2self
+    denoise_method -->|mppca<br/>default| denoise_mppca
+    denoise_method -->|patch2self| denoise_patch2self
     denoise_method -->|nlmeans| denoise_nlmeans
 
+    denoise_mppca --> brain_mask
     denoise_patch2self --> brain_mask
     denoise_nlmeans --> brain_mask
 
@@ -92,7 +96,7 @@ flowchart TD
     classDef skipNode fill:#eceff1,stroke:#607d8b,stroke-width:1px
 
     class input inputNode
-    class load,reslice,denoise_patch2self,denoise_nlmeans,brain_mask,gibbs,motion,save,viz processNode
+    class load,reslice,denoise_mppca,denoise_patch2self,denoise_nlmeans,brain_mask,gibbs,motion,save,viz processNode
     class reslice_check,denoise_method,gibbs_check,motion_check,viz_check decisionNode
     class output outputNode
     class reslice_skip,gibbs_skip,motion_skip,viz_skip skipNode

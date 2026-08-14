@@ -116,7 +116,10 @@ silently producing a corrupt tensor fit — on:
   `.bvec` file). b0 b-vectors may be zero.
 
 The b0 threshold is the single default in `csttool.defaults` (`50 s/mm²`),
-exposed via `--b0-threshold` on `preprocess`, `track`, and `run`.
+exposed via `--b0-threshold` on `preprocess`, `track`, and `run`. One execution
+uses one threshold throughout: it builds the gradient table, and the resulting
+`gtab.b0s_mask` is what brain masking and Patch2Self read, so no stage can
+disagree about which volumes are b0.
 
 !!! note "DICOM b-vector reorientation"
     The dicom2nifti fallback converter reorients the **image** to a standard

@@ -276,9 +276,87 @@ the flat table.
 | --- | --- |
 | `*_log-import.json` | DICOM import report: converter used, `fallback_used`, warnings, scanner manufacturer |
 | `*_log-series.json` | DICOM series analysis: acquisition parameters, suitability score |
-| `*_log-preproc.json` | Preprocessing report: methods applied, motion statistics |
+| `*_log-preproc.json` | Preprocessing report: ordered stage ledger, provenance block, legacy parameter summary — see [below](#preprocessing-report) |
 | `*_log-tracking.json` | Tracking report: parameters, streamline counts, timing |
 | `*_log-extraction.json` | Extraction report: ROI approach, streamline counts per hemisphere |
+
+---
+
+## Preprocessing report
+
+The preprocessing report (`{stem}_report.json`, relocated to `*_log-preproc.json` by
+the BIDS reorganisation) is the machine-readable record of what preprocessing did.
+
+```jsonc
+{
+  "schema_version": 1,
+  "timestamp": "...", "filename_stem": "sub-001_dwi_preproc_mc",
+  "data_shape": [96, 96, 60, 65], "data_dtype": "float32", "voxel_size": [2.0, 2.0, 2.0],
+
+  // Flat summary. Retained unchanged for existing consumers.
+  "processing_params": { "denoise_method": "mppca", "b0_threshold": 50, "...": "..." },
+
+  // git commit, Python and dependency versions, platform, hardware, thread env.
+  // The same block the tracking and metrics reports carry. Versions live here
+  // only — they are never duplicated per stage.
+  "provenance": { "...": "get_provenance_dict() output" },
+
+  // The ledger. Order is the chronology.
+  "stages": [
+    {
+      "stage": "external_correction",     // present only when declared
+      "performed_by": "external",
+      "status": "declared_external",
+      "parameters": {
+        "declared": "topup-eddy",
+        "verified_by_csttool": false,     // always false; csttool cannot check
+        "source": "user-declaration"
+      }
+    },
+    {
+      "stage": "motion_correction",
+      "performed_by": "csttool",
+      "requested": true,
+      "status": "executed",
+      "method": "register_dwi_series [center_of_mass, translation, rigid, affine]",
+      "backend": "dipy",
+      "parameters": { "...": "stage-specific" },
+      "input_geometry":  { "shape": [...], "zooms": [...], "axis_codes": "RAS" },
+      "output_geometry": { "shape": [...], "zooms": [...], "axis_codes": "RAS" },
+      "gradient_transform": {
+        "status": "bvecs_rotated",
+        "n_volumes_rotated": 64,
+        "max_rotation_deg": 0.84
+      },
+      "warnings": [],
+      "skip_reason": null
+    }
+  ]
+}
+```
+
+**Stages** are `load`, `reslice`, `denoise`, `mask`, `gibbs`, `motion_correction`,
+`save`, plus `external_correction` when a declaration was made. Every entry carries
+the same key set whether or not it applies, so a consumer tests values rather than
+key existence.
+
+**Status** is drawn from a closed vocabulary:
+
+| Status | Meaning |
+| --- | --- |
+| `executed` | csttool ran this stage |
+| `not_requested` | optional stage the caller did not ask for (see `skip_reason`) |
+| `failed_continued` | requested, raised, and the run continued without it (see `warnings`) |
+| `declared_external` | user-declared work that preceded csttool receiving the data |
+
+**`gradient_transform.status`** is `none`, `not_required` (the stage cannot change the
+physical gradient frame), `reoriented_to_ras` (the DICOM load path), or
+`bvecs_rotated`.
+
+**Ordering is provenance.** Externally declared correction is listed first, because it
+happened before csttool received the data. A thesis-style run therefore serialises as
+external TOPUP/EDDY → csttool denoise → mask, and no report can imply csttool denoised
+before corrections that preceded it.
 
 ---
 

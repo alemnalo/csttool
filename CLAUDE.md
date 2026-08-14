@@ -14,7 +14,8 @@ See `docs/contributing/architecture.md` for module layout and `docs/explanation/
 - RNG seed defaults to 42; every stochastic step must plumb through `reproducibility/`.
 - Every CLI run writes a provenance block (git commit, Python version, dependency
   versions, platform, hardware info, command line, thread env vars) into the
-  tracking report JSON and the bilateral metrics JSON. The HTML/PDF report
+  tracking report JSON, the bilateral metrics JSON, and the preprocessing
+  report JSON (which also carries an ordered per-stage ledger). The HTML/PDF report
   surfaces a filtered subset (hardware, dependencies, thread environment) for
   scientific readers.
 - Bidirectional CST extraction's artifact_index diagnostic (see CHANGELOG) is the agreed method for separating cortical-placement artifacts from genuine L/R asymmetry — don't propose alternatives without checking CHANGELOG first.

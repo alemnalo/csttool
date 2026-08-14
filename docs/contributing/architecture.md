@@ -46,9 +46,9 @@ The full pipeline path through the codebase:
 1. `cli/__init__.py:main` parses the global argv and dispatches by subcommand name.
 2. `cli/commands/run.py:cmd_run` parses run-specific flags and calls each stage in turn:
 3. `ingest.import_subject` → DICOM/NIfTI ingestion, BIDS-style staging.
-4. `preprocess.preprocess` → Patch2Self/NLMeans denoise, optional Gibbs unringing, optional motion correction, brain-mask via median Otsu.
+4. `preprocess.preprocess` → optional reslice, MPPCA denoise (Patch2Self/NLMeans optional), brain-mask via median Otsu, optional Gibbs unringing, optional motion correction (with b-vector rotation).
 5. `tracking.modules.run_tracking` → CSA-ODF model fit, deterministic propagation with `ThresholdStoppingCriterion`, writes whole-brain `.trk`.
-6. `extract.extract_cst` → atlas registration (ANTs SyN via `nilearn`), ROI dilation, filter streamlines by chosen method.
+6. `extract.extract_cst` → atlas registration (DIPY `SymmetricDiffeomorphicRegistration`), ROI dilation, filter streamlines by chosen method.
 7. `metrics.compute_metrics` → analyse each hemisphere, compute laterality index, render HTML report, optionally rasterise to PDF.
 
 Each stage is independently CLI-callable (`csttool preprocess`, `csttool track`, etc.) — the public entry function is the same one `run` invokes.

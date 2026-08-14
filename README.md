@@ -14,7 +14,7 @@ The pipeline runs in six sequential steps:
 |------|---------|-------------|
 | 1 | `doctor` | Verify Python environment and external dependencies |
 | 2 | `import` | Convert DICOM to NIfTI, or validate an existing NIfTI dataset |
-| 3 | `preprocess` | Denoise (patch2self or NLMEANS), skull-strip, optional motion correction and Gibbs unringing |
+| 3 | `preprocess` | Denoise (MPPCA by default; Patch2Self or NLMeans optional), skull-strip, optional Gibbs unringing and motion correction |
 | 4 | `track` | Whole-brain deterministic tractography using a CSA ODF model |
 | 5 | `extract` | Atlas-based bilateral CST extraction via MNI152 registration and Harvard-Oxford ROI masks |
 | 6 | `metrics` | Per-side and bilateral metrics (FA, MD, morphology, tract profiles, asymmetry indices) with PDF/HTML reports |

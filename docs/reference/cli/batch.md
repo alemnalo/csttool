@@ -51,10 +51,18 @@ Recommended for reproducibility.
         {
           "id": "sub-002",
           "dicom": "/raw/sub-002/dicoms/",
-          "session": "ses-01"
+          "session": "ses-01",
+          "options": {
+            "input_corrected": "topup-eddy"
+          }
         }
       ]
     }
+
+Keys under `global_options` apply to every subject; a subject's `options` block
+overrides them for that subject only. Any option `csttool run` accepts can be set
+this way — including `input_corrected`, which declares what correction was applied
+to that subject's data before csttool received it.
 
 ### BIDS auto-discovery
 
@@ -110,8 +118,8 @@ See [Output formats](../output-formats.md) for details.
 
 | Flag | Description |
 | --- | --- |
-| `--preprocessing` / `--no-preprocessing` | Enable or skip preprocessing (default: enabled) |
-| `--denoise-method` | `mppca` (default), `patch2self`, `nlmeans`, or `none` |
+| `--preprocessing` / `--no-preprocessing` | Enable or skip preprocessing (default: enabled). In v0.5.0 and earlier this setting never reached the worker, so every batch subject was processed *without* preprocessing regardless of what was requested; batch outputs from those versions differ from outputs produced now. |
+| `--denoise-method` | `mppca` (default), `patch2self`, or `nlmeans` |
 | `--generate-pdf` | Generate PDF report for each subject |
 
 ### Pipeline control

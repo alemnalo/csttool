@@ -153,6 +153,63 @@ pathology, passthrough with manual laterality assessment is more appropriate.
 
 ---
 
+## Preprocessing
+
+### csttool does not correct distortion or eddy currents
+
+`csttool preprocess` performs denoising, brain masking, optional Gibbs unringing and
+optional **affine, between-volume motion correction**. That is the whole of it. There
+is no susceptibility-distortion correction (no TOPUP-equivalent, no fieldmap or
+fieldmapless method), no eddy-current model, no outlier-slice detection or
+replacement, no slice-to-volume estimation and no bias-field correction.
+
+Those corrections matter, and for most datasets they should be done — with FSL, QSIPrep
+or an equivalent — **before** csttool sees the data. csttool's own preprocessing is off
+by default precisely because the common case is data another tool has already corrected.
+
+### Correction history is declared, not verified
+
+Because csttool cannot detect what was already done to a DWI, `--input-corrected`
+records the user's declaration and nothing more. Every such record carries
+`verified_by_csttool: false`, and there is no code path that can set it true. A
+declaration changes no processing decision; it exists so the provenance says what
+happened rather than assuming it.
+
+If you make no declaration and let csttool pass the data through untouched, a run-time
+advisory says so, and the report records `external_correction.declared: "unknown"` —
+which is deliberately distinct from `"none"`.
+
+### Motion correction: an approximation, and not a deterministic one
+
+When `--perform-motion-correction` is used:
+
+- The correction is **affine and between-volume**. Within-volume (slice-to-volume)
+  motion is not modelled, and the affine fit's shear and scale components are
+  discarded by the polar decomposition used to extract the rotation — the same
+  approximation class as FSL eddy's rotation propagation.
+- b-vectors are rotated by the estimated per-volume transforms and the rotated `.bvec`
+  is written alongside the output (Leemans & Jones 2009). **Before this was
+  implemented, motion-corrected runs shipped unrotated gradients**; results produced by
+  older versions with this flag should be regenerated.
+- The registration optimiser is not guaranteed bit-reproducible across runs or
+  platforms, so `--perform-motion-correction` is an **exception to csttool's
+  determinism guarantees**. The determinism test suite does not cover the
+  preprocessing stage.
+- If the correction or the gradient rotation fails, the run continues with the
+  uncorrected data and the original gradients — always a mutually consistent pair —
+  and the report records `motion_correction_requested: true` alongside
+  `motion_correction: false`.
+
+### Batch preprocessing in v0.5.0 and earlier
+
+`csttool batch` documented preprocessing as enabled by default, but the setting never
+reached the worker process: every subject was tracked on raw data. Batch results
+produced by v0.5.0 and earlier are not comparable with results produced now. Re-run
+affected cohorts, or pass `--no-preprocessing` to reproduce the old behaviour
+deliberately.
+
+---
+
 ## Software Dependencies
 
 csttool relies on:

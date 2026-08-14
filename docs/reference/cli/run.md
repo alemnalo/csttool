@@ -123,6 +123,8 @@ dataset (so that `SourceDatasets: bids::` resolves correctly):
 | --- | --- |
 | `--preprocess` | Enable preprocessing (denoising + brain masking). Default: skipped. |
 | `--denoise-method` | `mppca` (default), `patch2self`, or `nlmeans` |
+| `--b0-threshold` | b-value at or below which a volume counts as b=0, in s/mm² (default: 50). Drives the gradient table, brain masking and Patch2Self. |
+| `--input-corrected` | Declare correction applied to the input *before* csttool saw it: `unknown` (default), `none`, `topup-eddy`, `eddy-only`, `other`. Recorded as a user declaration, never verified. |
 | `--unring` | Enable Gibbs unringing |
 | `--perform-motion-correction` | Enable between-volume motion correction |
 | `--target-voxel-size X Y Z` | Reslice to target voxel size (mm) |
