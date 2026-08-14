@@ -858,8 +858,8 @@ def main() -> None:
         "--denoise-method",
         type=str,
         default=DEFAULT_DENOISE_METHOD,
-        choices=["nlmeans", "patch2self", "mppca", "none"],
-        help=f"Denoising method: nlmeans, patch2self, mppca, or none (default: {DEFAULT_DENOISE_METHOD})"
+        choices=["nlmeans", "patch2self", "mppca"],
+        help=f"Denoising method: nlmeans, patch2self, or mppca (default: {DEFAULT_DENOISE_METHOD})"
     )
     
     preproc_group = p_batch.add_mutually_exclusive_group()

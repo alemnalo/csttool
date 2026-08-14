@@ -13,6 +13,8 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime
 
+from csttool.defaults import DEFAULT_DENOISE_METHOD
+
 from .modules.locking import acquire_subject_lock, release_lock
 from .modules.logging_setup import setup_subject_logger
 
@@ -52,7 +54,7 @@ class BatchConfig:
     timeout_minutes: int = 120
     keep_work: bool = False
     # Pipeline overrides
-    denoise_method: str = "nlmeans"
+    denoise_method: str = DEFAULT_DENOISE_METHOD
     preprocessing: bool = True
     generate_pdf: bool = False
     # ... any other arguments that cmd_run accepts
@@ -210,10 +212,59 @@ def run_subject_with_timeout(
             log_path=log_path
         )
 
+def _build_run_namespace(
+    subject: SubjectSpec,
+    config: BatchConfig,
+    work_dir: Path,
+) -> argparse.Namespace:
+    """
+    Build the ``cmd_run`` argument namespace for one batch subject.
+
+    Extracted from ``_run_subject_worker`` so the worker boundary is testable
+    without spawning a process.
+
+    Attribute-name translation happens here: ``BatchConfig`` calls the flag
+    ``preprocessing`` (the name the batch CLI and manifests use), while
+    ``cmd_run`` reads ``args.preprocess``. Nothing bridged the two, so batch
+    runs silently took the pass-through branch no matter what the config said.
+    The dataclass field is deliberately *not* renamed — ``compute_config_hash``
+    hashes ``asdict(config)`` and existing ``_done.json`` resume markers must
+    stay comparable — so the translation is done at this boundary instead, and
+    both attributes are left on the namespace.
+    """
+    # Merge global options with per-subject options
+    merged_options = asdict(config)
+    merged_options.update(subject.options)
+
+    # Construct Namespace compatible with cmd_run
+    args = argparse.Namespace()
+    for k, v in merged_options.items():
+        setattr(args, k, v)
+
+    # BatchConfig.preprocessing -> cmd_run's args.preprocess
+    args.preprocess = bool(merged_options.get("preprocessing", True))
+
+    # Ensure correct input paths are set
+    setattr(args, 'subject_id', subject.subject_id)
+    setattr(args, 'session_id', subject.session_id)
+    setattr(args, 'out', work_dir)
+
+    if subject.input_type == "nifti":
+        setattr(args, 'nifti', subject.input_path)
+        setattr(args, 'dicom', None)
+    else:
+        setattr(args, 'dicom', subject.input_path)
+        setattr(args, 'nifti', None)
+        setattr(args, 'series', None)
+        setattr(args, 'series_uid', subject.series_uid)
+
+    return args
+
+
 def _run_subject_worker(
-    subject: SubjectSpec, 
-    config: BatchConfig, 
-    log_path: Path, 
+    subject: SubjectSpec,
+    config: BatchConfig,
+    log_path: Path,
     queue: multiprocessing.Queue
 ) -> None:
     """
@@ -237,30 +288,9 @@ def _run_subject_worker(
         # We'll use a simplified version of cmd_run logic directly
         # to avoid argparse dependency inside the worker.
         from csttool.cli.commands.run import cmd_run
-        
-        # Merge global options with per-subject options
-        merged_options = asdict(config)
-        merged_options.update(subject.options)
-        
-        # Construct Namespace compatible with cmd_run
-        args = argparse.Namespace()
-        for k, v in merged_options.items():
-            setattr(args, k, v)
-            
-        # Ensure correct input paths are set
-        setattr(args, 'subject_id', subject.subject_id)
-        setattr(args, 'session_id', subject.session_id)
-        setattr(args, 'out', work_dir) 
-        
-        if subject.input_type == "nifti":
-            setattr(args, 'nifti', subject.input_path)
-            setattr(args, 'dicom', None)
-        else:
-            setattr(args, 'dicom', subject.input_path)
-            setattr(args, 'nifti', None)
-            setattr(args, 'series', None)
-            setattr(args, 'series_uid', subject.series_uid)
-            
+
+        args = _build_run_namespace(subject, config, work_dir)
+
         # 4. Execute pipeline
         # cmd_run prints to stdout, which console handler of subj_logger catches
         # if verbose is set. Actually cmd_run uses print(), which doesn't go through logging.

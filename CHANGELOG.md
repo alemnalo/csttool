@@ -277,6 +277,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`csttool batch` never actually preprocessed anything.** ⚠️ **Output-changing.**
+  `BatchConfig.preprocessing` (documented default: enabled) was flattened onto the
+  worker's argument namespace under the name `preprocessing`, but `cmd_run` reads
+  `args.preprocess`. Nothing bridged the two, so every batch subject took the
+  pass-through branch and was tracked on raw, un-denoised, un-masked data — silently,
+  and regardless of `--preprocessing`/`--no-preprocessing`. The namespace construction
+  is now a testable helper, `_build_run_namespace`, which translates the name at the
+  worker boundary. The dataclass field keeps its name on purpose: `compute_config_hash`
+  hashes `asdict(config)`, so renaming it would invalidate every existing `_done.json`
+  resume marker. Config hashes are unchanged (pinned by a test).
+  **Batch outputs will differ from previous runs**: subjects now really are denoised
+  and skull-stripped before tractography, which is what the docs have always claimed.
+  Pass `--no-preprocessing` to keep the old effective behaviour explicitly.
+- **`csttool batch --denoise-method none` is no longer offered.** The choice existed
+  in the batch parser but `denoise()` has never implemented it (it raises
+  `ValueError`). While batch preprocessing was broken the branch was unreachable;
+  with the fix above it would have failed every subject that selected it. Removed
+  rather than implemented — an "input is already denoised" mode is a feature, not a
+  repair. Scripts passing it now get an argparse error instead of silently doing
+  nothing.
+- **Stale `BatchConfig.denoise_method` default.** The dataclass still defaulted to
+  `"nlmeans"` after the shared default moved to `mppca`. Unreachable through the CLI
+  (`cmd_batch` always sets it) but a trap for library callers constructing
+  `BatchConfig` directly; it now reads `DEFAULT_DENOISE_METHOD`.
+
 - **One-page A4 report: the redesign actually fits now.** The redesigned report
   rendered on two pages (the QC triptych and the reproducibility footer spilled
   onto page 2) while the page div hid the overflow with a fixed height plus
