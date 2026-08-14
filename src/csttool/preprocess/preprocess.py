@@ -15,6 +15,10 @@ from .modules.denoise import denoise
 from .modules.gibbs_unringing import gibbs_unringing
 from .modules.background_segmentation import background_segmentation
 from .modules.perform_motion_correction import perform_motion_correction
+from .modules.reorient_gradients import (
+    max_rotation_angle_deg,
+    rotate_bvecs_for_motion,
+)
 from .modules.reslice_voxels import reslice_voxels
 from .modules.save_preprocessed import save_preprocessed
 
@@ -167,7 +171,10 @@ def run_preprocessing(
     # -------------------------------------------------------------------------
     motion_correction_applied = False
     reg_affines = None
-    
+    rotated_bvecs = None
+    max_rotation_deg = None
+    warnings: list[str] = []
+
     if apply_motion_correction:
         try:
             preprocessed, reg_affines = perform_motion_correction(
@@ -178,9 +185,38 @@ def run_preprocessing(
             )
             motion_correction_applied = True
             print("PREPROCESSING: Motion correction complete")
+
+            # The volumes have been rotated onto the reference pose, so the
+            # b-vectors must follow: a resampled volume paired with its
+            # nominal gradient direction biases FA/MD and tilts V1 (Leemans &
+            # Jones 2009). This sits inside the same try block on purpose — if
+            # the rotation cannot be computed, the handler below discards the
+            # motion-corrected data too, so what ships is always a mutually
+            # consistent data/gradient pair rather than corrected volumes with
+            # uncorrected gradients (the defect this milestone fixes).
+            rotated_bvecs = rotate_bvecs_for_motion(
+                gtab.bvals,
+                gtab.bvecs,
+                reg_affines,
+                gtab.b0s_mask,
+                affine,
+                b0_threshold=b0_threshold,
+            )
+            max_rotation_deg = max_rotation_angle_deg(reg_affines)
+            print(
+                f"PREPROCESSING: b-vectors rotated "
+                f"(max estimated head rotation {max_rotation_deg:.2f}°)"
+            )
         except Exception as e:
             print(f"PREPROCESSING: Motion correction failed: {e}")
             print("   Continuing without motion correction")
+            warnings.append(
+                f"Motion correction was requested but failed ({type(e).__name__}: {e}); "
+                "continued with uncorrected data and the original gradients."
+            )
+            motion_correction_applied = False
+            reg_affines = None
+            rotated_bvecs = None
             preprocessed = data_for_motion
     else:
         preprocessed = data_for_motion
@@ -214,13 +250,21 @@ def run_preprocessing(
         output_dir=output_dir,
         filename_stem=output_stem,
         gradient_files=gradient_files if gradient_files else None,
+        bvecs=rotated_bvecs,
         brain_mask=brain_mask,
         processing_params={
             'denoise_method': denoise_method,
+            'b0_threshold': b0_threshold,
             'gibbs_correction': apply_gibbs_correction,
+            # requested vs applied: a failed motion correction used to be
+            # distinguishable only by the output filename suffix.
+            'motion_correction_requested': apply_motion_correction,
             'motion_correction': motion_correction_applied,
+            'bvecs_rotated': rotated_bvecs is not None,
+            'max_rotation_deg': max_rotation_deg,
             'resliced': target_voxel_size is not None,
             'target_voxel_size': target_voxel_size if target_voxel_size else None,
+            'warnings': warnings,
         }
     )
     print(f"PREPROCESSING: Saved outputs to {output_dir}")

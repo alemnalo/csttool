@@ -222,7 +222,11 @@ def main() -> None:
     p_preproc.add_argument(
         "--perform-motion-correction",
         action="store_true",
-        help="Enable between volume motion correction (disabled by default)."
+        help="Enable between-volume motion correction (disabled by default). "
+             "b-vectors are rotated by the estimated per-volume transforms and "
+             "the rotated .bvec is written alongside the output. Affine "
+             "motion correction only: no eddy-current, outlier or "
+             "susceptibility-distortion correction."
     )
     p_preproc.add_argument(
         "--unring",
@@ -628,7 +632,10 @@ def main() -> None:
     p_run.add_argument(
         "--perform-motion-correction",
         action="store_true",
-        help="Enable motion correction during preprocessing"
+        help="Enable between-volume motion correction during preprocessing. "
+             "b-vectors are rotated by the estimated per-volume transforms. "
+             "Affine motion correction only: no eddy-current, outlier or "
+             "susceptibility-distortion correction."
     )
     p_run.add_argument(
         "--target-voxel-size",

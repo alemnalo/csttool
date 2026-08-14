@@ -20,6 +20,7 @@ def save_preprocessed(
     filename_stem: str,
     *,
     gradient_files: dict[str, str | Path] | None = None,
+    bvecs: np.ndarray | None = None,
     brain_mask: np.ndarray | None = None,
     metadata: dict | None = None,
     processing_params: dict | None = None,
@@ -42,6 +43,15 @@ def save_preprocessed(
     gradient_files : dict or None, optional
         Dictionary with keys 'bval' and 'bvec' pointing to source files.
         If provided, these will be copied to the output directory.
+    bvecs : np.ndarray or None, optional
+        Transformed b-vectors, shape (N, 3), in the DIPY voxel-frame
+        convention. When given, the ``.bvec`` sidecar is *written* from this
+        array (3xN on disk, the dcm2niix/FSL layout) instead of copied from
+        ``gradient_files``. Used after motion correction, whose per-volume
+        rotations must be carried into the gradients. The ``.bval`` sidecar is
+        always copied: b-values are unaffected by rotation, and copying keeps
+        the file byte-identical rather than round-tripping through the
+        gradient table (which rewrites sub-threshold b-values to 0).
     brain_mask : np.ndarray or None, optional
         3D binary brain mask to save alongside data.
     metadata : dict or None, optional
@@ -91,9 +101,21 @@ def save_preprocessed(
     output_paths['data'] = data_path
     print(f"  ✓ Saved preprocessed data: {data_path}")
     
+    # Write transformed b-vectors, or copy the originals when untransformed
+    if bvecs is not None:
+        bvecs = np.asarray(bvecs, dtype=float)
+        if bvecs.ndim != 2 or bvecs.shape[1] != 3:
+            raise ValueError(f"bvecs must be (N, 3), got shape {bvecs.shape}")
+        dest = output_dir / f"{filename_stem}.bvec"
+        np.savetxt(dest, bvecs.T, fmt="%.8f")
+        output_paths['bvec'] = dest
+        print(f"  ✓ Wrote transformed bvec: {dest}")
+
     # Copy gradient files
     if gradient_files is not None:
         for grad_type in ['bval', 'bvec']:
+            if grad_type == 'bvec' and bvecs is not None:
+                continue  # already written above
             if grad_type in gradient_files:
                 src = Path(gradient_files[grad_type])
                 if src.exists():

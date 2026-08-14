@@ -11,6 +11,10 @@ from .modules.denoise import denoise
 from .modules.gibbs_unringing import gibbs_unringing
 from .modules.background_segmentation import background_segmentation
 from .modules.perform_motion_correction import perform_motion_correction
+from .modules.reorient_gradients import (
+    max_rotation_angle_deg,
+    rotate_bvecs_for_motion,
+)
 from .modules.save_preprocessed import save_preprocessed
 
 from .modules.visualizations import (
@@ -31,6 +35,8 @@ __all__ = [
     'gibbs_unringing',
     'background_segmentation',
     'perform_motion_correction',
+    'rotate_bvecs_for_motion',
+    'max_rotation_angle_deg',
     'save_preprocessed',
     # Visualizations
     'plot_denoising_comparison',

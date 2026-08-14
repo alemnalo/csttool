@@ -277,6 +277,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`--perform-motion-correction` shipped unrotated b-vectors.** ⚠️ **Output-changing,
+  and previous motion-corrected outputs were wrong.** Motion correction resampled
+  every DWI volume onto the reference pose but the original `.bvec` was copied
+  through unchanged, so the data and its gradient table described different
+  anatomies. Fitting a tensor to that pair biases FA/MD and tilts the principal
+  eigenvector — silently, since nothing about the files looks malformed. The
+  per-volume transforms estimated by the registration are now applied to the
+  corresponding b-vectors (Leemans & Jones 2009) and the rotated `.bvec` is written
+  next to the preprocessed NIfTI, where tractography picks it up automatically.
+  New module `preprocess/modules/reorient_gradients.py`.
+  - The rotation direction comes from DIPY's own `reorient_bvecs` primitive, not
+    from re-derived mathematics; the world→voxel frame conversion uses the image
+    affine's **orthonormal orientation** (voxel scaling deliberately excluded — a
+    b-vector is a physical direction, not an index-space displacement). A test
+    asserts the result is invariant to voxel size, and another pins the
+    sign-flipped (LAS) case where a naive rotation would go the wrong way.
+  - **Scope is unchanged and stated plainly**: affine, between-volume motion
+    correction. No eddy-current model, no outlier replacement, no slice-to-volume
+    estimation, no susceptibility-distortion correction.
+  - If anything in the correction step fails, the motion-corrected data is
+    discarded along with it, so what ships is always a mutually consistent
+    data/gradient pair.
+  - **Anyone who has used this flag should re-run**: the tensors, tractograms and
+    metrics derived from those outputs were computed against mismatched gradients.
+- **A failed motion correction was only visible in the output filename.** The
+  preprocessing report now records `motion_correction_requested` alongside
+  `motion_correction`, plus `bvecs_rotated`, `max_rotation_deg` and a `warnings`
+  list, so requested-but-failed is distinguishable from never-requested without
+  parsing the `_mc`/`_nomc` suffix.
+
 - **`--b0-threshold` was parsed and thrown away.** The flag is advertised on
   `preprocess`, `track` and `run`, but only `check-dataset` ever read it — every
   gradient-table construction site used the hard-coded default instead, so a
