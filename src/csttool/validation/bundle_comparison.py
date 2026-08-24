@@ -16,6 +16,8 @@ from nibabel.streamlines import load as load_trk
 from dipy.tracking.streamline import set_number_of_points, length
 from dipy.tracking.utils import density_map
 
+from ..reproducibility.context import DEFAULT_SEED, derive_seed
+
 
 class SpatialMismatchError(ValueError):
     """Raised when tractogram and reference space do not match."""
@@ -284,6 +286,7 @@ def mean_closest_distance(
     reference_path: str | Path,
     step_size_mm: float = 2.0,
     num_samples: int = 1000,
+    seed: int = DEFAULT_SEED,
 ) -> dict:
     """
     Compute Symmetric Mean of Closest Distances (MDF) between two bundles.
@@ -291,7 +294,14 @@ def mean_closest_distance(
     MDF = (mean(min_dist(A->B)) + mean(min_dist(B->A))) / 2
     
     Streamlines are resampled to a fixed step size (mm) for robustness.
+
+    A bundle larger than ``num_samples`` is subsampled, so the returned
+    distances depend on which streamlines are drawn. The draw is seeded from
+    ``seed`` through :func:`~csttool.reproducibility.context.derive_seed`;
+    it previously came from the unseeded global NumPy RNG, which made these
+    numbers differ between runs on the same inputs.
     """
+    rng = np.random.default_rng(derive_seed(seed, "bundle_comparison"))
     cand_streamlines, _, _ = _load_streamlines(candidate_path)
     ref_streamlines, _, _ = _load_streamlines(reference_path)
     
@@ -321,7 +331,9 @@ def mean_closest_distance(
         
         # 2. Subsample bundle using list manipulation
         if len(resampled) > max_samples:
-             indices = np.random.choice(len(resampled), max_samples, replace=False)
+             indices = np.sort(
+                 rng.choice(len(resampled), max_samples, replace=False)
+             )
              resampled = [resampled[i] for i in indices]
              
         # Flatten into point cloud

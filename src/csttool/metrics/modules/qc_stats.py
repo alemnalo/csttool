@@ -619,10 +619,12 @@ def subsample_stability(streamlines, scalar_map, affine,
       standard error of the published mean itself, which subsampling without
       replacement cannot express because at 100 % it has zero variance.
 
-    Seeded from ``DEFAULT_SEED`` rather than ``viz.utils.VIZ_SEED``: the latter
-    is derived through Python's builtin ``hash`` of a string, which is randomised
-    per process unless ``PYTHONHASHSEED`` is set, so it would make this figure
-    irreproducible across runs.
+    Seeded from ``DEFAULT_SEED`` rather than ``viz.utils.VIZ_SEED``, to keep
+    this estimate independent of figure subsampling. (``VIZ_SEED`` was itself
+    unstable across processes until it moved to
+    :func:`~csttool.reproducibility.context.derive_seed`; both are reproducible
+    now, and this call site is left on ``DEFAULT_SEED`` so the published
+    numbers do not shift.)
 
     Returns
     -------

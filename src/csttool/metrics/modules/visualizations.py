@@ -863,11 +863,11 @@ def plot_report_qc_strip(
         Per-hemisphere subsample cap for panel 4.
     seed : int, optional
         Seed for that subsample. Defaults to
-        :data:`csttool.reproducibility.context.DEFAULT_SEED` — never
-        ``viz.utils.viz_rng``, whose ``VIZ_SEED`` derives from Python's builtin
-        ``hash`` of a string and is randomised per process unless
-        ``PYTHONHASHSEED`` is set, which made the legacy panel irreproducible
-        across runs.
+        :data:`csttool.reproducibility.context.DEFAULT_SEED`, which keeps this
+        panel independent of figure subsampling. (``viz.utils.VIZ_SEED`` was
+        itself randomised per process until it moved to
+        :func:`~csttool.reproducibility.context.derive_seed`, which made the
+        legacy panel irreproducible across runs; both are stable now.)
 
     Returns
     -------

@@ -22,6 +22,8 @@ def run_tractography(csapeaks, stopping_criterion, seeds, affine, step_size=0.5,
     import numpy as np
     import matplotlib.pyplot as plt
 
+    from ...viz.utils import viz_rng
+
     if verbose:
         print(f"  → Running tractography (step={step_size}mm)...")
         if random_seed is not None:
@@ -52,9 +54,14 @@ def run_tractography(csapeaks, stopping_criterion, seeds, affine, step_size=0.5,
         fig.suptitle(f"Whole-Brain Tractography ({len(streamlines):,} streamlines)", 
                      fontsize=14)
         
-        # Sample streamlines for visualization (max 5000)
+        # Sample streamlines for visualization (max 5000).
+        # viz_rng, not np.random: the global RNG is unseeded here, which made
+        # this panel differ between runs, and drawing from it would also
+        # perturb the global stream for anything downstream.
         n_vis = min(5000, len(streamlines))
-        vis_indices = np.random.choice(len(streamlines), n_vis, replace=False)
+        vis_indices = np.sort(
+            viz_rng().choice(len(streamlines), n_vis, replace=False)
+        )
         
         views = [
             (0, 'Sagittal (Y-Z)', 1, 2, 'Y (mm)', 'Z (mm)', 'blue'),

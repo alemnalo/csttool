@@ -322,6 +322,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sub-seeds derived from Python's builtin `hash()` were randomised per process,
+  making every subsampled QC figure irreproducible.** ⚠️ **Figure-changing; no
+  scientific output affected.** `viz.utils.VIZ_SEED`, `RunContext.rng_viz` and
+  `RunContext.rng_perturb` all derived their sub-seed as
+  `hash(f"{seed}:label") & 0xFFFFFFFF`. Python salts `hash()` of a `str` per process
+  (PEP 456) unless `PYTHONHASHSEED` is set, so each took a *new value on every
+  invocation*. `deterministic_subsample` consequently drew a different subset of
+  streamlines on each run, despite its name. All three now derive through
+  `reproducibility.context.derive_seed()`, which uses BLAKE2b and is stable across
+  processes, platforms and Python versions.
+  - **Scope: rendering only.** A determinism run over four conditions (DICOM and
+    NIfTI, single- and 4-threaded, with and without motion correction) confirmed
+    every `.nii.gz`, `.trk`, `.bval` and `.bvec` was **bitwise identical** between
+    repeat runs, and every metric in `*_metrics.json` was unchanged. The split was
+    exact: all 17 figures that render their full input matched byte-for-byte, and
+    all 11 that subsample differed. Because these figures save with a tight bounding
+    box, a different subset changes the axis extent and hence the canvas size, which
+    is why some diffs covered ~18 % of pixels rather than a few strokes.
+  - Two call sites had already worked around this locally by seeding from
+    `DEFAULT_SEED` (the sampling-saturation panel and the CST-over-FA panel); their
+    behaviour is unchanged, and the docstrings explaining *why* have been corrected
+    now that the root cause is gone.
+- **The whole-brain tractography QC panel drew from the unseeded global NumPy RNG.**
+  `run_tractography()` selected its 5 000 display streamlines with
+  `np.random.choice`, which is neither seeded nor isolated — it varied between runs
+  and perturbed the global stream for anything drawing after it. Now uses `viz_rng()`
+  and sorts the indices.
+- **`mean_closest_distance()` returned different MDF values for identical inputs.**
+  ⚠️ **Output-changing for `csttool validate`.** When a bundle exceeded
+  `num_samples` (default 1 000) it was subsampled with the unseeded global
+  `np.random.choice`, so the reported `mdf_symmetric`, `mdf_cand_to_ref`,
+  `mdf_ref_to_cand` and `mdf_std` moved between runs on the same tractograms. The
+  draw is now seeded from a new `seed` parameter (default `DEFAULT_SEED`) via
+  `derive_seed()`. Unlike the figure defects above, this one affected *numbers*.
+- **Regression coverage.** `tests/reproducibility/test_seed_derivation.py` asserts
+  cross-process stability by spawning fresh interpreters under differing
+  `PYTHONHASHSEED` values, including a guard test that fails if `hash()` ever stops
+  being salted. In-process assertions cannot catch this class of defect — the salt is
+  fixed within a process, which is why the original bug survived the existing suite.
+
+### Fixed
+
 - **The dicom2nifti fallback silently mirrored the b-vectors on Siemens data.** ⚠️
   **Output-changing; affects every run imported without `dcm2niix` on PATH.**
   `dicom2nifti`'s Siemens path projects the gradient direction onto the image axes as
