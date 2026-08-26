@@ -7,6 +7,7 @@ from ..utils import extract_stem_from_filename, get_gtab_for_preproc
 from csttool.defaults import (
     DEFAULT_B0_THRESHOLD,
     DEFAULT_FA_THRESHOLD,
+    DEFAULT_NPEAKS,
     DEFAULT_RNG_SEED,
     DEFAULT_FIT_METHOD,
 )
@@ -106,6 +107,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             gtab,
             white_matter,
             sh_order=args.sh_order,
+            npeaks=getattr(args, 'npeaks', DEFAULT_NPEAKS),
             verbose=verbose
         )
     except Exception as e:
@@ -163,6 +165,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         'stopping_criterion': 'fa_threshold' + ('+brain_mask' if use_brain_mask_stop else ''),
         'relative_peak_threshold': 0.8,
         'min_separation_angle': 45,  # Peak extraction: minimum angle between detected peaks
+        'npeaks': getattr(args, 'npeaks', DEFAULT_NPEAKS),
         'random_seed': ctx.run_seed,
         'use_brain_mask_stop': use_brain_mask_stop,
         'fit_method': getattr(args, 'fit_method', DEFAULT_FIT_METHOD),

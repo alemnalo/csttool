@@ -318,6 +318,15 @@ def main() -> None:
         help=f"DTI tensor fit method: OLS, WLS, NLLS, or RT (default: {DEFAULT_FIT_METHOD})."
     )
     p_track.add_argument(
+        "--npeaks",
+        type=int,
+        default=DEFAULT_NPEAKS,
+        help=f"Maximum number of ODF peaks retained per voxel during CSA "
+             f"direction estimation (default: {DEFAULT_NPEAKS}). 1 keeps only the "
+             f"dominant direction; higher values also retain secondary peaks in "
+             f"crossing regions. Tracking stays deterministic either way."
+    )
+    p_track.add_argument(
         "--b0-threshold",
         type=float,
         default=DEFAULT_B0_THRESHOLD,
@@ -704,7 +713,11 @@ def main() -> None:
         "--npeaks",
         type=int,
         default=DEFAULT_NPEAKS,
-        help=f"Number of ODF peaks per voxel for roi-seeded/bidirectional tracking (default: {DEFAULT_NPEAKS})."
+        help=f"Maximum number of ODF peaks retained per voxel during direction "
+             f"estimation, for whole-brain tracking and for roi-seeded/"
+             f"bidirectional extraction (default: {DEFAULT_NPEAKS}). 1 keeps only "
+             f"the dominant direction; higher values also retain secondary peaks "
+             f"in crossing regions. Tracking stays deterministic either way."
     )
     p_run.add_argument(
         "--rng-seed",

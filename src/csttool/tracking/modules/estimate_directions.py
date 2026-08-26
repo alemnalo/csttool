@@ -1,5 +1,9 @@
 import warnings
-from csttool.defaults import DEFAULT_RELATIVE_PEAK_THRESHOLD, DEFAULT_MIN_SEPARATION_ANGLE
+from csttool.defaults import (
+    DEFAULT_MIN_SEPARATION_ANGLE,
+    DEFAULT_NPEAKS,
+    DEFAULT_RELATIVE_PEAK_THRESHOLD,
+)
 
 
 def get_max_sh_order(n_directions: int) -> int:
@@ -76,7 +80,9 @@ def validate_sh_order(gtab, sh_order: int, verbose: bool = False) -> int:
     return sh_order
 
 
-def estimate_directions(data, gtab, white_matter, sh_order=6, sphere_name="symmetric362", verbose=False):
+def estimate_directions(data, gtab, white_matter, sh_order=6,
+                        sphere_name="symmetric362", npeaks=DEFAULT_NPEAKS,
+                        verbose=False):
     """Estimate principal diffusion directions using CSA ODF model. 
        Code adapted from https://docs.dipy.org/dev/examples_built/streamline_analysis/streamline_tools.html
     
@@ -87,6 +93,14 @@ def estimate_directions(data, gtab, white_matter, sh_order=6, sphere_name="symme
         sh_order (int): Maximum spherical harmonic order (default 6).
             Will be automatically reduced if insufficient gradient directions.
         sphere_name (str): Name of sphere to build model around. symmetric 362 for speed, default_sphere for accuracy.
+        npeaks (int): Maximum number of ODF peaks retained per voxel
+            (default DEFAULT_NPEAKS). 1 keeps only the dominant direction. >1
+            retains secondary peaks in crossing regions, which LocalTracking
+            uses both as additional initial directions at the seed and as
+            candidates for the deterministic direction getter mid-track.
+            Selection stays deterministic: PeaksAndMetrics subclasses DIPY's
+            EuDXDirectionGetter, documented as a "Deterministic Direction
+            Getter based on peak directions".
         verbose (bool): Print processing details.
         
     Returns:
@@ -118,16 +132,15 @@ def estimate_directions(data, gtab, white_matter, sh_order=6, sphere_name="symme
         relative_peak_threshold=DEFAULT_RELATIVE_PEAK_THRESHOLD,
         min_separation_angle=DEFAULT_MIN_SEPARATION_ANGLE,
         mask=white_matter,
-	# npeaks has to be tested on the effect on whole brain tractogram.
-	# run experiment on tractoinferno subjects with different npeaks
-	# if Dice improves across the board, change to a higher value
-	# preliminary tests on the anom dataset show that for npeaks >= 2 values change compared to 1
-	# stable for npeaks = 2, 3 or 5, perturbations minimal
-        npeaks=1,  # Controls how many peaks are retained. NO INFLUENCE ON DETERMINISM.
+        # Retains this many peaks per voxel; no influence on determinism.
+        # See DEFAULT_NPEAKS in defaults.py for what changing it does.
+        npeaks=npeaks,
     )
     
     if verbose:
-        # Count voxels with valid peaks
+        # Count voxels with valid peaks. Index 0 is the dominant peak -- DIPY
+        # sorts peaks by descending ODF value -- so this counts voxels with at
+        # least one peak regardless of how many are retained.
         valid_peaks = (csapeaks.peak_values[..., 0] > 0).sum()
         coverage = valid_peaks / white_matter.sum() * 100
         print(f"    • Voxels with valid peaks: {valid_peaks:,}")

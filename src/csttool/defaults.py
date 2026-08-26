@@ -33,16 +33,31 @@ DEFAULT_DENOISE_METHOD = "mppca"
 # previously reported csttool FA/MD values.
 DEFAULT_FIT_METHOD = "WLS"
 
-# Number of ODF peaks extracted per voxel for roi-seeded and bidirectional tracking.
+# Maximum number of ODF peaks retained per voxel during direction estimation.
 #
-# The whole-brain estimate_directions path pins npeaks=1 explicitly. The
-# roi-seeded and bidirectional paths were previously leaving this unset, so they
-# inherited DIPY's version-dependent default. Pinning npeaks=1 makes the behaviour
-# consistent and reproducible across DIPY versions.
+# Applies to every tracking path: whole-brain (estimate_directions, used by
+# --extraction-method passthrough/endpoint) as well as roi-seeded and
+# bidirectional. Those paths previously left this unset and inherited DIPY's
+# version-dependent default; pinning it makes the behaviour consistent and
+# reproducible across DIPY versions.
 #
-# >1 enables multi-peak tracking for crossing-fibre regions (corona radiata where
-# CST crosses SLF/CC) — this is the planned research direction, not the current
-# production setting.
+# >1 retains secondary peaks in crossing-fibre regions (the corona radiata,
+# where the CST crosses the SLF and callosum). Two consequences, both from
+# DIPY's LocalTracking:
+#   - initial_direction returns every retained peak at the seed, and csttool
+#     leaves max_cross unset (None), so ONE STREAMLINE IS LAUNCHED PER PEAK
+#     PER SEED. Streamline counts scale with this value.
+#   - the deterministic direction getter gains additional mid-track candidates.
+# Selection remains deterministic in both cases: PeaksAndMetrics subclasses
+# EuDXDirectionGetter, documented as a "Deterministic Direction Getter based on
+# peak directions". This does not make tracking probabilistic.
+#
+# 1 remains the production default. >1 is under empirical validation and is not
+# yet a recommended setting. Prior observations carried over from the call site
+# (commit a6ac60e), to be confirmed by the TractoInferno sweep:
+#   - on the anom dataset, npeaks >= 2 changes results relative to 1
+#   - npeaks 2, 3 and 5 are stable, with minimal perturbation between them
+# The decision rule: raise the default only if Dice improves across the board.
 DEFAULT_NPEAKS = 1
 
 # --- B-value threshold for partitioning b=0 vs DWI volumes ---
