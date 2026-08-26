@@ -118,7 +118,12 @@ def estimate_directions(data, gtab, white_matter, sh_order=6, sphere_name="symme
         relative_peak_threshold=DEFAULT_RELATIVE_PEAK_THRESHOLD,
         min_separation_angle=DEFAULT_MIN_SEPARATION_ANGLE,
         mask=white_matter,
-        npeaks=1,  # Single direction for deterministic tracking
+	# npeaks has to be tested on the effect on whole brain tractogram.
+	# run experiment on tractoinferno subjects with different npeaks
+	# if Dice improves across the board, change to a higher value
+	# preliminary tests on the anom dataset show that for npeaks >= 2 values change compared to 1
+	# stable for npeaks = 2, 3 or 5, perturbations minimal
+        npeaks=1,  # Controls how many peaks are retained. NO INFLUENCE ON DETERMINISM.
     )
     
     if verbose:
