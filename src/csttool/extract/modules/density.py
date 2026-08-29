@@ -170,6 +170,15 @@ def save_cst_density(density, meta, affine, out_dir, stem, *,
         "VisitSemantics": ("voxel contains >= 1 sampled streamline point; "
                            "repeated visits by one streamline counted once"),
         "Densified": bool(meta["densified"]),
+        # The volume's true maximum. It was computed and printed but never
+        # persisted, so the one number that says how dense the densest voxel
+        # actually got could not be recovered from the derivatives.
+        #
+        # This is NOT the report's colour-scale cap. The QC strip saturates its
+        # scale at the 99th percentile of non-zero voxels and records that
+        # separately as DensityDisplayVmax; on a real subject the true maximum
+        # is roughly twice it. Do not use one where the other is meant.
+        "MaxFraction": float(meta["max_fraction"]),
     }
     if extra:
         sidecar_extra.update(extra)
