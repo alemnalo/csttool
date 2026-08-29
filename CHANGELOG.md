@@ -295,6 +295,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Report QC strip: panel-level annotation is now owned by the panel it
+  describes, and the layout is derived rather than allocated.** The strip's four
+  panels each got a fixed rectangle, which `imshow`'s `aspect='equal'` then
+  shrank and re-centred at draw time (Matplotlib's default `adjustable='box'`).
+  Annotations anchored to the Axes moved with it; annotations anchored to the
+  precomputed millimetre bands did not. The result depended on the subject's
+  acquisition matrix: the panel titles landed at 44.13 mm on a 24×20×18 grid
+  (clipped by the exact-bbox save) and at 40.58 mm on a 128×128×76 one, leaving
+  ~5.1 mm of the 44 mm canvas as dead white in the wrong places. Two furniture
+  bands were also smaller than the type they held — the 2.2 mm colourbar-label
+  band held a label needing 2.77 mm, so it overprinted the shared caption by a
+  measured 0.46 mm in every report.
+
+  New `qc_strip_geometry()` computes the image box from the displayed slice's
+  aspect, so `apply_aspect` is a no-op and the furniture bands hold what they
+  were measured for. Panel width is constant and a tall grid letterboxes instead
+  of narrowing the panel, because the key band underneath is width-critical.
+  Figure height is now derived and bounded by `QC_STRIP_MIN/MAX_HEIGHT_MM`;
+  `QC_STRIP_SIZE_MM` remains as the nominal size and the CSS sets width only.
+  Measured page use: 273.8 mm of 281, against a 6 mm headroom requirement.
+
+  Each panel now carries its own key in its own column: the DEC axis key (moved
+  out of the image, where it was a 6.1 mm opaque inset over ~3.5% of panel 1),
+  the density colourbar with its `vmax` as a flanking tick rather than a clause
+  inside a 47.45 mm sentence, the ROI colour key (greyed, not dropped, when the
+  display slab never reaches an ROI), and the hemisphere counts. The shared
+  caption keeps only what is true of all four panels — plane, selection rule,
+  slab and orientation convention. Panel titles rise to 9 pt, matching the
+  profile matrix's subplot titles, and never report status: a degraded panel
+  keeps its name and states the reason in its in-panel note. No scientific
+  content changed — same slice selection, same FA-grid guard, same degradation
+  behaviour, same sidecar keys plus `FigureSizeMm` and `PanelAspect`.
+
+  Every panel is now the same three zones in the same order — title, image,
+  fixed-height key — with the two separations that were previously missing made
+  into real bands: `_STRIP_IMAGE_KEY_GAP_MM` between an image and its own key,
+  and a deliberately larger `_STRIP_KEY_CAPTION_GAP_MM` above the shared
+  caption, so the caption reads as a caption for the composite rather than a
+  fifth legend under panel 4. Key labels are set on one shared typographic
+  baseline (`va='baseline'`); centring each string's bounding box instead put a
+  row of all-caps labels 0.127 mm off a row with ascenders. The density
+  colourbar is thicker, its end ticks straddle the bar rather than sitting on a
+  third line, and its width is *measured* from those ticks — a centred bar gives
+  each tick half the leftover room, so the binding constraint is twice the wider
+  tick, not their sum. Panel gutters widen 1.5 → 2.6 mm.
+
+  The extra whitespace is paid for in image scale, not page height: the page had
+  1.2 mm of headroom left, so `_STRIP_IMAGE_MAX_MM` drops 30.0 → 25.5 mm and the
+  typical panel now letterboxes by ~2.9 mm a side. The letterbox is black
+  against a slice whose own margins are black, so it costs scale and nothing
+  else. Page use 273.8 → 274.3 mm of 281, against the 6 mm headroom the layout
+  test demands.
+
 - **Metadata-schema correction: the pass-through preprocessing status no longer
   asserts external preprocessing.** `pipeline_metadata['preprocessing']['status']`
   read `"Skipped (External Preprocessing Used)"` on every default run — stating as

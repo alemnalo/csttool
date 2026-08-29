@@ -320,33 +320,203 @@ PROFILE_MATRIX_SIZE_MM = (194.0, 94.0)
 QC_TRIPTYCH_SIZE_MM = (116.0, 38.0)
 
 # The 1x4 report QC strip that replaces the triptych. Full content width, so the
-# coronal panels are 48.5 mm rather than the triptych's 38.7 mm; because the
-# coronal world aspect is landscape (~1.33), four wider panels are only ~6 mm
-# taller than three narrow ones.
+# coronal panels are ~47 mm rather than the triptych's 38.7 mm.
 #
-# The furniture below was trimmed from its first estimate (title row 3.5 -> 2.5
-# mm, caption 3.0 -> 2.5 mm) before anything touched panel size, which is the
-# prescribed order; that trim buys image height inside this 44 mm rather than
-# shrinking the strip, because the page budget was balanced elsewhere (profile
-# matrix 97 -> 94 mm, and the node-homology line moved onto the regional
-# table's existing caption row). Measured page use: 271.4 mm of 281.
-QC_STRIP_SIZE_MM = (194.0, 44.0)
+# Height is DERIVED, not fixed (see :func:`qc_strip_geometry`). The strip used to
+# allocate each panel a fixed rectangle and let ``imshow``'s ``aspect='equal'``
+# shrink it at draw time, which put the title wherever the subject's acquisition
+# matrix happened to put it: measured title tops of 44.13 mm on a 24x20x18 grid
+# (clipped by the exact-bbox save) against 40.58 mm on a 128x128x76 one, with
+# ~5 mm of the canvas left as dead white in between. The image box is now
+# computed from the data aspect so ``apply_aspect`` is a no-op and every
+# annotation anchors to a box that will not move.
+QC_STRIP_WIDTH_MM = 194.0
 
-# Internal vertical budget of the strip, in millimetres. The image band takes
-# whatever is left, so shaving the furniture is the first mitigation available
-# to the page budget and does not touch panel size.
-_STRIP_TITLE_MM = 2.5      # row of 7 pt bold panel titles
-_STRIP_CBAR_MM = 1.5       # panel 2's horizontal colourbar, the bar itself
-_STRIP_CBAR_LABEL_MM = 2.2  # the line of type beneath that bar
-_STRIP_CAPTION_MM = 2.5    # the one shared caption/legend line
-_STRIP_GAP_MM = 0.6        # between panels, so two black letterboxes never merge
+# Nominal height, for the page budget below. The real height comes from
+# :func:`qc_strip_geometry`; this is what a typical 1.6-aspect coronal grid
+# produces. Measured page use with it: 273.8 mm of 281.
+QC_STRIP_NOMINAL_HEIGHT_MM = 46.0
+QC_STRIP_SIZE_MM = (QC_STRIP_WIDTH_MM, QC_STRIP_NOMINAL_HEIGHT_MM)
 
-_STRIP_TITLE_PT = 7.0
-_STRIP_CAPTION_PT = 5.5
+# Bounds on the derived height. The report measured 271.4 mm of 281 before this
+# change and ``test_layout_keeps_headroom`` demands 6 mm spare, so 3.6 mm was
+# spendable against the old 44 mm — hence the 47.5 ceiling. The floor stops a
+# very wide grid from producing a degenerate strip.
+QC_STRIP_MIN_HEIGHT_MM = 42.0
+QC_STRIP_MAX_HEIGHT_MM = 47.5
+
+# Internal vertical budget, in millimetres. Each band is the height the type it
+# holds actually renders at, plus its pad — the previous constants were a page
+# budget ladder that had never been measured against rendered type, so the 2.5 mm
+# title band held a 7 pt title needing ~3.0 mm and the 2.2 mm colourbar-label
+# band held a label needing 2.77 mm, which is why that label overprinted the
+# shared caption by a measured 0.46 mm.
+# The vertical stack, top to bottom. Every panel is the same three zones in the
+# same order — title, image, fixed-height key — so the four columns align band
+# for band whatever their keys contain.
+_STRIP_MARGIN_TOP_MM = 2.6   # below the HTML section heading
+_STRIP_TITLE_MM = 4.0        # row of 9 pt bold panel titles (3.17 mm + 2 pt pad)
+_STRIP_IMAGE_KEY_GAP_MM = 1.4   # image -> its own key
+_STRIP_KEY_MM = 6.2          # per-panel key band: swatches, or panel 2's colourbar
+_STRIP_KEY_CAPTION_GAP_MM = 2.6  # the four keys -> the shared caption
+_STRIP_CAPTION_MM = 3.2      # the one shared caption line
+_STRIP_MARGIN_BOTTOM_MM = 1.4
+_STRIP_GAP_MM = 2.6          # between panels, so the four key bands read as columns
+
+# The two gaps above are what separate the three zones. The key -> caption gap is
+# deliberately the larger of the two, and larger than the image -> key gap: the
+# caption describes the whole composite, so it must not read as a fifth legend
+# sitting under panel 4. Proximity is the only thing distinguishing them, since
+# both are centred type at the same size.
+
+# Largest image height we will spend. Binding it caps the strip at
+# 21.4 + 25.5 = 46.9 mm, inside QC_STRIP_MAX_HEIGHT_MM and leaving 6.7 mm of
+# page headroom against the 6.0 the layout test demands. A grid tall enough to
+# bind it letterboxes inside a full-width panel rather than narrowing it — see
+# qc_strip_geometry for why the panel width is the thing held constant. The
+# letterbox is black against a slice whose own margins are black, so it is
+# invisible; what it costs is image scale, which is the only place the extra
+# whitespace in this stack could have come from.
+_STRIP_IMAGE_MAX_MM = 25.5
+
+# Type sizes. The strip used to be set two points below the profile matrix at
+# every level — 7 pt titles against its 9, and a 5.5 pt primary legend at the
+# size of the matrix's *footnote*. Titles now match _RPT_TITLE_PT exactly so the
+# two report figures cannot drift apart again.
+_STRIP_TITLE_PT = _RPT_TITLE_PT   # 9.0
+_STRIP_KEY_PT = 6.5
+_STRIP_CAPTION_PT = 6.5
 _STRIP_MARKER_PT = 6.0
 _STRIP_NOTE_PT = 6.0       # the italic "not produced" overlay on a degraded panel
 _STRIP_ROI_LINEWIDTH = 0.8
-_STRIP_GLYPH_IN = 0.24     # DEC direction-key glyph, edge length in inches
+
+# Key-row metrics, in millimetres.
+_STRIP_SWATCH_MM = 2.2      # length of one colour swatch line
+_STRIP_SWATCH_GAP_MM = 0.9  # swatch -> its own label
+_STRIP_ENTRY_GAP_MM = 1.9   # between one entry and the next
+# Panel 2's colourbar. The bar is thick enough to read as a scale rather than a
+# rule, and its width is *measured* rather than fixed (see the drawing code): the
+# two end ticks flank it, and a subject whose vmax needs more digits must eat
+# into the bar, never into the neighbouring panel.
+_STRIP_CBAR_MM = 2.2        # the bar itself
+_STRIP_CBAR_MAX_FRAC = 0.72  # widest the bar may be, as a fraction of the panel
+_STRIP_CBAR_MIN_FRAC = 0.42  # narrowest, before the ticks are allowed to crowd
+_STRIP_CBAR_GAP_MM = 0.7    # key label row -> the bar below it
+
+# Padding from the top of the key band to the cap height of its label row. The
+# label row is the alignment anchor shared by all four columns: panels 1, 3 and 4
+# put their swatches on it and panel 2 puts its quantity name there, with the bar
+# beneath. Every label is set on one shared baseline, derived from the cap-height
+# fraction below, so glyph content cannot shift a column off the row.
+_STRIP_KEY_TEXT_PAD_MM = 0.35
+_STRIP_KEY_CAP_FRAC = 0.72  # cap height as a fraction of the em, for DejaVu Sans
+
+# Floor for the auto-fit in _fit_key_fontsize. The ROI key is the widest row on
+# the strip (three swatches and three words in one panel width), so it is what
+# normally sets the common size; below this the key stops being readable at
+# print size and the right answer would be shorter words, not smaller type.
+_STRIP_KEY_MIN_PT = 5.5
+
+_STRIP_INK = '#333a45'      # caption and key type
+_STRIP_INK_MUTED = '#9aa3ae'  # an ROI that the display slab does not reach
+
+# World-axis colours for the DEC direction key. Red/green/blue is the DEC
+# convention itself (it is what the image encodes), not a csttool palette
+# choice, so these are deliberately not style.LEFT/RIGHT.
+_DEC_AXIS_KEY = (('#d62728', 'L–R'), ('#2ca02c', 'A–P'), ('#1f77b4', 'S–I'))
+
+
+def qc_strip_geometry(canvas_w, canvas_h):
+    """Figure size and panel rectangles for the QC strip, in millimetres.
+
+    The strip's whole layout is a pure function of the displayed slice's shape,
+    computed here so the caller can ``set_position`` each Axes to a rectangle
+    whose aspect already equals the data's. That is what makes
+    ``Axes.apply_aspect`` a no-op: Matplotlib's default ``adjustable='box'``
+    otherwise shrinks and re-centres an ``aspect='equal'`` image box at draw
+    time, and every annotation anchored to the Axes moves with it while every
+    annotation anchored to a precomputed millimetre band does not.
+
+    Two regimes, both handled:
+
+    * **wide grids** (the normal case; a 96x96x60 volume gives aspect 1.6) are
+      width-bound, so the image height falls straight out of the aspect and
+      fills the panel exactly;
+    * **tall grids** would want more height than :data:`_STRIP_IMAGE_MAX_MM`,
+      so the height is capped and the image letterboxes horizontally inside a
+      panel that keeps its full width — which is what
+      :func:`csttool.viz.geometry.pad_axes_to_canvas` exists for.
+
+    The panel width is deliberately **constant**. Narrowing it to keep the image
+    flush would be the obvious alternative, but the key band underneath is
+    width-critical: at aspect 1.33 the panel would fall to 40 mm while the ROI
+    key needs ~45, so the keys and even the titles begin to collide. Trading
+    image area for a key that fits is the right way round.
+
+    The cap binds below aspect ~1.83, which includes the range real DWI grids
+    occupy, so the typical panel *is* letterboxed — by ~2.9 mm a side at aspect
+    1.6. That is deliberate and it is what pays for the whitespace in the
+    vertical stack: the letterbox is black against a slice whose own margins are
+    black, so it costs image scale and nothing else, while the page had only
+    1.2 mm of headroom left to give.
+
+    Parameters
+    ----------
+    canvas_w, canvas_h : int
+        Width and height of the displayed slice in voxels, i.e. the reversed
+        shape of :func:`csttool.viz.geometry.slice_2d`.
+
+    Returns
+    -------
+    dict
+        ``width_mm``/``height_mm`` (the figure), ``panel_w_mm``/``image_h_mm``
+        (one panel's image box), ``panel_x0_mm`` (four left edges), the band
+        origins ``image_y0_mm``/``key_y0_mm``/``caption_y0_mm``, ``aspect`` (the
+        data's) and ``box_aspect`` (the panel box's; they differ only when the
+        image-height cap binds, and the difference is the letterbox).
+    """
+    aspect = float(canvas_w) / float(canvas_h)
+
+    furniture_mm = (_STRIP_MARGIN_TOP_MM + _STRIP_TITLE_MM
+                    + _STRIP_IMAGE_KEY_GAP_MM + _STRIP_KEY_MM
+                    + _STRIP_KEY_CAPTION_GAP_MM + _STRIP_CAPTION_MM
+                    + _STRIP_MARGIN_BOTTOM_MM)
+
+    panel_w = (QC_STRIP_WIDTH_MM - 3 * _STRIP_GAP_MM) / 4.0
+    image_h = min(panel_w / aspect, _STRIP_IMAGE_MAX_MM)
+
+    height_mm = furniture_mm + image_h
+    clamped = min(max(height_mm, QC_STRIP_MIN_HEIGHT_MM), QC_STRIP_MAX_HEIGHT_MM)
+    # Only the floor can bind (furniture + the image cap is 46.9 mm), so the
+    # slack is non-negative; split it between the two margins so a very wide
+    # grid centres its content rather than hanging from the top.
+    slack = max(0.0, clamped - height_mm)
+    height_mm = clamped
+    margin_bottom = _STRIP_MARGIN_BOTTOM_MM + slack / 2.0
+
+    # Stacked from the bottom, with the two gaps as real bands rather than
+    # implied by the type's own leading — which is what let the key row and the
+    # caption sit a bare 0.9 mm apart and read as one block of five legends.
+    caption_y0 = margin_bottom
+    key_y0 = caption_y0 + _STRIP_CAPTION_MM + _STRIP_KEY_CAPTION_GAP_MM
+    image_y0 = key_y0 + _STRIP_KEY_MM + _STRIP_IMAGE_KEY_GAP_MM
+
+    row_w = 4 * panel_w + 3 * _STRIP_GAP_MM
+    x_start = (QC_STRIP_WIDTH_MM - row_w) / 2.0
+    panel_x0 = [x_start + i * (panel_w + _STRIP_GAP_MM) for i in range(4)]
+
+    return {
+        "width_mm": QC_STRIP_WIDTH_MM,
+        "height_mm": height_mm,
+        "panel_w_mm": panel_w,
+        "image_h_mm": image_h,
+        "panel_x0_mm": panel_x0,
+        "image_y0_mm": image_y0,
+        "key_y0_mm": key_y0,
+        "caption_y0_mm": caption_y0,
+        "aspect": aspect,
+        "box_aspect": panel_w / image_h,
+    }
 
 
 def _blend_on_white(color, alpha):
@@ -727,65 +897,126 @@ def _load_optional(path, fa_shape, fa_affine, name):
     return img
 
 
-def _strip_caption_segments(slice_index, provenance, slab_mm, n_left, n_right,
-                            roi_available):
-    """The one shared caption/legend line, as coloured (text, colour) tokens.
+def _strip_caption_text(slice_index, provenance, slab_mm):
+    """The one shared caption line — only what is true of all four panels.
 
-    Everything that would otherwise be repeated four times lives here: the
-    shared slice and the rule that chose it, the slab thickness, the hemisphere
-    counts, and the ROI colour key. The hemisphere counts double as the strip's
-    only legend, which is why there are no per-panel legends — and why the
-    density panel does not need per-hemisphere outlines to disclose an
-    imbalance: the two counts state it numerically, over an untouched
-    sequential map.
+    The hemisphere counts and the ROI colour key used to live here too, which
+    put every key away from the data it described and merged four unrelated
+    facts into one 5.5 pt line. They now sit in their own panel's key band, so
+    what is left is genuinely shared: the plane every panel shows, the rule that
+    chose it, the display slab, and the orientation convention (previously
+    implied only by the per-panel R/L glyphs).
+
+    The slab governs panels 3 and 4 only, but it is a property of how the
+    composite is displayed rather than of either panel's science, so it stays
+    shared rather than being printed twice.
     """
-    ink = '#333a45'
-    segments = [
-        (f"coronal slice {slice_index} · rule: {provenance.get('rule')} · "
-         f"slab {slab_mm:.1f} mm · ", ink),
-        (f"Left CST n={n_left}", _style.LEFT),
-        ("  ·  ", ink),
-        (f"Right CST n={n_right}", _style.RIGHT),
-    ]
-    if roi_available:
-        segments += [
-            ("  ·  ROI: ", ink),
-            ("brainstem", _style.BRAINSTEM),
-            (" / ", ink),
-            ("motor-L", _style.MOTOR_LEFT),
-            (" / ", ink),
-            ("motor-R", _style.MOTOR_RIGHT),
-        ]
-    return segments
+    rule = str(provenance.get('rule', 'unknown')).replace('_', ' ')
+    return (f"Coronal slice {slice_index} · selected by {rule} · "
+            f"{slab_mm:g} mm display slab · "
+            f"radiological convention (R at viewer left)")
 
 
-def _draw_caption_row(fig, ax, segments, fontsize):
-    """Lay out one centred line of differently-coloured tokens.
+def _fit_key_fontsize(ax, renderer, rows, start_pt, floor_pt=_STRIP_KEY_MIN_PT):
+    """The largest type at or below ``start_pt`` at which every key row fits.
 
-    Matplotlib has no rich text, and the colour *is* the key here — it is what
-    ties the caption's ROI words to the contours in panel 3 and its hemisphere
-    counts to the trajectories in panel 4. So each token is measured and placed
-    in sequence. Measurement is a pure function of the text, the font and the
-    figure DPI, so the result is reproducible.
+    One size for all four columns, not one per column: a key band whose columns
+    disagree about type size reads as four unrelated captions rather than one
+    row. The ROI key is the widest row and therefore normally the one that
+    decides, so the whole band tracks it.
+
+    Swatch and gap widths are fixed millimetres and text width scales with point
+    size, so the fit is solved directly from a single measurement per row rather
+    than by iterating.
     """
+    box_w = ax.get_window_extent(renderer).width
+    px_per_mm = ax.figure.dpi / 25.4
+    scale = 1.0
+    for entries in rows:
+        if not entries:
+            continue
+        fixed = sum((_STRIP_SWATCH_MM + _STRIP_SWATCH_GAP_MM) * px_per_mm
+                    for color, *_ in entries if color)
+        fixed += _STRIP_ENTRY_GAP_MM * px_per_mm * (len(entries) - 1)
+        text = 0.0
+        for entry in entries:
+            probe = ax.text(0, 0, entry[1], fontsize=start_pt)
+            text += probe.get_window_extent(renderer).width
+            probe.remove()
+        if text <= 0:
+            continue
+        scale = min(scale, max(0.0, box_w - fixed) / text)
+    return max(floor_pt, min(start_pt, start_pt * scale))
+
+
+def _draw_key_row(ax, renderer, entries, fontsize, *, y):
+    """Lay out one centred row of ``swatch + label`` pairs for a single panel.
+
+    This is the strip's one legend primitive: panels 1, 3 and 4 each get a row
+    of it in their own column of the key band, so a reader decodes a contour or
+    a trajectory without leaving the panel. Panel 2 cannot use it — a
+    continuous scale is not a set of swatches — and draws a colourbar into the
+    same band instead.
+
+    Each token is measured and placed in sequence because Matplotlib has no
+    rich text and the colour *is* the key. Measurement is a pure function of the
+    text, the font and the figure DPI, so the result is reproducible.
+
+    ``entries`` is a sequence of ``(colour, label)`` or
+    ``(colour, label, label_colour)``; a ``colour`` of None draws the label with
+    no swatch. Overflow is deliberately left visible rather than scaled away — a
+    key that does not fit its column is a layout defect and the tests assert
+    against it.
+
+    ``y`` is the row's **baseline** in axes fraction, and the type is set on it
+    with ``va='baseline'``. Centring instead (``va='center'``) centres each
+    string's bounding box, so a row of all-caps labels sits 0.127 mm off a row
+    with ascenders — visible as four legends that do not quite line up.
+    """
+    from matplotlib.lines import Line2D
+
     ax.set_axis_off()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
+    if not entries:
+        return
 
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
+    entries = [e if len(e) == 3 else (e[0], e[1], _STRIP_INK) for e in entries]
+    fig = ax.figure
+    px_per_mm = fig.dpi / 25.4
+    swatch = _STRIP_SWATCH_MM * px_per_mm
+    swatch_gap = _STRIP_SWATCH_GAP_MM * px_per_mm
+    entry_gap = _STRIP_ENTRY_GAP_MM * px_per_mm
+
     widths = []
-    for text, _ in segments:
-        probe = ax.text(0, 0, text, fontsize=fontsize)
-        widths.append(probe.get_window_extent(renderer).width)
+    for color, label, _ in entries:
+        probe = ax.text(0, 0, label, fontsize=fontsize)
+        text_w = probe.get_window_extent(renderer).width
         probe.remove()
+        widths.append(text_w + (swatch + swatch_gap if color else 0.0))
 
     box = ax.get_window_extent(renderer)
-    x = max(0.0, (box.width - sum(widths)) / 2.0)
-    for (text, color), width in zip(segments, widths):
-        ax.text(x / box.width, 0.5, text, transform=ax.transAxes, color=color,
-                fontsize=fontsize, ha='left', va='center')
-        x += width
+    total = sum(widths) + entry_gap * (len(entries) - 1)
+    x = max(0.0, (box.width - total) / 2.0)
+    # The swatch is a mark, not type, so it rides at the optical middle of the
+    # cap height rather than on the baseline the labels sit on.
+    band_mm = box.height / fig.dpi * 25.4
+    cap_mm = _STRIP_KEY_CAP_FRAC * fontsize * 25.4 / 72.0
+    mark_y = y + 0.35 * cap_mm / band_mm
+
+    for (color, label, label_color), width in zip(entries, widths):
+        if color:
+            ax.add_line(Line2D(
+                [x / box.width, (x + swatch) / box.width], [mark_y, mark_y],
+                transform=ax.transAxes, color=color, linewidth=1.6,
+                solid_capstyle='butt', clip_on=False,
+            ))
+            label_x = (x + swatch + swatch_gap) / box.width
+        else:
+            label_x = x / box.width
+        ax.text(label_x, y, label, transform=ax.transAxes, ha='left',
+                va='baseline', fontsize=fontsize, color=label_color)
+        x += width + entry_gap
 
 
 def plot_report_qc_strip(
@@ -815,14 +1046,35 @@ def plot_report_qc_strip(
 
     One figure, one owner
     ---------------------
-    The strip is a single PNG placed by CSS at exactly
-    :data:`QC_STRIP_SIZE_MM`, so this function creates the Figure and the four
-    Axes and draws into them with the ``csttool.viz.render`` primitives. It does
-    **not** call the standalone ``qc_figures.plot_*_panel`` functions: each of
-    those owns a Figure and saves it, which cannot be composed onto one canvas.
-    The cost is four render calls per panel; the alternative — refactoring five
-    reviewed standalone figures to accept an axes — is a larger change that
-    would touch tested figures for no benefit here.
+    The strip is a single PNG placed by CSS at :data:`QC_STRIP_WIDTH_MM`, so
+    this function creates the Figure and the four Axes and draws into them with
+    the ``csttool.viz.render`` primitives. It does **not** call the standalone
+    ``qc_figures.plot_*_panel`` functions: each of those owns a Figure and saves
+    it, which cannot be composed onto one canvas. The cost is four render calls
+    per panel; the alternative — refactoring five reviewed standalone figures to
+    accept an axes — is a larger change that would touch tested figures for no
+    benefit here.
+
+    That ownership extends to **every panel-level annotation**: titles, the DEC
+    direction key, the density colourbar, the ROI key and the hemisphere counts
+    are all drawn here, and the HTML template contributes only the section
+    heading. Only the Figure knows where the panels actually landed, so only the
+    Figure can align a key to a panel column; and a key drawn from
+    ``style.LEFT`` / ``style.BRAINSTEM`` / ``style.DENSITY_CMAP`` cannot drift
+    from the marks it describes, which a CSS copy can. This is the same rule
+    ``plot_profile_matrix`` already follows.
+
+    Layout
+    ------
+    Four columns, each carrying — top to bottom — a 9 pt bold title, its image,
+    and its own key. One shared caption spans the strip beneath them, carrying
+    only what is true of all four panels: the plane, the rule that chose it, the
+    display slab and the orientation convention. Panel-specific facts live in
+    panel-specific keys, so no reader has to cross the figure to decode a mark.
+
+    Geometry is computed by :func:`qc_strip_geometry` from the displayed slice's
+    aspect, which is what keeps the furniture bands meaningful — see that
+    function for the defect this replaces.
 
     One slice
     ---------
@@ -924,20 +1176,23 @@ def plot_report_qc_strip(
     )
 
     # ---- canvas ----------------------------------------------------------
-    width_mm, height_mm = QC_STRIP_SIZE_MM
+    # Geometry first, from the displayed slice's shape: the image boxes are
+    # computed rather than allocated, so apply_aspect never moves them and the
+    # furniture bands below hold what they were measured for.
+    canvas_h, canvas_w = _geo.slice_2d(fa, "coronal", slice_index).shape
+    geom = qc_strip_geometry(canvas_w, canvas_h)
+    width_mm, height_mm = geom["width_mm"], geom["height_mm"]
+    panel_mm, image_mm = geom["panel_w_mm"], geom["image_h_mm"]
     fig = plt.figure(figsize=(width_mm / 25.4, height_mm / 25.4))
-
-    furniture_mm = (_STRIP_TITLE_MM + _STRIP_CBAR_MM + _STRIP_CBAR_LABEL_MM
-                    + _STRIP_CAPTION_MM)
-    image_mm = height_mm - furniture_mm
-    image_y0 = (_STRIP_CAPTION_MM + _STRIP_CBAR_MM + _STRIP_CBAR_LABEL_MM) / height_mm
-    image_h = image_mm / height_mm
-    panel_mm = (width_mm - 3 * _STRIP_GAP_MM) / 4.0
 
     axes = []
     for column in range(4):
-        x0 = column * (panel_mm + _STRIP_GAP_MM) / width_mm
-        axes.append(fig.add_axes([x0, image_y0, panel_mm / width_mm, image_h]))
+        axes.append(fig.add_axes([
+            geom["panel_x0_mm"][column] / width_mm,
+            geom["image_y0_mm"] / height_mm,
+            panel_mm / width_mm,
+            image_mm / height_mm,
+        ]))
 
     degraded = []
 
@@ -947,9 +1202,17 @@ def plot_report_qc_strip(
             cmap=_style.ANATOMY_BG, norm=plt.Normalize(0, 1), markers=False,
         )
 
+    def _title(ax, text):
+        # 9 pt, matching the profile matrix's subplot titles. The pad is inside
+        # _STRIP_TITLE_MM, which is the rendered height of this type plus it.
+        ax.set_title(text, fontsize=_STRIP_TITLE_PT, fontweight='bold', pad=2.0)
+
     def _unavailable(ax, title, note):
+        # The title names the panel; it never reports status. A reader must be
+        # able to see which of the four questions went unanswered without the
+        # heading row changing length from subject to subject.
         _background(ax)
-        ax.set_title(title, fontsize=_STRIP_TITLE_PT, fontweight='bold', pad=1.5)
+        _title(ax, title)
         ax.text(0.5, 0.06, note, transform=ax.transAxes, ha='center', va='bottom',
                 fontsize=_STRIP_NOTE_PT, style='italic', color='#dddddd')
 
@@ -966,22 +1229,22 @@ def plot_report_qc_strip(
         dec = np.clip(dec, 0.0, 1.0).astype(np.float32)
         _render.render_rgb_slice(axes[0], dec, affine, "coronal", slice_index,
                                  markers=False)
-        # The only per-panel key in the strip, and it is not a legend: it states
-        # which world axis each colour channel is, which is the whole content of
-        # a DEC image and cannot be moved to a shared caption.
-        # 0.24 in (6 mm), not the 0.16 in first specified: the print review
-        # showed three 3-character labels cannot be set legibly inside a 4 mm
-        # box, and an unreadable key is dead ink on a one-page report.
-        _render.add_direction_legend(axes[0], loc='lower right',
-                                     size=_STRIP_GLYPH_IN)
-        axes[0].set_title("DEC-FA", fontsize=_STRIP_TITLE_PT, fontweight='bold',
-                          pad=1.5)
+        # The direction key is drawn in this panel's column of the key band
+        # below, not as an inset over the image. The arrow glyph it replaces was
+        # a 6.1 x 6.1 mm opaque box covering ~3.5% of the panel, in the
+        # inferior-lateral corner the CST descends through; its own docstring
+        # concedes it cannot be shrunk below 0.22 in and stay legible, so it had
+        # to leave the image rather than get smaller. render.add_direction_legend
+        # stays in place for the standalone 90 mm panel, where 6 mm is
+        # proportionate.
+        _title(axes[0], "DEC-FA")
     else:
-        _unavailable(axes[0], "DEC-FA — V1 unavailable", "world-frame V1 not produced")
+        _unavailable(axes[0], "DEC-FA", "world-frame V1 not produced")
         degraded.append("dec_fa")
 
     # ---- panel 2: CST density -------------------------------------------
     vmax = None
+    density_image = None
     if density is not None:
         nonzero = density[density > 0]
         # Subject-adaptive: measured maxima are ~0.10 and ~0.29 on the two
@@ -996,21 +1259,9 @@ def plot_report_qc_strip(
             axes[1], density, affine, "coronal", slice_index,
             cmap=_style.DENSITY_CMAP, vmax=vmax,
         )
-        axes[1].set_title("CST density", fontsize=_STRIP_TITLE_PT,
-                          fontweight='bold', pad=1.5)
-        cbar_ax = fig.add_axes([
-            axes[1].get_position().x0 + 0.015,
-            (_STRIP_CAPTION_MM + _STRIP_CBAR_LABEL_MM) / height_mm,
-            panel_mm / width_mm - 0.03,
-            _STRIP_CBAR_MM / height_mm,
-        ])
-        cbar = fig.colorbar(density_image, cax=cbar_ax, orientation='horizontal',
-                            ticks=[])
-        cbar.set_label(f"fraction of bundle streamlines (vmax={vmax:.4f})",
-                       fontsize=_STRIP_CAPTION_PT, labelpad=1.5)
-        cbar.outline.set_linewidth(0.4)
+        _title(axes[1], "CST density")
     else:
-        _unavailable(axes[1], "CST density — unavailable", "density map not produced")
+        _unavailable(axes[1], "CST density", "density map not produced")
         degraded.append("density")
 
     # ---- panel 3: extraction ROIs ---------------------------------------
@@ -1034,11 +1285,9 @@ def plot_report_qc_strip(
                     axes[2], projected, affine, "coronal", slice_index,
                     color=color, linewidth=_STRIP_ROI_LINEWIDTH,
                 )
-        axes[2].set_title("Extraction ROIs", fontsize=_STRIP_TITLE_PT,
-                          fontweight='bold', pad=1.5)
+        _title(axes[2], "Extraction ROIs")
     else:
-        _unavailable(axes[2], "Extraction ROIs — unavailable",
-                     "ROI segmentation not produced")
+        _unavailable(axes[2], "Extraction ROIs", "ROI segmentation not produced")
         degraded.append("roi_dseg")
 
     # ---- panel 4: final CST over FA -------------------------------------
@@ -1049,8 +1298,7 @@ def plot_report_qc_strip(
             axes[3], streamlines, affine, "coronal", slice_index, color=color,
             thickness_mm=slab_mm, max_streamlines=max_streamlines, rng=rng,
         )
-    axes[3].set_title("CST over FA", fontsize=_STRIP_TITLE_PT, fontweight='bold',
-                      pad=1.5)
+    _title(axes[3], "CST over FA")
     if not left and not right:
         degraded.append("streamlines")
 
@@ -1058,20 +1306,160 @@ def plot_report_qc_strip(
     # Every panel is the same view of the same grid, so one canvas gives all
     # four identical world limits: 1 mm of brain is 1 mm of paper everywhere,
     # and the four are directly comparable by eye.
-    canvas_h, canvas_w = _geo.slice_2d(fa, "coronal", slice_index).shape
+    #
+    # When the image-height cap binds, the panel box is wider than the data, so
+    # the common canvas is widened to the box's aspect and the difference prints
+    # as the black letterbox this helper draws. Without this the box and the
+    # data would disagree and apply_aspect would start moving boxes again.
+    canvas_w_eff, canvas_h_eff = canvas_w, canvas_h
+    if geom["box_aspect"] > geom["aspect"]:
+        canvas_w_eff = canvas_h * geom["box_aspect"]
+    elif geom["box_aspect"] < geom["aspect"]:
+        canvas_h_eff = canvas_w / geom["box_aspect"]
     for ax in axes:
-        _geo.pad_axes_to_canvas(ax, canvas_w, canvas_h)
+        _geo.pad_axes_to_canvas(ax, canvas_w_eff, canvas_h_eff)
         # Markers, not legends: a reader must not have to look at a neighbouring
         # panel to orient the one they are reading.
         _geo.add_lr_markers(ax, fontsize=_STRIP_MARKER_PT)
 
+    # ---- per-panel key band ----------------------------------------------
+    # One key column per panel, aligned to that panel's own computed x-extent,
+    # so every legend sits under the data it describes. Draw once first: the
+    # renderer is what _draw_key_row measures against, and by this point the
+    # image boxes are final (they were computed, so apply_aspect changed
+    # nothing).
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    def _key_axes(column):
+        return fig.add_axes([
+            geom["panel_x0_mm"][column] / width_mm,
+            geom["key_y0_mm"] / height_mm,
+            panel_mm / width_mm,
+            _STRIP_KEY_MM / height_mm,
+        ])
+
+    key_axes = [_key_axes(column) for column in range(4)]
+    for ax in key_axes:
+        ax.set_axis_off()
+
+    # Panel 1: which world axis each colour channel is. Not a legend — it is the
+    # whole content of a DEC image.
+    rows = [list(_DEC_AXIS_KEY) if v1_img is not None else []]
+
+    # Panel 2's label row is measured as a single centred token so it takes part
+    # in the common fit; its two numeric ticks flank the bar and are short.
+    rows.append([(None, "streamline fraction")] if density_image is not None else [])
+
+    # Panel 3: the ROI colour key, beside the contours it names. An ROI the
+    # display slab never reaches is greyed rather than dropped, so a zero count
+    # is visible instead of silently absent.
+    if dseg is not None:
+        rows.append([
+            (_style.BRAINSTEM if roi_slab_voxels.get("brainstem") else _STRIP_INK_MUTED,
+             "brainstem",
+             _STRIP_INK if roi_slab_voxels.get("brainstem") else _STRIP_INK_MUTED),
+            (_style.MOTOR_LEFT if roi_slab_voxels.get("motor_left") else _STRIP_INK_MUTED,
+             "motor L",
+             _STRIP_INK if roi_slab_voxels.get("motor_left") else _STRIP_INK_MUTED),
+            (_style.MOTOR_RIGHT if roi_slab_voxels.get("motor_right") else _STRIP_INK_MUTED,
+             "motor R",
+             _STRIP_INK if roi_slab_voxels.get("motor_right") else _STRIP_INK_MUTED),
+        ])
+    else:
+        rows.append([])
+
+    # Panel 4: the hemisphere counts, beside the trajectories they count.
+    rows.append([
+        (_style.LEFT, f"Left n={len(left)}"),
+        (_style.RIGHT, f"Right n={len(right)}"),
+    ])
+
+    # One size for the whole band, set by whichever row is tightest.
+    key_pt = _fit_key_fontsize(key_axes[0], renderer, rows, _STRIP_KEY_PT)
+
+    # The label row is the alignment anchor for all four columns: swatches for
+    # panels 1, 3 and 4, the quantity name for panel 2. One shared baseline,
+    # placed so the cap heights meet the band's top pad, and derived from the
+    # fitted type size rather than fixed so the row holds whatever the auto-fit
+    # settles on.
+    text_h_mm = key_pt * 25.4 / 72.0
+    cap_mm = _STRIP_KEY_CAP_FRAC * text_h_mm
+    label_baseline_mm = _STRIP_KEY_MM - _STRIP_KEY_TEXT_PAD_MM - cap_mm
+    label_y = label_baseline_mm / _STRIP_KEY_MM
+
+    _draw_key_row(key_axes[0], renderer, rows[0], key_pt, y=label_y)
+    _draw_key_row(key_axes[2], renderer, rows[2], key_pt, y=label_y)
+    _draw_key_row(key_axes[3], renderer, rows[3], key_pt, y=label_y)
+
+    # Panel 2: a continuous scale is not a set of swatches, so this column gets
+    # the colourbar. Its quantity name sits on the shared label row with the
+    # other three keys and the bar hangs beneath it, so the four columns still
+    # read as one row of legends. The name is static and the number is dynamic,
+    # so they are set separately: as one string the label measured 47.45 mm
+    # inside a 48.05 mm column and overflowed into the neighbouring panels as
+    # soon as vmax reached two integer digits.
+    if density_image is not None:
+        key_ax = key_axes[1]
+        key_ax.text(0.5, label_y, "streamline fraction",
+                    transform=key_ax.transAxes, ha='center', va='baseline',
+                    fontsize=key_pt, color=_STRIP_INK)
+
+        # The bar's width is what is left after the two end ticks have their
+        # room, so a vmax needing more digits narrows the bar instead of
+        # pushing a number into panel 1 or panel 3.
+        tick_texts = ("0", f"{vmax:.3g}")
+        tick_w_mm = []
+        for text in tick_texts:
+            probe = key_ax.text(0, 0, text, fontsize=key_pt)
+            tick_w_mm.append(probe.get_window_extent(renderer).width
+                             / fig.dpi * 25.4)
+            probe.remove()
+        gap_mm = _STRIP_SWATCH_GAP_MM
+        # The bar is centred in the column, so each tick has (panel - bar) / 2
+        # to live in and the *wider* of the two is what binds — using their sum
+        # lets the longer one hang past the column edge.
+        allowed = panel_mm - 2 * gap_mm - 2 * max(tick_w_mm)
+        bar_w = min(allowed, _STRIP_CBAR_MAX_FRAC * panel_mm)
+        bar_w = max(bar_w, _STRIP_CBAR_MIN_FRAC * panel_mm)
+        # A vmax wide enough to fight the minimum takes the bar down with it
+        # rather than clipping: a short bar is legible, a truncated number is not.
+        bar_w = max(min(bar_w, allowed), 0.15 * panel_mm)
+
+        bar_top_mm = label_baseline_mm - _STRIP_CBAR_GAP_MM
+        bar_x0_mm = geom["panel_x0_mm"][1] + (panel_mm - bar_w) / 2.0
+        cbar_ax = fig.add_axes([
+            bar_x0_mm / width_mm,
+            (geom["key_y0_mm"] + bar_top_mm - _STRIP_CBAR_MM) / height_mm,
+            bar_w / width_mm,
+            _STRIP_CBAR_MM / height_mm,
+        ])
+        cbar = fig.colorbar(density_image, cax=cbar_ax, orientation='horizontal',
+                            ticks=[])
+        cbar.outline.set_linewidth(0.4)
+
+        # Ticks flank the bar, on a baseline set so their cap height straddles
+        # the bar's middle, so bar and endpoints read as one object rather than
+        # three stacked lines.
+        bar_lo = (panel_mm - bar_w) / 2.0
+        tick_baseline_mm = bar_top_mm - _STRIP_CBAR_MM / 2.0 - cap_mm / 2.0
+        tick_y = tick_baseline_mm / _STRIP_KEY_MM
+        for x_mm, text, align in (
+            ((bar_lo - gap_mm) / panel_mm, tick_texts[0], 'right'),
+            ((bar_lo + bar_w + gap_mm) / panel_mm, tick_texts[1], 'left'),
+        ):
+            key_ax.text(x_mm, tick_y, text, transform=key_ax.transAxes,
+                        ha=align, va='baseline', fontsize=key_pt,
+                        color=_STRIP_INK)
+
     # ---- shared caption --------------------------------------------------
-    caption_ax = fig.add_axes([0.0, 0.0, 1.0, _STRIP_CAPTION_MM / height_mm])
-    _draw_caption_row(
-        fig, caption_ax,
-        _strip_caption_segments(slice_index, provenance, slab_mm,
-                                len(left), len(right), dseg is not None),
-        _STRIP_CAPTION_PT,
+    caption_ax = fig.add_axes([0.0, geom["caption_y0_mm"] / height_mm, 1.0,
+                               _STRIP_CAPTION_MM / height_mm])
+    caption_ax.set_axis_off()
+    caption_ax.text(
+        0.5, 0.5, _strip_caption_text(slice_index, provenance, slab_mm),
+        transform=caption_ax.transAxes, ha='center', va='center',
+        fontsize=_STRIP_CAPTION_PT, color=_STRIP_INK,
     )
 
     fig_path = output_dir / f"{subject_id}_report_qc_strip.png"
@@ -1094,6 +1482,10 @@ def plot_report_qc_strip(
         "RoiSlabVoxelCounts": roi_slab_voxels,
         "DegradedPanels": degraded,
         "Seed": int(seed),
+        # The figure size is derived from the displayed slice's aspect, so it is
+        # disclosed rather than assumed to be the module constant.
+        "FigureSizeMm": [round(width_mm, 3), round(height_mm, 3)],
+        "PanelAspect": round(geom["aspect"], 6),
     }
     fig_path.with_suffix('.json').write_text(
         json.dumps(sidecar, indent=2) + "\n", encoding='utf-8'

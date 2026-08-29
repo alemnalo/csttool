@@ -784,16 +784,26 @@ class TestReportFiguresMatchCss:
     def test_css_widths_match_figure_sizes(self):
         from csttool.metrics.modules.reports import _TEMPLATE_DIR
         from csttool.metrics.modules.visualizations import (
-            PROFILE_MATRIX_SIZE_MM, QC_STRIP_SIZE_MM,
+            PROFILE_MATRIX_SIZE_MM, QC_STRIP_WIDTH_MM,
         )
 
         css = (_TEMPLATE_DIR / "report.css").read_text()
         assert f".profile-matrix" in css
         assert f"width: {PROFILE_MATRIX_SIZE_MM[0]:g}mm" in css
         assert f".qc-strip" in css
-        assert f"width: {QC_STRIP_SIZE_MM[0]:g}mm" in css
+        assert f"width: {QC_STRIP_WIDTH_MM:g}mm" in css
         # The figures are placed at the width they were drawn at, never resized.
         assert ".qc-triptych" not in css
+
+    def test_css_does_not_constrain_the_strip_height(self):
+        """The strip's height is derived from the subject's coronal aspect, so
+        the CSS must set width only — a height here would rescale the figure and
+        silently break the 1 pt = 1 pt guarantee its type sizes rest on."""
+        from csttool.metrics.modules.reports import _TEMPLATE_DIR
+
+        css = (_TEMPLATE_DIR / "report.css").read_text()
+        block = css.split(".qc-strip {", 1)[1].split("}", 1)[0]
+        assert "height" not in block
 
 
 class TestReproducibilityFooter:

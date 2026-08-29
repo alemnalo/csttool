@@ -8,9 +8,9 @@ explicit, reviewed action; the tests skip when the goldens are absent.
     python tests/metrics/generate_golden.py
 """
 
-from pathlib import Path
-
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import matplotlib
@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.metrics.test_report_layout import (
     make_comparison,
     make_fa_background,
+    make_qc_strip,
     make_streamlines,
     RAS_AFFINE,
 )
@@ -52,11 +53,20 @@ def main() -> None:
     tri.replace(out / "tractogram_qc_triptych.png")
     tri = out / "tractogram_qc_triptych.png"
 
+    # The 1x4 strip that replaced the triptych in the report. Its golden was
+    # never wired up here, which is why TestVisualRegressionGolden's strip case
+    # has always skipped; the strip is the report's QC figure, so it is the one
+    # that most needs the check.
+    with tempfile.TemporaryDirectory() as scratch:
+        strip = make_qc_strip(Path(scratch), "_golden")
+        shutil.copyfile(strip, out / "report_qc_strip.png")
+    strip = out / "report_qc_strip.png"
+
     # Remove the temporary subject-prefixed files the generators wrote.
     for f in out.glob("_golden_*"):
         f.unlink()
 
-    print(f"goldens written: {pm}, {tri}")
+    print(f"goldens written: {pm}, {tri}, {strip}")
 
 
 if __name__ == "__main__":

@@ -132,8 +132,11 @@
     </section>
 
     {# ===== Tractography QC (1x4 strip, one shared coronal slice) ===== #}
+    {# Each panel's key is owned by the Matplotlib figure, which is the only #}
+    {# thing that knows where the panels landed. Do not add legends here. #}
+    {# The slice and the rule that chose it live in the figure's caption. #}
     <section class="qc">
-        <h2 class="section-title">Tractography QC <small>one coronal slice, FA background</small></h2>
+        <h2 class="section-title">Tractography QC <small>FA background</small></h2>
         {% if qc_strip %}
         <img class="qc-strip" src="{{ qc_strip }}" alt="Report QC strip (DEC-FA, CST density, extraction ROIs, CST over FA)">
         {% else %}

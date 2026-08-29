@@ -209,7 +209,14 @@ placed by CSS at that same width, so the printed height is the designed height:
 | Figure | Size | Contents |
 | --- | --- | --- |
 | Along-tract profile matrix | 194 × 94 mm | FA / MD / RD / AD profiles, left and right, each line backed by the per-node **interquartile range across contributing streamlines**. The centre line is the mean — the same array the twelve regional values are derived from — so the band is dispersion around the published number, not a different statistic. |
-| Report QC strip | 194 × 44 mm | 1×4: DEC-FA, CST density, extraction ROIs, final CST over FA, all on **one** shared coronal slice with one legend, one caption and one colourbar. Replaces the earlier 1×3 triptych, which showed the same information from three angles. |
+| Report QC strip | 194 mm wide, 42–46.9 mm tall | 1×4: DEC-FA, CST density, extraction ROIs, final CST over FA, all on **one** shared coronal slice. Each panel carries its own title and its own key — the DEC axis key, the density colourbar, the ROI colours, the hemisphere counts — with a single shared caption underneath for the facts common to all four. Replaces the earlier 1×3 triptych, which showed the same information from three angles. |
+
+Every panel is the same three zones in the same order — title, image, then a
+fixed-height key region — so the four columns align band for band whatever their
+keys contain, and a single shared caption sits clearly below all four. The
+strip's height is derived from the subject's coronal aspect ratio rather than
+fixed, so the panels keep the same physical scale on any acquisition matrix; it
+is bounded so the one-page budget holds. The CSS sets the width only.
 
 Every strip panel degrades independently: a missing world-frame V1, density
 volume or ROI segmentation leaves a labelled grayscale-FA slot in place rather
