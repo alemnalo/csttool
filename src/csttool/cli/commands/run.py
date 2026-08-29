@@ -415,6 +415,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     
     cst_left_path = None
     cst_right_path = None
+    cst_combined_path = None
     
     extraction_method = getattr(args, 'extraction_method', 'passthrough')
     
@@ -464,6 +465,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         if extract_result:
             cst_left_path = extract_result.get('cst_left_path')
             cst_right_path = extract_result.get('cst_right_path')
+            cst_combined_path = extract_result.get('cst_combined_path')
             # Feeds the tissue-plausibility panel; None when extraction could
             # not write the density product.
             density_path = (Path(extract_result['density_path'])
@@ -572,6 +574,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             ad_path=ad_path,
             cst_left_path=cst_left_path,
             cst_right_path=cst_right_path,
+            cst_combined_path=cst_combined_path,
             preproc_path=preproc_path,
             pipeline_metadata=pipeline_metadata,
             verbose=verbose,
@@ -686,6 +689,7 @@ def _write_bids_derivatives(
     ad_path,
     cst_left_path,
     cst_right_path,
+    cst_combined_path,
     preproc_path,
     pipeline_metadata: dict,
     verbose: bool,
@@ -829,19 +833,13 @@ def _write_bids_derivatives(
         (tractogram_path, "wholebrain"),
         (cst_left_path,   "CSTleft"),
         (cst_right_path,  "CSTright"),
+        (cst_combined_path, "CSTbilateral"),
     ]:
         if src_path and Path(src_path).exists():
             dst = tract_dir / _fname("tractogram", ".trk", space="orig", desc=desc_val)
             shutil.move(src_path, dst)
             if verbose:
                 print(f"    BIDS: {dst.relative_to(bids_out)}")
-
-    # Combined CST (produced by extract step alongside the separated tractograms)
-    for combined in (args.out / "extraction").glob("*_cst_combined.trk"):
-        dst = tract_dir / _fname("tractogram", ".trk", space="orig", desc="CSTbilateral")
-        shutil.move(combined, dst)
-        if verbose:
-            print(f"    BIDS: {dst.relative_to(bids_out)}")
 
     # ------------------------------------------------------------------
     # New scientific NIfTI data products (visualization-refactor M2/M3)
@@ -960,9 +958,10 @@ def _write_bids_derivatives(
     })
 
     # ------------------------------------------------------------------
-    # Remove stage directories unconditionally
-    # Each one should be empty after all moves above; rmtree handles any
-    # empty subdirectories (e.g. scalar_maps/, logs/) left behind.
+    # Remove stage directories unconditionally.
+    # Anything still inside is discarded, so every artifact that belongs in the
+    # BIDS tree must be moved out above -- a promotion that silently fails to
+    # match its source loses the file here rather than leaving it behind.
     # ------------------------------------------------------------------
     for step in ("preprocessing", "tracking", "extraction", "metrics"):
         d = args.out / step

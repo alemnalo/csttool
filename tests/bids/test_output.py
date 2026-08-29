@@ -279,8 +279,8 @@ class TestBidsReorgNiftiSurvival:
             args, subject_id=stem, session_id=None, bids_out=bids_out,
             step_results={}, tractogram_path=None, fa_path=fa_path,
             md_path=None, rd_path=None, ad_path=None,
-            cst_left_path=None, cst_right_path=None, preproc_path=None,
-            pipeline_metadata={}, verbose=False,
+            cst_left_path=None, cst_right_path=None, cst_combined_path=None,
+            preproc_path=None, pipeline_metadata={}, verbose=False,
         )
 
         # P-1: both new NIfTIs exist under <bids>/sub-001/dwi/.
@@ -303,6 +303,52 @@ class TestBidsReorgNiftiSurvival:
         assert not (out_root / "tracking").exists()
         assert not (out_root / "extraction").exists()
 
+    def test_bilateral_tractogram_survives_reorg(self, tmp_path):
+        """The bilateral CST must reach the BIDS tree, not the rmtree.
+
+        Regression: the promotion globbed ``extraction/*_cst_combined.trk`` while
+        extraction writes ``extraction/trk/<prefix>cst_bilateral.trk``. The glob
+        never matched, so the file was deleted with the stage dirs and the
+        documented ``*_desc-CSTbilateral_tractogram.trk`` was never produced.
+        """
+        from csttool.cli.commands.run import _write_bids_derivatives
+        out_root = tmp_path / "w"
+        out_root.mkdir()
+        stem = "sub-003"
+        self._setup_fake_tree(out_root, stem)
+
+        import nibabel as nib
+        import numpy as np
+        fa_path = out_root / "tracking" / "scalar_maps" / f"{stem}_fa.nii.gz"
+        nib.save(nib.Nifti1Image(np.zeros((4, 4, 4), np.float32),
+                                 np.diag([2, 2, 2, 1.0])), fa_path)
+
+        # Where extraction actually puts it (endpoint_filtering.save_cst_results).
+        trk_dir = out_root / "extraction" / "trk"
+        trk_dir.mkdir(parents=True, exist_ok=True)
+        bilateral = trk_dir / f"{stem}_cst_bilateral.trk"
+        bilateral.write_bytes(b"TRACK fake")
+
+        bids_out = tmp_path / "d"
+        import argparse
+        args = argparse.Namespace(out=out_root, bids_in=None, raw_bids=None)
+        _write_bids_derivatives(
+            args, subject_id=stem, session_id=None, bids_out=bids_out,
+            step_results={}, tractogram_path=None, fa_path=fa_path,
+            md_path=None, rd_path=None, ad_path=None,
+            cst_left_path=None, cst_right_path=None,
+            cst_combined_path=bilateral,
+            preproc_path=None, pipeline_metadata={}, verbose=False,
+        )
+
+        tract_dir = bids_out / stem / "dwi" / "tractography"
+        promoted = sorted(tract_dir.glob("*desc-CSTbilateral_tractogram.trk"))
+        assert promoted, (
+            "bilateral tractogram did not survive the BIDS reorg; it was "
+            "deleted with the extraction stage dir")
+        assert promoted[0].read_bytes() == b"TRACK fake"
+        assert not (out_root / "extraction").exists()
+
     def test_p5_sidecars_valid_json_with_required_keys(self, tmp_path):
         from csttool.cli.commands.run import _write_bids_derivatives
         out_root = tmp_path / "w"; out_root.mkdir()
@@ -317,7 +363,7 @@ class TestBidsReorgNiftiSurvival:
         args = argparse.Namespace(out=out_root, bids_in=None, raw_bids=None)
         _write_bids_derivatives(
             args, "sub-002", None, bids_out, {}, None, fa_path,
-            None, None, None, None, None, None, {}, False)
+            None, None, None, None, None, None, None, {}, False)
         import json
         v1_sc = sorted((bids_out / "sub-002" / "dwi").glob("*desc-V1_dwimap.json"))[0]
         d_sc = sorted((bids_out / "sub-002" / "dwi").glob("*desc-CSTdensity_dwimap.json"))[0]

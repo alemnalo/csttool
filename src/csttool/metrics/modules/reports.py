@@ -502,7 +502,6 @@ def build_report_context(
     # renders a QC figure rather than a placeholder.
     qc_path = (visualization_paths.get("qc_strip")
                or visualization_paths.get("tractogram_qc_triptych"))
-    qc_has_colorbar = qc_path is not None
 
     return {
         "subject_id": subject_id,
@@ -517,7 +516,6 @@ def build_report_context(
         "node_homology": build_node_homology_view(comparison.get("node_homology")),
         "profile_matrix": _embed_image(visualization_paths.get("profile_matrix")),
         "qc_strip": _embed_image(qc_path),
-        "qc_has_colorbar": qc_has_colorbar,
         "provenance": _build_report_provenance((metadata or {}).get("provenance", {})),
     }
 

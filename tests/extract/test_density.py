@@ -9,7 +9,10 @@ lock the unique-visit semantics that DIPY provides (§5.2).
 import numpy as np
 import pytest
 
-from csttool.extract.modules.density import compute_cst_density
+from csttool.extract.modules.density import (
+    compute_cst_density,
+    save_cst_density,
+)
 
 
 # 4x4x4 grid, 1 mm isotropic, RAS.
@@ -81,6 +84,36 @@ class TestDensitySemantics:
         assert d1[2, 2, 2] == pytest.approx(0.5)
         assert d2[2, 2, 2] == pytest.approx(2.0 / 3.0)
 
+    def test_the_denominator_is_bilateral_not_side_normalized(self):
+        """The regression guard for the metric's meaning.
+
+        A voxel every retained *left* streamline visits, and no right one,
+        reads ``n_left / (n_left + n_right)`` — it cannot reach 1.0 while the
+        right bundle is non-empty. Side-normalized density (``n_L(v) / N_L``)
+        would put that voxel at 1.0, which is a different quantity with a
+        different interpretation; switching to it is a scientific decision, not
+        a visualization tweak, so it must never happen silently.
+
+        This is also the ceiling the colourbar label exists to explain: on the
+        validation subject n_left=749 of n_total=1756, so a fully occupied left
+        voxel tops out near 43%.
+        """
+        # Three identical left streamlines through one voxel, two right ones
+        # elsewhere: the left voxel is visited by 3 of 5 retained streamlines.
+        left = [_sl([0.1, 0.1, 0.1], [0.4, 0.4, 0.4]) for _ in range(3)]
+        right = [_sl([2.1, 2.1, 2.1], [2.4, 2.4, 2.4]) for _ in range(2)]
+        density, meta = compute_cst_density(left, right, AFFINE, SHAPE)
+
+        assert meta["n_total"] == meta["n_left"] + meta["n_right"] == 5
+        assert density[0, 0, 0] == pytest.approx(3.0 / 5.0)
+        assert density[0, 0, 0] < 1.0, "a unilateral voxel must not reach 1.0"
+        assert density[2, 2, 2] == pytest.approx(2.0 / 5.0)
+        # Emptying the other side is what would make it 1.0 — proving the
+        # denominator really is shared rather than per-hemisphere.
+        solo, solo_meta = compute_cst_density(left, [], AFFINE, SHAPE)
+        assert solo_meta["n_total"] == 3
+        assert solo[0, 0, 0] == pytest.approx(1.0)
+
     def test_d7_empty_bundle_all_zero(self):
         density, meta = compute_cst_density([], [], AFFINE, SHAPE)
         assert meta["n_total"] == 0
@@ -133,3 +166,69 @@ class TestDensityMeta:
         assert meta["n_left"] == 2
         assert meta["n_right"] == 1
         assert meta["n_total"] == 3
+
+
+class TestDensitySidecar:
+    """What ``save_cst_density`` records beside the volume.
+
+    The sidecar is how a reader recovers what the fractions were divided by and
+    how dense the densest voxel actually got, without re-deriving anything.
+    """
+
+    def _write(self, tmp_path, left, right):
+        import json
+
+        density, meta = compute_cst_density(left, right, AFFINE, SHAPE)
+        nii = save_cst_density(density, meta, AFFINE, tmp_path, "sub-x")
+        sidecar = json.loads(nii.with_name(
+            nii.name.replace(".nii.gz", ".json")).read_text())
+        return density, meta, sidecar
+
+    def test_records_the_true_maximum_fraction(self, tmp_path):
+        """It was computed and printed but never persisted, so the one number
+        saying how dense the densest voxel got could not be recovered from the
+        derivatives at all."""
+        left = [_sl([0.1, 0.1, 0.1], [0.4, 0.4, 0.4]) for _ in range(3)]
+        right = [_sl([2.1, 2.1, 2.1], [2.4, 2.4, 2.4])]
+        density, meta, sidecar = self._write(tmp_path, left, right)
+
+        assert sidecar["MaxFraction"] == pytest.approx(float(density.max()))
+        assert sidecar["MaxFraction"] == pytest.approx(meta["max_fraction"])
+        assert 0.0 <= sidecar["MaxFraction"] <= 1.0
+        # Three of four retained streamlines share one voxel.
+        assert sidecar["MaxFraction"] == pytest.approx(3.0 / 4.0)
+
+    def test_the_true_maximum_is_not_the_report_display_cap(self, tmp_path):
+        """The distinction this field exists to preserve. The QC strip saturates
+        its colour scale at the 99th percentile of non-zero voxels and records
+        that separately as ``DensityDisplayVmax``; on a real subject the true
+        maximum is roughly twice it. The extraction sidecar carries the data's
+        maximum and must never carry a display decision."""
+        left = [_sl([0.1, 0.1, 0.1], [0.4, 0.4, 0.4]) for _ in range(3)]
+        right = [_sl([2.1, 2.1, 2.1], [2.4, 2.4, 2.4])]
+        _, _, sidecar = self._write(tmp_path, left, right)
+
+        for display_key in ("DensityDisplayVmax", "DensityDisplayPercentile",
+                            "Vmax", "P99"):
+            assert display_key not in sidecar
+
+    def test_the_existing_schema_is_unchanged(self, tmp_path):
+        """Purely additive: every key a previous reader relied on is still
+        there, with the same meaning."""
+        left = [_sl([0.1, 0.1, 0.1], [0.4, 0.4, 0.4]),
+                _sl([0.2, 0.2, 0.2], [0.4, 0.4, 0.4])]
+        right = [_sl([2.1, 2.1, 2.1], [2.4, 2.4, 2.4])]
+        _, meta, sidecar = self._write(tmp_path, left, right)
+
+        assert sidecar["Denominator"] == meta["n_total"] == 3
+        assert sidecar["StreamlineCountLeft"] == 2
+        assert sidecar["StreamlineCountRight"] == 1
+        assert sidecar["Units"] == "dimensionless fraction"
+        assert sidecar["Densified"] is False
+        assert "density_map" in sidecar["Numerator"]
+        assert sidecar["Description"] == meta["definition"]
+
+    def test_an_empty_bundle_records_a_zero_maximum(self, tmp_path):
+        _, _, sidecar = self._write(tmp_path, [], [])
+        assert sidecar["MaxFraction"] == 0.0
+        assert sidecar["Denominator"] == 0

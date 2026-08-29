@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-29
+
 ### Added
+
+- **`MaxFraction` in the CST density sidecar.** The extraction stage computed
+  the volume's true maximum density fraction and printed it, then discarded it,
+  so the one number saying how dense the densest voxel actually got could not be
+  recovered from the derivatives. It is now persisted alongside the existing
+  `Denominator` / `StreamlineCountLeft` / `StreamlineCountRight` keys. Purely
+  additive; the density calculation, its bilateral normalization and the NIfTI
+  values are unchanged. It is deliberately **not** the report's colour-scale cap
+  — the QC strip saturates at the 99th percentile of non-zero voxels and records
+  that separately as `DensityDisplayVmax`.
 
 - **Preprocessing provenance ledger.** The preprocessing report JSON gains
   `schema_version`, a `provenance` block (the same `get_provenance_dict()` output
@@ -293,7 +305,170 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   axial plane. Direct unit tests of the extracted QC helper cover the
   previously-impossible label-loss and hemisphere-swap detector paths.
 
+
+- **Formal edge-case suite (AU31).** A new `tests/edge_cases/` package
+  characterises the six pathological-input classes the three audits named —
+  zero streamlines, all-zero DWI, single direction, misordered bvec/bval,
+  truncated NIfTI, DICOM missing tags — pinning current behaviour so a
+  regression is caught. Targeted hardening accompanies the suite: a truncated
+  NIfTI now raises a clear `NIfTI file appears truncated or corrupt` error at
+  the load boundary (instead of a raw `EOFError` deep in a stage); an all-zero
+  DWI now warns `No white-matter voxels found` (instead of a silent empty
+  output). The remaining classes already behaved correctly (misordered
+  gradients via AU21; zero-streamline extraction returns a well-formed empty
+  result; missing DICOM tags default and classify as unsuitable) and are now
+  pinned. 16 new tests.
+
+- **`--fit-method`** on `csttool track` and `csttool run` — exposes the DTI tensor fit
+  method (`OLS`, `WLS`, `NLLS`, `RT`) as an explicit parameter, pinned to `WLS` by
+  default. Previously `fit_tensors.py` and the extraction modules relied on DIPY's
+  version-dependent default. The parameter sweep can now include fit method, which
+  is a first-order determinant of FA/MD bias at low SNR. (AU13)
+
+- **`--npeaks`** on `csttool run` — pins the number of ODF peaks extracted per voxel
+  in the roi-seeded and bidirectional tracking paths, defaulting to `1` (single
+  principal direction, matching the whole-brain `estimate_directions` default).
+  Previously these paths inherited DIPY's version-dependent default. (AU17)
+
+- **`--extraction-method bidirectional`** on `csttool run` — two-pass seeding with
+  per-side count-bounded intersection and a forward/reverse artifact diagnostic.
+
+  **Motivation:** Atlas-based motor cortex ROIs land at slightly different positions
+  relative to the GM/WM boundary on each side, causing the forward-seeded (motor→brainstem)
+  pass to produce asymmetric streamline counts. Brainstem-seeded reverse tracking is
+  inherently symmetric (confirmed on in-vivo data: R/L = 0.987). Bidirectional seeding
+  removes the cortical placement artifact while preserving genuine unilateral asymmetry
+  (e.g. stroke, tumour) — a bilateral-symmetry cap is intentionally NOT applied.
+
+  **Algorithm (three steps):**
+  1. *Forward pass* — seed from left and right motor cortex ROIs separately; keep
+     streamlines that reach the brainstem.
+  2. *Reverse pass* — seed from brainstem ROI; keep streamlines that reach each
+     motor cortex ROI, yielding `bs_to_left` and `bs_to_right` bundles.
+  3. *Per-side count-bounded selection* — voxelise the reverse bundles into density
+     maps; cap each side independently at `min(N_forward, N_reverse)`; from each
+     forward bundle take the top streamlines ranked by spatial overlap score with the
+     corresponding reverse density map.
+
+  **Diagnostic (`artifact_index`):** Per-side forward/reverse inflation ratios are
+  reported. When the two ratios diverge (`artifact_index > 0.20`), residual L/R count
+  asymmetry is likely a cortical-interface artifact; when they agree, residual asymmetry
+  is likely structural (genuine biology or pathology). This lets the method correct the
+  artifact without masking pathology.
+
+  **Result on personal in-vivo data:** streamline count LI = +0.002 (271 L / 270 R),
+  vs −0.128 for passthrough. Matches the brainstem-seeded ground-truth (LI = +0.007).
+
+  **New files:**
+  - `src/csttool/extract/modules/bidirectional_filtering.py`
+  - `docs/fixes/bidirectional_seeding.md`
+  - `docs/explanation/design-decisions.md` — new section on bidirectional seeding
+
+  **Modified files:**
+  - `src/csttool/extract/__init__.py` — export `extract_cst_bidirectional`
+  - `src/csttool/cli/__init__.py` — `run` choices extended
+  - `src/csttool/cli/commands/extract.py` — guard + `run_bidirectional_extraction`
+  - `src/csttool/cli/commands/run.py` — routing branch added
+
 ### Changed
+
+- **Removed the unused `qc_has_colorbar` report-context key.** It was built and
+  handed to the Jinja template on every render and the template never read it.
+  A regression test now asserts every key the report context supplies is
+  actually referenced by the template.
+
+- **Report QC strip: the CST density panel now says what it measures and where
+  its scale saturates.** The colourbar was labelled `streamline fraction`, which
+  could equally have meant a fraction of one streamline, of one hemisphere's
+  streamlines, or of every streamline generated. It is the fraction of the
+  *bilateral* retained population (`n_left + n_right`), and that denominator is
+  the one thing a reader cannot guess — it is also what sets the ceiling, since
+  a voxel every left streamline visits reads `n_left / n_total`, about 43% on
+  the validation subject, not 100%. The label now reads **Fraction of bilateral
+  CST streamlines**.
+
+  Endpoints are shown as percentages (`0%`, `≥7.4%`) rather than raw fractions,
+  a display change only — the stored volume remains a float in `[0, 1]` and the
+  metric is untouched. The upper endpoint carries `≥` whenever the scale
+  saturates below the data's true maximum, which it usually does: the scale top
+  is the 99th percentile of non-zero voxels, and on the validation subject the
+  true maximum is 1.9x that, with 71 voxels sharing the top colour. Labelling
+  that endpoint as a bare number named it as the maximum, which it is not. Where
+  the cap happens to reach the maximum, no `≥` is claimed. The shared caption
+  gains `density scale capped at non-zero P99`, stating how the scale top was
+  chosen whenever a density panel is drawn.
+
+  The figure sidecar's `DensityVmax` held the display cap under a name that
+  reads like a data maximum. It is replaced by `DensityMaxFraction` (the
+  volume's real maximum), `DensityDisplayVmax`, `DensityDisplayPercentile`,
+  `DensityDisplayPercentileBasis` and `DensityDisplayClipped`, and the
+  visualization code names the two apart throughout. **The density metric itself
+  is unchanged** — same bilateral denominator, same DIPY `density_map`
+  numerator, same densification guard — and a new test pins it against a silent
+  switch to side-normalized density.
+
+  Also: the colourbar's end ticks keep a margin from their column edge (solving
+  the bar width against the ticks previously landed the wider one exactly on the
+  boundary), and the shared caption is measured and shrunk rather than clipped
+  if the slice, rule, slab and density note together outgrow the strip.
+
+- **Report: the `FA background` subtitle is removed from the Tractography QC
+  heading.** It was true of panels 2-4 only — panel 1 is the DEC image itself,
+  not an overlay on FA — and each panel now names its own content in its own
+  key, so it was an orphaned and partly false annotation.
+
+- **Report QC strip: panel-level annotation is now owned by the panel it
+  describes, and the layout is derived rather than allocated.** The strip's four
+  panels each got a fixed rectangle, which `imshow`'s `aspect='equal'` then
+  shrank and re-centred at draw time (Matplotlib's default `adjustable='box'`).
+  Annotations anchored to the Axes moved with it; annotations anchored to the
+  precomputed millimetre bands did not. The result depended on the subject's
+  acquisition matrix: the panel titles landed at 44.13 mm on a 24×20×18 grid
+  (clipped by the exact-bbox save) and at 40.58 mm on a 128×128×76 one, leaving
+  ~5.1 mm of the 44 mm canvas as dead white in the wrong places. Two furniture
+  bands were also smaller than the type they held — the 2.2 mm colourbar-label
+  band held a label needing 2.77 mm, so it overprinted the shared caption by a
+  measured 0.46 mm in every report.
+
+  New `qc_strip_geometry()` computes the image box from the displayed slice's
+  aspect, so `apply_aspect` is a no-op and the furniture bands hold what they
+  were measured for. Panel width is constant and a tall grid letterboxes instead
+  of narrowing the panel, because the key band underneath is width-critical.
+  Figure height is now derived and bounded by `QC_STRIP_MIN/MAX_HEIGHT_MM`;
+  `QC_STRIP_SIZE_MM` remains as the nominal size and the CSS sets width only.
+  Measured page use: 273.8 mm of 281, against a 6 mm headroom requirement.
+
+  Each panel now carries its own key in its own column: the DEC axis key (moved
+  out of the image, where it was a 6.1 mm opaque inset over ~3.5% of panel 1),
+  the density colourbar with its `vmax` as a flanking tick rather than a clause
+  inside a 47.45 mm sentence, the ROI colour key (greyed, not dropped, when the
+  display slab never reaches an ROI), and the hemisphere counts. The shared
+  caption keeps only what is true of all four panels — plane, selection rule,
+  slab and orientation convention. Panel titles rise to 9 pt, matching the
+  profile matrix's subplot titles, and never report status: a degraded panel
+  keeps its name and states the reason in its in-panel note. No scientific
+  content changed — same slice selection, same FA-grid guard, same degradation
+  behaviour, same sidecar keys plus `FigureSizeMm` and `PanelAspect`.
+
+  Every panel is now the same three zones in the same order — title, image,
+  fixed-height key — with the two separations that were previously missing made
+  into real bands: `_STRIP_IMAGE_KEY_GAP_MM` between an image and its own key,
+  and a deliberately larger `_STRIP_KEY_CAPTION_GAP_MM` above the shared
+  caption, so the caption reads as a caption for the composite rather than a
+  fifth legend under panel 4. Key labels are set on one shared typographic
+  baseline (`va='baseline'`); centring each string's bounding box instead put a
+  row of all-caps labels 0.127 mm off a row with ascenders. The density
+  colourbar is thicker, its end ticks straddle the bar rather than sitting on a
+  third line, and its width is *measured* from those ticks — a centred bar gives
+  each tick half the leftover room, so the binding constraint is twice the wider
+  tick, not their sum. Panel gutters widen 1.5 → 2.6 mm.
+
+  The extra whitespace is paid for in image scale, not page height: the page had
+  1.2 mm of headroom left, so `_STRIP_IMAGE_MAX_MM` drops 30.0 → 25.5 mm and the
+  typical panel now letterboxes by ~2.9 mm a side. The letterbox is black
+  against a slice whose own margins are black, so it costs scale and nothing
+  else. Page use 273.8 → 274.3 mm of 281, against the 6 mm headroom the layout
+  test demands.
 
 - **Metadata-schema correction: the pass-through preprocessing status no longer
   asserts external preprocessing.** `pipeline_metadata['preprocessing']['status']`
@@ -319,6 +494,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label set is recomputed on the resampled grid so a Harvard-Oxford→MNI-grid
   resample is not misreported as a label change. No algorithm or metric value
   changes; verbose printing is preserved.
+
+
+- **The default denoising method is now `mppca`, on every command.** MPPCA estimates its own
+  noise level from the eigenvalue distribution of local PCA patches, so it requires neither a
+  receiver-coil count nor an assumption about the noise distribution, and unlike `patch2self`
+  it does not need bvals.
+
+  This supersedes the previous entry claiming the same thing. **That claim was false**: the
+  flip had been applied only to `run_preprocessing`'s signature default, while all three CLI
+  parsers still passed an explicit `default="nlmeans"` that overrode it. No CLI run ever used
+  MPPCA. The entry was also filed under the already-released 0.5.0; it has been moved here and
+  corrected.
+
+  The default is now defined once, in `csttool/defaults.py` as `DEFAULT_DENOISE_METHOD`, and
+  read by the CLI parsers, the command wrappers, `run_preprocessing` and `denoise`. It was
+  previously restated in eight places, which is why a one-line change looked complete and was
+  not. `tests/test_cli_denoise_default.py` asserts the value each command actually resolves,
+  rather than the library signature that looked right while the tool did the opposite.
+
+  **What this retires.** `rician=False` (AU2) and the PIESNO coil count `N` (AU25) exist only
+  in the `nlmeans` branch of `denoise()`, so both now leave the default path. They still apply
+  if `--denoise-method nlmeans` is chosen explicitly. MPPCA also exposes no thread-count or
+  seed parameter, so the multithreading non-determinism behind AU1/AU7 cannot arise on the
+  default path; MPPCA output is bitwise identical across repeated runs.
+
+  **Users who need the old behaviour** should pass `--denoise-method nlmeans` explicitly.
+  Denoised output, and every metric downstream of it, will change for anyone relying on the
+  default.
+
+- **`nlmeans` now runs single-threaded** (`num_threads` `-1` → `1`). Multithreaded reduction
+  order varies between runs, so the previous setting made denoising non-deterministic — the
+  bug behind audit finding AU1. Single-threaded is slower but reproducible.
+
+- **`gibbs_removal` now runs single-threaded** (`num_processes` `-1` → `1`), the same defect
+  class as above (AU7), latent behind `--unring`.
+
+  (These two entries were previously filed under the released 0.5.0; they describe 2026-07-16
+  work and have been moved here.)
+
+- **Tensor `fit_method` and ODF `npeaks` are now explicit, pinned parameters** in every
+  code path that creates a `TensorModel` or calls `peaks_from_model`. Previously these
+  inherited DIPY's version-dependent defaults, which could change between DIPY releases
+  and silently shift FA/MD values and tracking behaviour. The defaults (`fit_method='WLS'`,
+  `npeaks=1`) match the current DIPY 1.9+ behaviour and preserve backward compatibility
+  with all previously reported numbers. See `--fit-method` and `--npeaks` under Added.
+  (AU13, AU17)
+
+- **Motor cortex ROIs are now clamped at the anatomical midline** using the warped-MNI
+  `hemisphere_mask` from AU11. Previously, dilated Harvard-Oxford motor labels could
+  bleed across the midline (documented: up to 9.5 mm into the contralateral hemisphere)
+  and the mutual-exclusivity filter only caught streamlines hitting *both* ROIs — a bled
+  ROI silently accepted wrong-hemisphere streamlines and attributed contralateral FA
+  values to the wrong side. The bidirectional method corrects the count artifact
+  but not this ROI-placement artifact on FA sampling. Clamping is applied after
+  dilation in `create_cst_roi_masks`; when `hemisphere_mask` is unavailable the scalar
+  `midline_x` is used as a fallback. Both are already carried by the `warped` dict.
+  (AU12)
+
+- **Removed `assess_clinical_significance` and `compute_effect_size`** from the public
+  API. Both were dead code (never called from any pipeline path) but were exported in
+  `metrics.__all__`. `compute_effect_size` fabricated a pooled standard deviation by
+  assuming a 10% coefficient of variation, then divided a single-subject L−R difference
+  by it and called the result "Cohen's d" — with N=1 per side no effect size is defined.
+  The interpretation strings from `assess_clinical_significance` did reach the JSON
+  report via `save_json_report`, so downstream JSON consumers may notice their absence.
+  (AU15)
 
 ### Fixed
 
@@ -362,7 +603,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   being salted. In-process assertions cannot catch this class of defect — the salt is
   fixed within a process, which is why the original bug survived the existing suite.
 
-### Fixed
 
 - **The dicom2nifti fallback silently mirrored the b-vectors on Siemens data.** ⚠️
   **Output-changing; affects every run imported without `dcm2niix` on PATH.**
@@ -575,140 +815,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself, so this makes the fallback consistent with the primary path rather than
   introducing a new orientation. (AU21)
 
-### Added
-
-- **Formal edge-case suite (AU31).** A new `tests/edge_cases/` package
-  characterises the six pathological-input classes the three audits named —
-  zero streamlines, all-zero DWI, single direction, misordered bvec/bval,
-  truncated NIfTI, DICOM missing tags — pinning current behaviour so a
-  regression is caught. Targeted hardening accompanies the suite: a truncated
-  NIfTI now raises a clear `NIfTI file appears truncated or corrupt` error at
-  the load boundary (instead of a raw `EOFError` deep in a stage); an all-zero
-  DWI now warns `No white-matter voxels found` (instead of a silent empty
-  output). The remaining classes already behaved correctly (misordered
-  gradients via AU21; zero-streamline extraction returns a well-formed empty
-  result; missing DICOM tags default and classify as unsuitable) and are now
-  pinned. 16 new tests.
-
-- **`--fit-method`** on `csttool track` and `csttool run` — exposes the DTI tensor fit
-  method (`OLS`, `WLS`, `NLLS`, `RT`) as an explicit parameter, pinned to `WLS` by
-  default. Previously `fit_tensors.py` and the extraction modules relied on DIPY's
-  version-dependent default. The parameter sweep can now include fit method, which
-  is a first-order determinant of FA/MD bias at low SNR. (AU13)
-
-- **`--npeaks`** on `csttool run` — pins the number of ODF peaks extracted per voxel
-  in the roi-seeded and bidirectional tracking paths, defaulting to `1` (single
-  principal direction, matching the whole-brain `estimate_directions` default).
-  Previously these paths inherited DIPY's version-dependent default. (AU17)
-
-- **`--extraction-method bidirectional`** on `csttool run` — two-pass seeding with
-  per-side count-bounded intersection and a forward/reverse artifact diagnostic.
-
-  **Motivation:** Atlas-based motor cortex ROIs land at slightly different positions
-  relative to the GM/WM boundary on each side, causing the forward-seeded (motor→brainstem)
-  pass to produce asymmetric streamline counts. Brainstem-seeded reverse tracking is
-  inherently symmetric (confirmed on in-vivo data: R/L = 0.987). Bidirectional seeding
-  removes the cortical placement artifact while preserving genuine unilateral asymmetry
-  (e.g. stroke, tumour) — a bilateral-symmetry cap is intentionally NOT applied.
-
-  **Algorithm (three steps):**
-  1. *Forward pass* — seed from left and right motor cortex ROIs separately; keep
-     streamlines that reach the brainstem.
-  2. *Reverse pass* — seed from brainstem ROI; keep streamlines that reach each
-     motor cortex ROI, yielding `bs_to_left` and `bs_to_right` bundles.
-  3. *Per-side count-bounded selection* — voxelise the reverse bundles into density
-     maps; cap each side independently at `min(N_forward, N_reverse)`; from each
-     forward bundle take the top streamlines ranked by spatial overlap score with the
-     corresponding reverse density map.
-
-  **Diagnostic (`artifact_index`):** Per-side forward/reverse inflation ratios are
-  reported. When the two ratios diverge (`artifact_index > 0.20`), residual L/R count
-  asymmetry is likely a cortical-interface artifact; when they agree, residual asymmetry
-  is likely structural (genuine biology or pathology). This lets the method correct the
-  artifact without masking pathology.
-
-  **Result on personal in-vivo data:** streamline count LI = +0.002 (271 L / 270 R),
-  vs −0.128 for passthrough. Matches the brainstem-seeded ground-truth (LI = +0.007).
-
-  **New files:**
-  - `src/csttool/extract/modules/bidirectional_filtering.py`
-  - `docs/fixes/bidirectional_seeding.md`
-  - `docs/explanation/design-decisions.md` — new section on bidirectional seeding
-
-  **Modified files:**
-  - `src/csttool/extract/__init__.py` — export `extract_cst_bidirectional`
-  - `src/csttool/cli/__init__.py` — `run` choices extended
-  - `src/csttool/cli/commands/extract.py` — guard + `run_bidirectional_extraction`
-  - `src/csttool/cli/commands/run.py` — routing branch added
-
-### Changed
-
-- **The default denoising method is now `mppca`, on every command.** MPPCA estimates its own
-  noise level from the eigenvalue distribution of local PCA patches, so it requires neither a
-  receiver-coil count nor an assumption about the noise distribution, and unlike `patch2self`
-  it does not need bvals.
-
-  This supersedes the previous entry claiming the same thing. **That claim was false**: the
-  flip had been applied only to `run_preprocessing`'s signature default, while all three CLI
-  parsers still passed an explicit `default="nlmeans"` that overrode it. No CLI run ever used
-  MPPCA. The entry was also filed under the already-released 0.5.0; it has been moved here and
-  corrected.
-
-  The default is now defined once, in `csttool/defaults.py` as `DEFAULT_DENOISE_METHOD`, and
-  read by the CLI parsers, the command wrappers, `run_preprocessing` and `denoise`. It was
-  previously restated in eight places, which is why a one-line change looked complete and was
-  not. `tests/test_cli_denoise_default.py` asserts the value each command actually resolves,
-  rather than the library signature that looked right while the tool did the opposite.
-
-  **What this retires.** `rician=False` (AU2) and the PIESNO coil count `N` (AU25) exist only
-  in the `nlmeans` branch of `denoise()`, so both now leave the default path. They still apply
-  if `--denoise-method nlmeans` is chosen explicitly. MPPCA also exposes no thread-count or
-  seed parameter, so the multithreading non-determinism behind AU1/AU7 cannot arise on the
-  default path; MPPCA output is bitwise identical across repeated runs.
-
-  **Users who need the old behaviour** should pass `--denoise-method nlmeans` explicitly.
-  Denoised output, and every metric downstream of it, will change for anyone relying on the
-  default.
-
-- **`nlmeans` now runs single-threaded** (`num_threads` `-1` → `1`). Multithreaded reduction
-  order varies between runs, so the previous setting made denoising non-deterministic — the
-  bug behind audit finding AU1. Single-threaded is slower but reproducible.
-
-- **`gibbs_removal` now runs single-threaded** (`num_processes` `-1` → `1`), the same defect
-  class as above (AU7), latent behind `--unring`.
-
-  (These two entries were previously filed under the released 0.5.0; they describe 2026-07-16
-  work and have been moved here.)
-
-- **Tensor `fit_method` and ODF `npeaks` are now explicit, pinned parameters** in every
-  code path that creates a `TensorModel` or calls `peaks_from_model`. Previously these
-  inherited DIPY's version-dependent defaults, which could change between DIPY releases
-  and silently shift FA/MD values and tracking behaviour. The defaults (`fit_method='WLS'`,
-  `npeaks=1`) match the current DIPY 1.9+ behaviour and preserve backward compatibility
-  with all previously reported numbers. See `--fit-method` and `--npeaks` under Added.
-  (AU13, AU17)
-
-- **Motor cortex ROIs are now clamped at the anatomical midline** using the warped-MNI
-  `hemisphere_mask` from AU11. Previously, dilated Harvard-Oxford motor labels could
-  bleed across the midline (documented: up to 9.5 mm into the contralateral hemisphere)
-  and the mutual-exclusivity filter only caught streamlines hitting *both* ROIs — a bled
-  ROI silently accepted wrong-hemisphere streamlines and attributed contralateral FA
-  values to the wrong side. The bidirectional method corrects the count artifact
-  but not this ROI-placement artifact on FA sampling. Clamping is applied after
-  dilation in `create_cst_roi_masks`; when `hemisphere_mask` is unavailable the scalar
-  `midline_x` is used as a fallback. Both are already carried by the `warped` dict.
-  (AU12)
-
-- **Removed `assess_clinical_significance` and `compute_effect_size`** from the public
-  API. Both were dead code (never called from any pipeline path) but were exported in
-  `metrics.__all__`. `compute_effect_size` fabricated a pooled standard deviation by
-  assuming a 10% coefficient of variation, then divided a single-subject L−R difference
-  by it and called the result "Cohen's d" — with N=1 per side no effect size is defined.
-  The interpretation strings from `assess_clinical_significance` did reach the JSON
-  report via `save_json_report`, so downstream JSON consumers may notice their absence.
-  (AU15)
-
-### Fixed
 
 - **AU20 — b0 threshold is now a single source of truth** (`DEFAULT_B0_THRESHOLD = 50`
   in `defaults.py`). Previously hardcoded as ``< 50`` in seven places across
@@ -791,7 +897,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   control did. **Re-deriving the thesis global FA/MD/RD/AD table and the LI figures from the
   new headline is a separate follow-up**, deliberately out of scope of this code fix.
 
-### Fixed
 
 - **Hemisphere splits now use the warped MNI midline, not world X=0 (AU11); the
   Jacobian hemisphere stats now use the full affine and a per-mm gradient (AU19).**

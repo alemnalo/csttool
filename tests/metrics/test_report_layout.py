@@ -215,6 +215,31 @@ class TestHtmlStructure:
     def test_li_formula_present(self, rendered_html):
         assert "LI = (L - R) / (L + R)" in rendered_html
 
+    def test_report_context_carries_no_unused_keys(self, tmp_path):
+        """``qc_has_colorbar`` was built and handed to the template on every
+        render, and the template never read it. A context key nothing consumes
+        is a claim about the report that no longer has to stay true."""
+        comparison = make_comparison()
+        context = build_report_context(
+            comparison,
+            {"qc_strip": None, "profile_matrix": None},
+            "sub-x", version="0.5.0", space="Native Space",
+            metadata=full_metadata(), fa_affine=RAS_AFFINE,
+        )
+        assert "qc_has_colorbar" not in context
+        template = (Path(__file__).parents[2] / "src" / "csttool" / "metrics"
+                    / "modules" / "templates" / "report.html.j2").read_text()
+        for key in context:
+            assert key in template, f"context key {key!r} is never read"
+
+    def test_qc_heading_carries_no_fa_background_subtitle(self, rendered_html):
+        """"FA background" described panels 2-4 only: panel 1 is the DEC image
+        itself, not an overlay on FA. Each panel now names its own content in
+        its own key, so the subtitle was an orphaned and partly false
+        annotation rather than useful information."""
+        assert "FA background" not in rendered_html
+        assert "Tractography QC" in rendered_html
+
     def test_method_summary_concise(self, rendered_html):
         assert "Deterministic CST tractography" in rendered_html
 
@@ -784,16 +809,26 @@ class TestReportFiguresMatchCss:
     def test_css_widths_match_figure_sizes(self):
         from csttool.metrics.modules.reports import _TEMPLATE_DIR
         from csttool.metrics.modules.visualizations import (
-            PROFILE_MATRIX_SIZE_MM, QC_STRIP_SIZE_MM,
+            PROFILE_MATRIX_SIZE_MM, QC_STRIP_WIDTH_MM,
         )
 
         css = (_TEMPLATE_DIR / "report.css").read_text()
         assert f".profile-matrix" in css
         assert f"width: {PROFILE_MATRIX_SIZE_MM[0]:g}mm" in css
         assert f".qc-strip" in css
-        assert f"width: {QC_STRIP_SIZE_MM[0]:g}mm" in css
+        assert f"width: {QC_STRIP_WIDTH_MM:g}mm" in css
         # The figures are placed at the width they were drawn at, never resized.
         assert ".qc-triptych" not in css
+
+    def test_css_does_not_constrain_the_strip_height(self):
+        """The strip's height is derived from the subject's coronal aspect, so
+        the CSS must set width only — a height here would rescale the figure and
+        silently break the 1 pt = 1 pt guarantee its type sizes rest on."""
+        from csttool.metrics.modules.reports import _TEMPLATE_DIR
+
+        css = (_TEMPLATE_DIR / "report.css").read_text()
+        block = css.split(".qc-strip {", 1)[1].split("}", 1)[0]
+        assert "height" not in block
 
 
 class TestReproducibilityFooter:
