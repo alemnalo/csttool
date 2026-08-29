@@ -396,12 +396,34 @@ _STRIP_SWATCH_GAP_MM = 0.9  # swatch -> its own label
 _STRIP_ENTRY_GAP_MM = 1.9   # between one entry and the next
 # Panel 2's colourbar. The bar is thick enough to read as a scale rather than a
 # rule, and its width is *measured* rather than fixed (see the drawing code): the
-# two end ticks flank it, and a subject whose vmax needs more digits must eat
+# two end ticks flank it, and a subject whose endpoint needs more digits must eat
 # into the bar, never into the neighbouring panel.
 _STRIP_CBAR_MM = 2.2        # the bar itself
 _STRIP_CBAR_MAX_FRAC = 0.72  # widest the bar may be, as a fraction of the panel
 _STRIP_CBAR_MIN_FRAC = 0.42  # narrowest, before the ticks are allowed to crowd
 _STRIP_CBAR_GAP_MM = 0.7    # key label row -> the bar below it
+_STRIP_CBAR_EDGE_MM = 0.8   # outer margin, so an end tick never touches the column
+                            # edge — without it the bar-width solve lands the
+                            # wider tick exactly on the boundary
+
+# What the density colourbar measures. The denominator is the *bilateral*
+# retained population (n_left + n_right), which is the one thing a reader cannot
+# guess and the one thing the old "streamline fraction" wording omitted: that
+# label could equally have meant a fraction of one streamline, of one
+# hemisphere's streamlines, or of every streamline generated. Naming the
+# denominator is what makes the scale readable, so it is named in full.
+#
+# It also explains the ceiling. A voxel every left streamline visits and no
+# right streamline visits reads n_left / (n_left + n_right) — about 43% on the
+# validation subject, not 100% — so a reader who assumes a per-hemisphere
+# denominator will read every value as roughly half what they expected.
+_DENSITY_CBAR_LABEL = "Fraction of bilateral CST streamlines"
+
+# Percentile the display scale is capped at, over voxels the bundle actually
+# visits. Measured maxima are ~0.10 and ~0.29 on the two validation subjects, so
+# a fixed [0, 1] scale renders both panels nearly uniformly dark; the cap is a
+# *display* decision and never touches the stored volume.
+_DENSITY_DISPLAY_PERCENTILE = 99.0
 
 # Padding from the top of the key band to the cap height of its label row. The
 # label row is the alignment anchor shared by all four columns: panels 1, 3 and 4
@@ -416,6 +438,7 @@ _STRIP_KEY_CAP_FRAC = 0.72  # cap height as a fraction of the em, for DejaVu San
 # normally sets the common size; below this the key stops being readable at
 # print size and the right answer would be shorter words, not smaller type.
 _STRIP_KEY_MIN_PT = 5.5
+_STRIP_CAPTION_MIN_PT = 5.5  # floor for the same auto-fit on the shared caption
 
 _STRIP_INK = '#333a45'      # caption and key type
 _STRIP_INK_MUTED = '#9aa3ae'  # an ROI that the display slab does not reach
@@ -897,7 +920,42 @@ def _load_optional(path, fa_shape, fa_affine, name):
     return img
 
 
-def _strip_caption_text(slice_index, provenance, slab_mm):
+def format_density_percent(fraction, *, saturated=False):
+    """Render a density *fraction* as a percentage label for display only.
+
+    The stored volume is a fraction in ``[0, 1]``; showing it as ``0.074`` asks
+    the reader to do the conversion, so the colourbar shows ``7.4%``. This
+    formats the label and nothing else — the underlying float is never touched.
+
+    ``saturated=True`` prefixes ``≥``, which is the honest form whenever the
+    scale is capped below the volume's true maximum: voxels at or above the cap
+    all carry the top colour, so a bare ``7.4%`` would read as the maximum when
+    the real one is nearly twice that.
+
+    Precision follows the magnitude — one decimal where that is the meaningful
+    digit, two significant figures below 1%, and no trailing ``.0``:
+
+    >>> format_density_percent(0.074)
+    '7.4%'
+    >>> format_density_percent(0.074, saturated=True)
+    '≥7.4%'
+    >>> format_density_percent(0.5)
+    '50%'
+    >>> format_density_percent(0.0)
+    '0%'
+    """
+    pct = float(fraction) * 100.0
+    if pct <= 0:
+        return "0%"
+    if pct < 1.0:
+        text = f"{pct:.2g}"
+    else:
+        text = f"{pct:.1f}".rstrip("0").rstrip(".")
+    return f"{'≥' if saturated else ''}{text}%"
+
+
+def _strip_caption_text(slice_index, provenance, slab_mm, *,
+                        density_scale_note=False):
     """The one shared caption line — only what is true of all four panels.
 
     The hemisphere counts and the ROI colour key used to live here too, which
@@ -910,11 +968,29 @@ def _strip_caption_text(slice_index, provenance, slab_mm):
     The slab governs panels 3 and 4 only, but it is a property of how the
     composite is displayed rather than of either panel's science, so it stays
     shared rather than being printed twice.
+
+    The density clipping rule is the one exception to "nothing panel-specific
+    here", and it earns the place: it is a statement about how a *colour scale*
+    was built rather than about what the density panel shows, it is the same
+    class of fact as the slab and the orientation convention, and the density
+    column has no room left for a second line of type. The panel's own key
+    carries the ``≥`` that marks the endpoint as a cap; this says what the cap
+    is.
+
+    It appears whenever a density panel was drawn, not only when the scale
+    happens to saturate: the rule describes how the scale top was *chosen*, and
+    a caption that explained the scale for some subjects and not others would be
+    the harder thing to read. Whether values actually exceed the cap is the
+    separate question the ``≥`` answers.
     """
     rule = str(provenance.get('rule', 'unknown')).replace('_', ' ')
-    return (f"Coronal slice {slice_index} · selected by {rule} · "
+    text = (f"Coronal slice {slice_index} · selected by {rule} · "
             f"{slab_mm:g} mm display slab · "
             f"radiological convention (R at viewer left)")
+    if density_scale_note:
+        text += (" · density scale capped at non-zero "
+                 f"P{_DENSITY_DISPLAY_PERCENTILE:g}")
+    return text
 
 
 def _fit_key_fontsize(ax, renderer, rows, start_pt, floor_pt=_STRIP_KEY_MIN_PT):
@@ -947,6 +1023,25 @@ def _fit_key_fontsize(ax, renderer, rows, start_pt, floor_pt=_STRIP_KEY_MIN_PT):
             continue
         scale = min(scale, max(0.0, box_w - fixed) / text)
     return max(floor_pt, min(start_pt, start_pt * scale))
+
+
+def _fit_caption_fontsize(ax, renderer, text, start_pt,
+                          floor_pt=_STRIP_CAPTION_MIN_PT):
+    """The largest type at or below ``start_pt`` at which the caption fits.
+
+    Text width scales with point size, so the fit is solved from one
+    measurement rather than by iterating. Normally a no-op — the caption has
+    ~8 mm of slack on a typical subject — but the line grows with the slice
+    index, the rule name, the slab and the density note, and there is no
+    combination of those the figure may clip.
+    """
+    box_w = ax.get_window_extent(renderer).width
+    probe = ax.text(0, 0, text, fontsize=start_pt)
+    text_w = probe.get_window_extent(renderer).width
+    probe.remove()
+    if text_w <= 0 or text_w <= box_w:
+        return start_pt
+    return max(floor_pt, start_pt * box_w / text_w)
 
 
 def _draw_key_row(ax, renderer, entries, fontsize, *, y):
@@ -1125,7 +1220,8 @@ def plot_report_qc_strip(
     -------
     pathlib.Path
         The saved PNG. A JSON sidecar beside it records the slice, the rule that
-        chose it, the slab, the counts, the density ``vmax``, the per-ROI slab
+        chose it, the slab, the counts, the density maximum and the display cap
+        that differs from it, the per-ROI slab
         voxel counts and which panels degraded.
     """
     import json
@@ -1243,21 +1339,35 @@ def plot_report_qc_strip(
         degraded.append("dec_fa")
 
     # ---- panel 2: CST density -------------------------------------------
-    vmax = None
+    # Two different numbers, deliberately named apart. The *display* cap is a
+    # presentation choice; the *true* maximum is a property of the data. The old
+    # single ``vmax`` carried the first under a name that reads like the second,
+    # which is exactly the confusion the endpoint label has to avoid.
+    density_max_fraction = None      # the volume's real maximum, in [0, 1]
+    density_display_vmax = None      # where the colour scale saturates
+    density_display_clipped = False  # True when real values exceed that cap
     density_image = None
     if density is not None:
         nonzero = density[density > 0]
-        # Subject-adaptive: measured maxima are ~0.10 and ~0.29 on the two
-        # validation subjects, so a fixed [0, 1] scale would render both panels
-        # nearly uniformly dark. The value is printed in the colourbar label, so
-        # the scale is never anonymous. No log or power stretch: that would be a
-        # second normalization on top of the persisted definition and would make
-        # two subjects incomparable.
-        vmax = float(np.percentile(nonzero, 99)) if nonzero.size else 1.0
+        # Subject-adaptive: a fixed [0, 1] scale renders real subjects nearly
+        # uniformly dark, because the bilateral denominator puts even a fully
+        # occupied unilateral voxel near 0.5 and real maxima far below that. No
+        # log or power stretch: that would be a second normalization on top of
+        # the persisted definition and would make two subjects incomparable.
+        density_max_fraction = float(density.max()) if density.size else 0.0
+        density_display_vmax = (
+            float(np.percentile(nonzero, _DENSITY_DISPLAY_PERCENTILE))
+            if nonzero.size else 1.0
+        )
+        # Saturation is a fact about this subject, not an assumption: on the
+        # validation subject the true maximum is 1.9x the cap, so 71 voxels
+        # share the top colour and a bare endpoint would misname the maximum.
+        # Where the cap happens to reach the maximum, no "≥" is claimed.
+        density_display_clipped = density_max_fraction > density_display_vmax
         _background(axes[1])
         density_image = _render.render_density_overlay(
             axes[1], density, affine, "coronal", slice_index,
-            cmap=_style.DENSITY_CMAP, vmax=vmax,
+            cmap=_style.DENSITY_CMAP, vmax=density_display_vmax,
         )
         _title(axes[1], "CST density")
     else:
@@ -1349,7 +1459,7 @@ def plot_report_qc_strip(
 
     # Panel 2's label row is measured as a single centred token so it takes part
     # in the common fit; its two numeric ticks flank the bar and are short.
-    rows.append([(None, "streamline fraction")] if density_image is not None else [])
+    rows.append([(None, _DENSITY_CBAR_LABEL)] if density_image is not None else [])
 
     # Panel 3: the ROI colour key, beside the contours it names. An ROI the
     # display slab never reaches is greyed rather than dropped, so a zero count
@@ -1398,17 +1508,26 @@ def plot_report_qc_strip(
     # read as one row of legends. The name is static and the number is dynamic,
     # so they are set separately: as one string the label measured 47.45 mm
     # inside a 48.05 mm column and overflowed into the neighbouring panels as
-    # soon as vmax reached two integer digits.
+    # soon as the endpoint reached two integer digits.
     if density_image is not None:
         key_ax = key_axes[1]
-        key_ax.text(0.5, label_y, "streamline fraction",
+        key_ax.text(0.5, label_y, _DENSITY_CBAR_LABEL,
                     transform=key_ax.transAxes, ha='center', va='baseline',
                     fontsize=key_pt, color=_STRIP_INK)
 
+        # Percentages, not raw fractions: the stored value is a fraction but a
+        # reader should not have to convert 0.074 in their head. The upper tick
+        # says "≥" whenever the scale saturates below the true maximum, so it
+        # can never be misread as the maximum itself.
+        #
         # The bar's width is what is left after the two end ticks have their
-        # room, so a vmax needing more digits narrows the bar instead of
+        # room, so an endpoint needing more digits narrows the bar instead of
         # pushing a number into panel 1 or panel 3.
-        tick_texts = ("0", f"{vmax:.3g}")
+        tick_texts = (
+            format_density_percent(0.0),
+            format_density_percent(density_display_vmax,
+                                   saturated=density_display_clipped),
+        )
         tick_w_mm = []
         for text in tick_texts:
             probe = key_ax.text(0, 0, text, fontsize=key_pt)
@@ -1419,10 +1538,11 @@ def plot_report_qc_strip(
         # The bar is centred in the column, so each tick has (panel - bar) / 2
         # to live in and the *wider* of the two is what binds — using their sum
         # lets the longer one hang past the column edge.
-        allowed = panel_mm - 2 * gap_mm - 2 * max(tick_w_mm)
+        allowed = (panel_mm - 2 * gap_mm - 2 * max(tick_w_mm)
+                   - 2 * _STRIP_CBAR_EDGE_MM)
         bar_w = min(allowed, _STRIP_CBAR_MAX_FRAC * panel_mm)
         bar_w = max(bar_w, _STRIP_CBAR_MIN_FRAC * panel_mm)
-        # A vmax wide enough to fight the minimum takes the bar down with it
+        # An endpoint wide enough to fight the minimum takes the bar down with it
         # rather than clipping: a short bar is legible, a truncated number is not.
         bar_w = max(min(bar_w, allowed), 0.15 * panel_mm)
 
@@ -1456,10 +1576,20 @@ def plot_report_qc_strip(
     caption_ax = fig.add_axes([0.0, geom["caption_y0_mm"] / height_mm, 1.0,
                                _STRIP_CAPTION_MM / height_mm])
     caption_ax.set_axis_off()
+    caption_text = _strip_caption_text(
+        slice_index, provenance, slab_mm,
+        density_scale_note=density_image is not None,
+    )
+    # Measured and shrunk if need be, exactly as the key rows are. The caption
+    # grows with the slice index, the rule name, the slab and the density note,
+    # and the figure is saved with its exact bbox, so an overlong line would be
+    # silently cut off at the canvas edge rather than wrap.
+    caption_pt = _fit_caption_fontsize(caption_ax, renderer, caption_text,
+                                       _STRIP_CAPTION_PT)
     caption_ax.text(
-        0.5, 0.5, _strip_caption_text(slice_index, provenance, slab_mm),
+        0.5, 0.5, caption_text,
         transform=caption_ax.transAxes, ha='center', va='center',
-        fontsize=_STRIP_CAPTION_PT, color=_STRIP_INK,
+        fontsize=caption_pt, color=_STRIP_INK,
     )
 
     fig_path = output_dir / f"{subject_id}_report_qc_strip.png"
@@ -1478,7 +1608,15 @@ def plot_report_qc_strip(
         "StreamlineCounts": {"left": len(left), "right": len(right)},
         "StreamlinesDrawn": {"left": min(len(left), max_streamlines),
                              "right": min(len(right), max_streamlines)},
-        "DensityVmax": vmax,
+        # Three separate facts, because the old single "DensityVmax" held the
+        # display cap under a name that reads like a data maximum.
+        "DensityMaxFraction": density_max_fraction,
+        "DensityDisplayVmax": density_display_vmax,
+        "DensityDisplayPercentile": (_DENSITY_DISPLAY_PERCENTILE
+                                     if density_display_vmax is not None else None),
+        "DensityDisplayPercentileBasis": ("non-zero voxels"
+                                          if density_display_vmax is not None else None),
+        "DensityDisplayClipped": density_display_clipped,
         "RoiSlabVoxelCounts": roi_slab_voxels,
         "DegradedPanels": degraded,
         "Seed": int(seed),

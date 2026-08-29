@@ -135,8 +135,11 @@
     {# Each panel's key is owned by the Matplotlib figure, which is the only #}
     {# thing that knows where the panels landed. Do not add legends here. #}
     {# The slice and the rule that chose it live in the figure's caption. #}
+    {# No subtitle: "FA background" was true of panels 2-4 only — panel 1 is #}
+    {# the DEC image itself, not an overlay on FA — and each panel now names #}
+    {# its own content in its own key. #}
     <section class="qc">
-        <h2 class="section-title">Tractography QC <small>FA background</small></h2>
+        <h2 class="section-title">Tractography QC</h2>
         {% if qc_strip %}
         <img class="qc-strip" src="{{ qc_strip }}" alt="Report QC strip (DEC-FA, CST density, extraction ROIs, CST over FA)">
         {% else %}

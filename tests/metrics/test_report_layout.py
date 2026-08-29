@@ -215,6 +215,31 @@ class TestHtmlStructure:
     def test_li_formula_present(self, rendered_html):
         assert "LI = (L - R) / (L + R)" in rendered_html
 
+    def test_report_context_carries_no_unused_keys(self, tmp_path):
+        """``qc_has_colorbar`` was built and handed to the template on every
+        render, and the template never read it. A context key nothing consumes
+        is a claim about the report that no longer has to stay true."""
+        comparison = make_comparison()
+        context = build_report_context(
+            comparison,
+            {"qc_strip": None, "profile_matrix": None},
+            "sub-x", version="0.5.0", space="Native Space",
+            metadata=full_metadata(), fa_affine=RAS_AFFINE,
+        )
+        assert "qc_has_colorbar" not in context
+        template = (Path(__file__).parents[2] / "src" / "csttool" / "metrics"
+                    / "modules" / "templates" / "report.html.j2").read_text()
+        for key in context:
+            assert key in template, f"context key {key!r} is never read"
+
+    def test_qc_heading_carries_no_fa_background_subtitle(self, rendered_html):
+        """"FA background" described panels 2-4 only: panel 1 is the DEC image
+        itself, not an overlay on FA. Each panel now names its own content in
+        its own key, so the subtitle was an orphaned and partly false
+        annotation rather than useful information."""
+        assert "FA background" not in rendered_html
+        assert "Tractography QC" in rendered_html
+
     def test_method_summary_concise(self, rendered_html):
         assert "Deterministic CST tractography" in rendered_html
 

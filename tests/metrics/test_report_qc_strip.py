@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from csttool.metrics.modules.visualizations import (
+    format_density_percent,
     QC_STRIP_MAX_HEIGHT_MM,
     QC_STRIP_MIN_HEIGHT_MM,
     QC_STRIP_WIDTH_MM,
@@ -64,6 +65,22 @@ def _density():
     density = np.zeros(SHAPE, dtype=np.float32)
     density[8:11, 8:13, 4:14] = 0.4
     density[14:17, 8:13, 4:14] = 0.3
+    return density
+
+
+def _long_tailed_density():
+    """A density whose true maximum sits well above its non-zero P99.
+
+    The flat two-valued ``_density`` fixture cannot saturate — its P99 *is* its
+    maximum — so it cannot exercise the clipped branch. Real subjects have a
+    long tail: on the validation subject the maximum is 1.9x the P99 and 1% of
+    visited voxels sit at or above it.
+    """
+    density = np.zeros(SHAPE, dtype=np.float32)
+    rng = np.random.default_rng(0)
+    body = (slice(6, 18), slice(6, 14), slice(3, 15))
+    density[body] = rng.uniform(0.01, 0.10, size=density[body].shape)
+    density[11:13, 9:11, 7:9] = 0.9   # the tail: a few very dense core voxels
     return density
 
 
@@ -440,37 +457,123 @@ class TestPanelContent:
         bright = rgb.sum(axis=2) > 0.1
         assert rgb[..., 2][bright].mean() > rgb[..., 0][bright].mean()
 
-    def test_density_vmax_is_subject_adaptive_and_disclosed(self, subject, tmp_path):
-        """A fixed [0, 1] scale would render real subjects nearly uniformly dark,
-        so vmax adapts — which makes stating it mandatory."""
+    def test_the_sidecar_separates_the_true_maximum_from_the_display_cap(
+        self, subject, tmp_path
+    ):
+        """Two different numbers. The display cap is a presentation choice; the
+        maximum is a property of the data. They were previously one key named
+        ``DensityVmax``, which reads like the second and held the first."""
         sidecar = _sidecar(_render(subject, tmp_path))
-        assert 0 < sidecar["DensityVmax"] <= 1.0
-        assert sidecar["DensityVmax"] < 1.0
+        assert 0 < sidecar["DensityDisplayVmax"] <= 1.0
+        assert 0 < sidecar["DensityMaxFraction"] <= 1.0
+        assert sidecar["DensityMaxFraction"] >= sidecar["DensityDisplayVmax"]
+        assert sidecar["DensityDisplayPercentile"] == 99.0
+        assert sidecar["DensityDisplayPercentileBasis"] == "non-zero voxels"
+        assert isinstance(sidecar["DensityDisplayClipped"], bool)
+        assert "DensityVmax" not in sidecar, "the misleading key must be gone"
 
-    def test_exactly_one_colourbar_and_it_names_its_vmax(self, subject, tmp_path,
-                                                          strip_probe):
-        """Density is the only quantitative scale in the strip, and its vmax is
-        subject-adaptive, so exactly one colourbar exists and it must state the
-        number it is scaled to.
-
-        The number is a *tick*, not a clause inside the label. As one string the
-        label measured 47.45 mm against a 48.05 mm column and overflowed into
-        the neighbouring panels as soon as vmax reached two integer digits; the
-        quantity name is static and the number is dynamic, so they are set
-        separately.
-        """
-        path = _render(subject, tmp_path)
+    def test_the_colourbar_names_the_bilateral_denominator(self, subject,
+                                                           tmp_path, strip_probe):
+        """"streamline fraction" could equally have meant a fraction of one
+        streamline, of one hemisphere's streamlines, or of every streamline
+        generated. The denominator is the one thing a reader cannot guess, and
+        it is what sets the ceiling: a voxel every left streamline visits reads
+        n_left / (n_left + n_right), not 100%."""
+        _render(subject, tmp_path)
         texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-        assert texts.count("streamline fraction") == 1
-        assert f"{_sidecar(path)['DensityVmax']:.3g}" in texts
-        assert "0" in texts
+        assert texts.count("Fraction of bilateral CST streamlines") == 1
+        assert "streamline fraction" not in texts
         assert not any("vmax=" in t for t in texts)
+
+    def test_the_colourbar_endpoints_are_percentages(self, subject, tmp_path,
+                                                     strip_probe):
+        """Display only — the stored volume stays a fraction in [0, 1]."""
+        path = _render(subject, tmp_path)
+        sidecar = _sidecar(path)
+        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
+        assert "0%" in texts
+        expected = format_density_percent(
+            sidecar["DensityDisplayVmax"],
+            saturated=sidecar["DensityDisplayClipped"],
+        )
+        assert expected in texts
+        assert expected.endswith("%")
+        # The raw fraction must not appear anywhere on the figure.
+        assert f"{sidecar['DensityDisplayVmax']:.3g}" not in texts
+
+    def test_a_clipped_endpoint_is_marked_as_a_floor_not_a_maximum(
+        self, subject, tmp_path, strip_probe
+    ):
+        """A long-tailed density — like a real subject's, whose true maximum is
+        ~1.9x its 99th percentile — puts voxels above the cap, so they share the
+        top colour and a bare number would misname the maximum."""
+        path = _render(subject, tmp_path,
+                       density_path=_write_nifti(tmp_path / "tail.nii.gz",
+                                                 _long_tailed_density(),
+                                                 RAS_AFFINE))
+        sidecar = _sidecar(path)
+        assert sidecar["DensityDisplayClipped"] is True
+        assert sidecar["DensityMaxFraction"] > sidecar["DensityDisplayVmax"]
+        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
+        upper = [t for t in texts if t.startswith("\u2265")]
+        assert len(upper) == 1, "the capped endpoint must carry a >= marker"
+        assert format_density_percent(sidecar["DensityMaxFraction"]) not in texts, (
+            "the true maximum must not be printed as the endpoint"
+        )
+
+    def test_an_unclipped_endpoint_is_stated_exactly(self, subject, tmp_path,
+                                                     strip_probe):
+        """The counterpart: where the cap happens to reach the true maximum,
+        nothing saturates and no ">=" may be claimed."""
+        path = _render(subject, tmp_path)
+        sidecar = _sidecar(path)
+        assert sidecar["DensityDisplayClipped"] is False, "fixture must not saturate"
+        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
+        assert not any(t.startswith("\u2265") for t in texts)
+        assert format_density_percent(sidecar["DensityDisplayVmax"]) in texts
+
+    @pytest.mark.parametrize("long_tail", [False, True])
+    def test_the_caption_states_the_clipping_rule_that_the_code_applies(
+        self, subject, tmp_path, strip_probe, long_tail
+    ):
+        """The rule stated on the page must be the rule the code ran — a caption
+        naming a percentile the visualization does not use is worse than none.
+
+        It is stated whenever a density panel exists, saturating or not: the
+        rule describes how the scale top was chosen, and a caption that explained
+        the scale for some subjects and not others would be harder to read.
+        """
+        from csttool.metrics.modules.visualizations import (
+            _DENSITY_DISPLAY_PERCENTILE,
+        )
+
+        density = _long_tailed_density() if long_tail else _density()
+        path = _render(subject, tmp_path,
+                       density_path=_write_nifti(tmp_path / "d.nii.gz", density,
+                                                 RAS_AFFINE))
+        assert "density scale capped at non-zero P99" in _caption_text(strip_probe)
+        assert _DENSITY_DISPLAY_PERCENTILE == 99.0
+        # And it is genuinely that percentile of the non-zero voxels.
+        nonzero = density[density > 0]
+        assert _sidecar(path)["DensityDisplayVmax"] == pytest.approx(
+            float(np.percentile(nonzero, _DENSITY_DISPLAY_PERCENTILE))
+        )
+
+    def test_no_label_calls_the_display_cap_a_maximum(self, subject, tmp_path,
+                                                      strip_probe):
+        _render(subject, tmp_path)
+        for ax in strip_probe["axes"]:
+            for text in ax["texts"]:
+                assert "max" not in text.lower(), f"{text!r} calls the cap a maximum"
 
     def test_no_colourbar_when_density_is_unavailable(self, subject, tmp_path,
                                                       strip_probe):
         _render(subject, tmp_path, density_path=None)
-        assert not any("streamline fraction" in t
-                       for ax in strip_probe["axes"] for t in ax["texts"])
+        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
+        assert not any("Fraction of bilateral" in t for t in texts)
+        # And the caption must not advertise a clipping rule for a panel that
+        # was never drawn.
+        assert "capped at non-zero" not in _caption_text(strip_probe)
 
     def test_every_panel_is_radiological(self, subject, tmp_path, strip_probe):
         """All four must agree on which side of the page is anatomical left.
@@ -941,9 +1044,9 @@ class TestFurnitureLayout:
         key = _key_band(strip_probe)[1]
         bar = _colourbar_axes(strip_probe)
         ticks = [b for t, b in zip(key["texts"], key["text_bboxes_mm"])
-                 if b and t != "streamline fraction"]
+                 if b and t.rstrip("%").lstrip("\u2265").replace(".", "").isdigit()]
         label = [b for t, b in zip(key["texts"], key["text_bboxes_mm"])
-                 if b and t == "streamline fraction"][0]
+                 if b and t == "Fraction of bilateral CST streamlines"][0]
         assert len(ticks) == 2
         for box in ticks:
             overlap = min(box[3], bar[3]) - max(box[1], bar[1])
@@ -984,17 +1087,18 @@ def test_streamline_counts_do_not_reflow_the_layout(tmp_path, strip_probe,
             assert box[0] >= cx0 - 0.05 and box[2] <= cx1 + 0.05
 
 
-@pytest.mark.parametrize("scale, expected", [(1e-4, "4e-05"), (1.0, "0.4"),
-                                             (105.0, "42")])
-def test_density_vmax_magnitude_does_not_reflow_the_colourbar(
+@pytest.mark.parametrize("scale, expected", [(1e-4, "0.004%"), (1.0, "40%"),
+                                             (105.0, "4200%")])
+def test_density_endpoint_magnitude_does_not_reflow_the_colourbar(
     tmp_path, strip_probe, scale, expected
 ):
-    """vmax is subject-adaptive and printed beside the bar. Under the old
-    ``{vmax:.4f}`` inside a sentence, reaching two integer digits pushed the
-    label into the neighbouring panels; ``%.3g`` holds its width instead."""
+    """The endpoint is subject-adaptive and printed beside the bar. Under the
+    old ``{vmax:.4f}`` inside a sentence, reaching two integer digits pushed the
+    label into the neighbouring panels; the bar is now measured around whatever
+    the endpoint needs, so the column absorbs the change instead."""
     _render(_layout_subject(tmp_path, (30, 24, 18), density_scale=scale), tmp_path)
     texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-    assert expected in texts
+    assert any(t.lstrip("\u2265") == expected for t in texts), texts
     key = _key_band(strip_probe)[1]
     cx0, _, cx1, _ = key["box_mm"]
     for box in [b for b in key["text_bboxes_mm"] if b]:
@@ -1084,3 +1188,86 @@ class TestStripGeometryFunction:
     def test_a_wider_grid_gives_a_shorter_strip(self):
         heights = [qc_strip_geometry(w, 60)["height_mm"] for w in (110, 130, 160)]
         assert heights == sorted(heights, reverse=True)
+
+
+class TestDensityPercentFormatting:
+    """``format_density_percent`` — display only, never the stored value."""
+
+    @pytest.mark.parametrize("fraction, expected", [
+        (0.074, "7.4%"),        # the validation subject's display cap
+        (0.138952, "13.9%"),    # its true maximum
+        (0.5, "50%"),           # no meaningless trailing zero
+        (1.0, "100%"),
+        (0.0, "0%"),
+        (0.42665, "42.7%"),     # a fully occupied unilateral voxel
+        (0.004, "0.4%"),
+        (0.00042, "0.042%"),    # two significant figures below 1%
+    ])
+    def test_reads_as_a_percentage(self, fraction, expected):
+        assert format_density_percent(fraction) == expected
+
+    def test_saturation_marks_the_endpoint_as_a_floor(self):
+        assert format_density_percent(0.074, saturated=True) == "\u22657.4%"
+        assert format_density_percent(0.074, saturated=False) == "7.4%"
+
+    def test_zero_never_carries_a_saturation_marker(self):
+        """The lower endpoint is exact by construction."""
+        assert format_density_percent(0.0, saturated=True) == "0%"
+
+    def test_every_output_is_a_percentage(self):
+        for fraction in (0.0, 1e-6, 0.001, 0.074, 0.5, 1.0):
+            assert format_density_percent(fraction).endswith("%")
+
+    def test_formatting_does_not_touch_the_underlying_value(self):
+        """A formatter, not a transform: the caller's float is unchanged and the
+        label is derived from it rather than replacing it."""
+        value = 0.0740321
+        assert format_density_percent(value) == "7.4%"
+        assert value == 0.0740321
+
+
+class TestAnnotationFitsWhateverItSays:
+    """The two auto-fits that keep dynamic text inside its box."""
+
+    def test_the_caption_shrinks_rather_than_clipping(self):
+        """The figure is saved with its exact bbox, so an overlong caption is
+        cut off at the canvas edge rather than wrapped. It grows with the slice
+        index, the rule name, the slab and the density note, so it is measured."""
+        import matplotlib.pyplot as plt
+        from csttool.metrics.modules.visualizations import (
+            _STRIP_CAPTION_MIN_PT, _STRIP_CAPTION_PT, _fit_caption_fontsize,
+        )
+
+        fig = plt.figure(figsize=(194 / 25.4, 47 / 25.4))
+        ax = fig.add_axes([0.0, 0.0, 1.0, 0.1])
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+
+        short = "Coronal slice 42 · 10 mm display slab"
+        assert _fit_caption_fontsize(ax, renderer, short,
+                                     _STRIP_CAPTION_PT) == _STRIP_CAPTION_PT
+
+        long_text = short + " · " + ("a very long clause indeed " * 12)
+        fitted = _fit_caption_fontsize(ax, renderer, long_text, _STRIP_CAPTION_PT)
+        assert _STRIP_CAPTION_MIN_PT <= fitted < _STRIP_CAPTION_PT
+        plt.close(fig)
+
+    @pytest.mark.parametrize("shape", LAYOUT_SHAPES,
+                             ids=lambda s: "x".join(str(v) for v in s))
+    def test_the_colourbar_ticks_keep_clear_of_the_column_edge(self, tmp_path,
+                                                               strip_probe, shape):
+        """Solving the bar width against the ticks lands the wider one exactly
+        on the boundary; the edge margin is what keeps it off.
+
+        The threshold is an absolute millimetre figure, deliberately not
+        ``_STRIP_CBAR_EDGE_MM`` — asserting against the constant under test
+        would pass for any value of it, including zero.
+        """
+        _render(_layout_subject(tmp_path, shape, density_scale=1.0), tmp_path)
+        key = _key_band(strip_probe)[1]
+        cx0, _, cx1, _ = key["box_mm"]
+        for text, box in zip(key["texts"], key["text_bboxes_mm"]):
+            if box is None or not text.rstrip("%").lstrip("\u2265").replace(".", "").isdigit():
+                continue
+            assert box[0] - cx0 >= 0.5, f"{text!r} crowds the left column edge"
+            assert cx1 - box[2] >= 0.5, f"{text!r} crowds the right column edge"
