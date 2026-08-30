@@ -15,6 +15,7 @@ from csttool.defaults import (
 from csttool.tracking.modules import (
     fit_tensors,
     estimate_directions,
+    resolve_brain_mask,
     validate_sh_order,
     seed_and_stop,
     run_tractography,
@@ -75,13 +76,23 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         return None
 
     # Step 1: Brain masking
-    print(f"\n[Step 1/6] Brain masking with median Otsu...")
+    brain_mask_path = getattr(args, 'brain_mask', None)
+    if brain_mask_path is None:
+        print(f"\n[Step 1/6] Brain masking with median Otsu...")
+    else:
+        print(f"\n[Step 1/6] Brain masking from external mask: {brain_mask_path}")
 
-    from csttool.preprocess.modules.background_segmentation import background_segmentation
-    masked_data, brain_mask = background_segmentation(
-        data,
-        gtab
-    )
+    try:
+        masked_data, brain_mask, mask_info = resolve_brain_mask(
+            data,
+            gtab,
+            affine,
+            brain_mask_path=brain_mask_path,
+            verbose=verbose,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"  ✗ Brain masking failed: {e}")
+        return None
 
     # Step 2: Tensor fitting
     print(f"\n[Step 2/6] Tensor fit and scalar measures (FA, MD, RD, AD)...")
@@ -169,6 +180,8 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         'random_seed': ctx.run_seed,
         'use_brain_mask_stop': use_brain_mask_stop,
         'fit_method': getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
+        'brain_mask_source': mask_info['brain_mask_source'],
+        'brain_mask_path': mask_info['brain_mask_path'],
     }
 
     try:

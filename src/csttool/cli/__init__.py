@@ -364,6 +364,17 @@ def main() -> None:
         help="Disable deterministic seeding (use random initialization)."
     )
     p_track.add_argument(
+        "--brain-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Path to a DWI-space brain mask (NIfTI) to use instead of "
+             "csttool's automatic background segmentation for tensor "
+             "fitting and tracking. Must be 3D and already on the DWI grid "
+             "(same shape and affine); it is never resampled. Any nonzero "
+             "voxel counts as brain. Omit to use automatic masking."
+    )
+    p_track.add_argument(
         "--use-brain-mask-stop",
         action="store_true",
         help="Stop tracking at brain mask boundary in addition to FA threshold."
@@ -732,6 +743,17 @@ def main() -> None:
         help=f"B-value at or below which a volume counts as b=0, in s/mm² "
              f"(default: {DEFAULT_B0_THRESHOLD}). Sets the gradient table's b0 "
              f"partition, which also drives brain masking and Patch2Self."
+    )
+    p_run.add_argument(
+        "--brain-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Path to a DWI-space brain mask (NIfTI) to use instead of "
+             "csttool's automatic background segmentation for tensor "
+             "fitting and tracking. Must be 3D and already on the DWI grid "
+             "(same shape and affine); it is never resampled. Any nonzero "
+             "voxel counts as brain. Omit to use automatic masking."
     )
 
     # Extraction options

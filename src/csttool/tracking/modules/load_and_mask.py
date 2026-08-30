@@ -1,11 +1,18 @@
-def load_and_mask(nii_dirname, nii_fname, visualize=False, verbose=False):
+def load_and_mask(nii_dirname, nii_fname, visualize=False, verbose=False,
+                  brain_mask_path=None):
     """This function loads a NIfTI dataset with its gradient table, then applies median Otsu threshold segmentation to generate a brainmask.
+
+    When ``brain_mask_path`` is supplied, that mask replaces the automatic
+    segmentation entirely: ``background_segmentation`` is not called.
 
     Args:
         nii_dirname (str): Directory of your NIfTI file.
         nii_fname (str): Name of your NIfTI file.
         visualize (bool): Set to True for data visualization. Defaults to False.
         verbose (bool): Set to True for verbose output. Defaults to False.
+        brain_mask_path (str | Path | None): Optional external DWI-space brain
+            mask to use instead of automatic background segmentation.
+            Defaults to None (automatic).
 
     Returns:
         tuple: (data, affine, img, gtab, masked_data, brain_mask)
@@ -17,7 +24,7 @@ def load_and_mask(nii_dirname, nii_fname, visualize=False, verbose=False):
             - brain_mask: Binary brain mask array
     """    
     from csttool.preprocess.modules.load_dataset import load_dataset
-    from csttool.preprocess.modules.background_segmentation import background_segmentation
+    from csttool.tracking.modules.brain_mask import resolve_brain_mask
 
     # Remove extension if present in fname, as modules.load_dataset expects stem or handles it differently
     # Actually modules.load_dataset expects fname without extension for nifti construction in some paths,
@@ -41,17 +48,16 @@ def load_and_mask(nii_dirname, nii_fname, visualize=False, verbose=False):
         print(f"    • Data shape: {data.shape}")
         print(f"    • Gradient table: {len(gtab.bvals)} volumes")
 
-    # background_segmentation(data, gtab=None, median_radius=2, numpass=1, autocrop=False)
-    # Original used visualize=visualize, but new one doesn't support visualize arg directly in computation 
-    # (it seems visualizion is handled separately or removed).
-    # We will ignore visualize arg for segmentation as it's not in the new signature.
-    masked_data, brain_mask = background_segmentation(
+    # Automatic path is background_segmentation(data, gtab), exactly as before;
+    # an external mask short-circuits it (see brain_mask.resolve_brain_mask).
+    # The old inline call passed visualize=visualize, but the current
+    # background_segmentation signature has no visualize argument.
+    masked_data, brain_mask, _mask_info = resolve_brain_mask(
         data,
-        gtab
+        gtab,
+        affine,
+        brain_mask_path=brain_mask_path,
+        verbose=verbose,
     )
-
-    if verbose:
-        mask_coverage = brain_mask.sum() / brain_mask.size * 100
-        print(f"    • Brain mask: {brain_mask.sum():,} voxels ({mask_coverage:.1f}%)")
 
     return data, affine, img, gtab, masked_data, brain_mask

@@ -138,6 +138,7 @@ dataset (so that `SourceDatasets: bids::` resolves correctly):
 | `--seed-density <n>` | Seeds per voxel (default: 1) |
 | `--step-size <mm>` | Tracking step size (default: 0.5) |
 | `--sh-order <n>` | Spherical harmonic order for CSA ODF (default: 6) |
+| `--brain-mask <path>` | Use this DWI-space brain mask (NIfTI) instead of csttool's automatic background segmentation. Must be 3D and already on the DWI grid (same shape and affine) — it is never resampled; any nonzero voxel counts as brain. Omit for automatic masking. |
 
 ### Extraction
 

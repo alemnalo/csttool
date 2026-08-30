@@ -371,6 +371,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             fit_method=getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
             npeaks=getattr(args, 'npeaks', DEFAULT_NPEAKS),
             rng_seed=getattr(args, 'rng_seed', DEFAULT_RNG_SEED),
+            brain_mask=getattr(args, 'brain_mask', None),
             save_visualizations=getattr(args, 'save_visualizations', False),
             show_plots=getattr(args, 'show_plots', False),
             verbose=verbose,

@@ -226,6 +226,9 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
             'stopping_criterion': tracking_params.get('stopping_criterion', 'fa_threshold'),
             'relative_peak_threshold': tracking_params.get('relative_peak_threshold', 0.8),
             'min_separation_angle': tracking_params.get('min_separation_angle', 45),
+            'brain_mask_source': tracking_params.get(
+                'brain_mask_source', 'automatic_background_segmentation'),
+            'brain_mask_path': tracking_params.get('brain_mask_path', None),
         },
         'data_info': {
             'volume_shape': [int(x) for x in img.shape[:3]],

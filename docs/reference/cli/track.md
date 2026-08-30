@@ -30,6 +30,7 @@ csttool track \
 - `--fa-thr`: FA threshold for stopping and seeding (default: 0.2)
 - `--sh-order`: Maximum spherical harmonic order for CSA ODF model (default: 6)
 - `--rng-seed`: Random seed for reproducible tractography (default: None, non-deterministic)
+- `--brain-mask`: Path to a DWI-space brain mask (NIfTI) to use instead of automatic background segmentation. Must be 3D and already on the DWI grid (same shape and affine) — it is never resampled; any nonzero voxel counts as brain. Omit for automatic masking
 - `--use-brain-mask-stop`: Stop tracking at brain mask boundary in addition to FA threshold
 - `--show-plots`: Enable QC plots for segmentation and tractography
 - `--verbose`: Print detailed processing information

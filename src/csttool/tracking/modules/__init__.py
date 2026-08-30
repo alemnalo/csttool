@@ -4,6 +4,11 @@ Tracking pipeline modules.
 Exports the main pipeline functions for tractography and visualization.
 """
 
+from .brain_mask import (
+    apply_brain_mask,
+    load_external_brain_mask,
+    resolve_brain_mask,
+)
 from .load_and_mask import load_and_mask
 from .fit_tensors import fit_tensors
 from .estimate_directions import (
@@ -28,6 +33,9 @@ from .visualizations import (
 __all__ = [
     # Pipeline functions
     'load_and_mask',
+    'resolve_brain_mask',
+    'load_external_brain_mask',
+    'apply_brain_mask',
     'fit_tensors',
     'estimate_directions',
     'get_max_sh_order',
