@@ -24,9 +24,22 @@ import pytest
 
 from csttool.metrics.modules.reports import build_report_context, save_html_report
 from csttool.metrics.modules.visualizations import (
+    _REGION_DISPLAY_NAMES,
     plot_profile_matrix,
     plot_tractogram_qc_triptych,
 )
+
+# The three positional bin names as a reader sees them. Derived from the source
+# of truth rather than restated, so a future rename cannot leave these tests
+# asserting strings the figures no longer draw.
+REGION_LABELS = tuple(_REGION_DISPLAY_NAMES[k]
+                      for k in ("pontine", "plic", "precentral"))
+
+# Names the bins must never carry again. The bins are fixed ranges of a 20-node
+# normalized profile assigned by index; they are not atlas-defined regions and
+# were never verified against an anatomical landmark, so an anatomical label on
+# them is a claim the computation does not support.
+ANATOMICAL_NAMES = ("Pontine", "PLIC", "Precentral")
 from csttool.viz.geometry import orientation_code
 
 
@@ -388,8 +401,11 @@ class TestNodeHomologyLine:
         """The no-suppression guarantee: every regional value stays visible and
         unmodified whatever the homology says."""
         html = self._html(tmp_path, homology, "sub-nh-cells")
-        for region in ("Pontine", "PLIC", "Precentral"):
+        for region in REGION_LABELS:
             assert f'class="region-label">{region}<' in html
+        for anatomical in ANATOMICAL_NAMES:
+            assert anatomical not in html, (
+                f"{anatomical!r} names a positional bin as an anatomical region")
         # Four scalar columns of real values, three rows, in every case.
         assert html.count('<td class="region-label">') == 3
 
@@ -583,7 +599,7 @@ class TestProfileMatrixLayout:
             pt
             for ax in figure_probe["axes"]
             for text, pt in ax["texts"]
-            if text in ("Pontine Level", "PLIC", "Precentral Gyrus")
+            if text in REGION_LABELS
         ]
         assert len(titles) == 4
         assert len(region_pts) == 3, "region names must be drawn exactly once each"
@@ -594,8 +610,7 @@ class TestProfileMatrixLayout:
         plot_profile_matrix(comparison["left"], comparison["right"], tmp_path, "sub-strip")
         strips = [
             ax for ax in figure_probe["axes"]
-            if any(t in ("Pontine Level", "PLIC", "Precentral Gyrus")
-                   for t, _ in ax["texts"])
+            if any(t in REGION_LABELS for t, _ in ax["texts"])
         ]
         assert len(strips) == 1, "the region names must not be repeated per panel"
         strip, panels = strips[0], [

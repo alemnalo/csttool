@@ -67,3 +67,66 @@ class TestStylePolicy:
         style.save_figure(fig, out)
         assert out.exists() and out.stat().st_size > 0
         plt.close(fig)
+
+
+class TestSingleExportPath:
+    """Every figure csttool writes goes through ``style.save_figure``.
+
+    The policy docstring used to describe dpi=200 while 22 call sites passed
+    their own ``dpi=150``, so the documented policy described nothing that
+    actually happened and the stage QC PNGs disagreed with the report figures
+    about resolution and background.
+    """
+
+    VIZ_MODULES = [
+        "src/csttool/metrics/modules/visualizations.py",
+        "src/csttool/extract/modules/visualizations.py",
+        "src/csttool/preprocess/modules/visualizations.py",
+        "src/csttool/tracking/modules/visualizations.py",
+        "src/csttool/metrics/modules/qc_figures.py",
+    ]
+
+    def _repo_root(self):
+        import pathlib
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_no_module_hardcodes_a_dpi(self):
+        root = self._repo_root()
+        offenders = []
+        for rel in self.VIZ_MODULES:
+            for i, line in enumerate((root / rel).read_text().splitlines(), 1):
+                if "dpi=" in line and "SAVEFIG_DPI" not in line \
+                        and "PROTOTYPE_DPI" not in line and not line.lstrip().startswith("#"):
+                    offenders.append(f"{rel}:{i}: {line.strip()}")
+        assert not offenders, "hardcoded DPI outside the export policy:\n" + "\n".join(offenders)
+
+    def test_no_module_calls_savefig_directly(self):
+        root = self._repo_root()
+        offenders = []
+        for rel in self.VIZ_MODULES:
+            for i, line in enumerate((root / rel).read_text().splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if ".savefig(" in stripped or "plt.savefig(" in stripped:
+                    offenders.append(f"{rel}:{i}: {stripped}")
+        assert not offenders, (
+            "figures must be saved through style.save_figure / save_figure_exact:\n"
+            + "\n".join(offenders))
+
+    def test_save_figure_exact_pins_the_canvas(self, tmp_path):
+        import matplotlib.pyplot as plt
+        from PIL import Image
+        from csttool.viz import layout, style
+
+        fig = layout.figure_mm(100.0, 50.0)
+        fig.add_axes([0, 0, 1, 1]).plot([0, 1], [0, 1])
+        out = tmp_path / "exact.png"
+        style.save_figure_exact(fig, out)
+        plt.close(fig)
+
+        w, h = Image.open(out).size
+        expected_w = 100.0 / 25.4 * style.SAVEFIG_DPI
+        expected_h = 50.0 / 25.4 * style.SAVEFIG_DPI
+        assert abs(w - expected_w) <= 1
+        assert abs(h - expected_h) <= 1

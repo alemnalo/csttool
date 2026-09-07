@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`csttool.viz.layout` — shared millimetre-based figure layout.** The one-page
+  report has always been laid out at its final physical size, so 1 Matplotlib
+  point printed as 1 point; every other figure was sized in arbitrary inches and
+  scaled at include time, which is why the stage QC PNGs set their type at an
+  effective 3–6 pt wherever they were placed. The report's machinery is now a
+  shared module: `figure_mm` / `axes_mm` (physically sized Figures and Axes),
+  `TypeScale` and `KeyMetrics` (frozen type/legend scales), `PanelRowBands` and
+  `panel_row_geometry` (the panel-row arithmetic, generalized from the strip's
+  fixed four panels and 194 mm to N panels on any width), `draw_key_row` /
+  `fit_key_fontsize` / `fit_caption_fontsize` (the per-panel key band), and
+  `content_bbox_2d` / `union_bbox` / `square_bbox` / `apply_bbox` /
+  `crop_axes_to_content` (cropping to anatomy, preserving the radiological
+  x-inversion). **No document dimension lives in the module** — callers pass the
+  width their page needs. `metrics.modules.visualizations.qc_strip_geometry` is
+  now a thin binding of `panel_row_geometry` to the report's own page, and
+  `test_qc_strip_geometry_matches_shared_primitive` pins the two together.
+
+- **`viz.render.render_mask_overlay`** — binary-mask overlay as a translucent
+  RGBA fill plus an optional same-hue outline, replacing per-module ad-hoc
+  overlays. Fill and outline are independently switchable, so one primitive
+  covers filled, contour-only and hybrid representations.
+
+- **`viz.style.save_figure_exact`** — saves a figure at exactly the canvas it was
+  laid out at, for figures built with `layout.figure_mm`.
+
+- **`plot_profile_matrix(..., size_mm=, filename=)`** — the report's profile
+  matrix can now be typeset on a measure other than the report's content width.
+  The figure is otherwise identical, so the same function serves a document with
+  a different text width instead of that document scaling the figure down.
+
+### Fixed
+
+- **Binary masks rendered through a continuous colormap.** The white-matter mask
+  panel and the tensor-maps brain-mask column drew their masks as
+  `imshow(mask, cmap='Blues')`. A constant-valued array normalizes to the
+  colormap's *low* end, so both overlays rendered near-white while their legend
+  swatches showed saturated blue — the legend did not describe the mark. Both now
+  draw an explicit RGBA fill at the stated colour and alpha.
+
+- **The white-matter mask legend omitted the dilation.** The mask on the figure is
+  `binary_dilation((FA > tau) & brain_mask, iterations=1)` — the mask that
+  actually seeds and stops tracking — but the key read `White Matter (FA > 0.2)`,
+  and the voxel count in the title is likewise post-dilation. The key now names
+  the dilation. No mask changed.
+
+- **Registration QC column headers named the row, not the column.** They were
+  written as `f'{view_name}\n<column>'` on row 0 only, so all three columns were
+  headed "Axial" while the row labels down the left correctly read
+  Axial/Coronal/Sagittal — the figure read as nine axial panels. Headers now name
+  the column ("Subject FA" / "MNI template (warped)" / "Overlay"), and the overlay
+  column gained a colour key, which it never had.
+
+### Changed
+
+- **One export path for every figure.** 22 call sites across the four stage
+  visualization modules carried their own `dpi=150` and bbox/facecolor arguments,
+  so `style.save_figure`'s documented dpi=200 policy described nothing that
+  happened and the stage PNGs disagreed with the report figures. All 22 now go
+  through `style.save_figure`. **Every stage QC PNG is therefore 4/3 larger in
+  each dimension**; the six metrics figures that previously saved without an
+  explicit facecolor also gain the policy's white background. Figure content is
+  unchanged. Two tests enforce the single path.
+
+- **Along-tract bins are named positionally, not anatomically.** The three bins
+  are fixed ranges of a 20-node normalized profile assigned by index; nothing in
+  the pipeline verifies them against an anatomical landmark, and their extent in
+  millimetres varies between subjects and between hemispheres of one subject.
+  "Pontine Level" / "PLIC" / "Precentral Gyrus" asserted a correspondence the
+  computation does not establish — a reader could take a value in the "PLIC" row
+  as a measurement of the posterior limb of the internal capsule. They are now
+  **Inferior / Central / Superior** in the profile figures, the profile-matrix
+  legend, the report's regional-metrics table and the node-homology axis label.
+  **The JSON keys `pontine` / `plic` / `precentral` are unchanged** — they are the
+  schema of every persisted metrics JSON and batch CSV column, and renaming them
+  would invalidate existing derivatives for a presentation change.
+
+
 ## [0.6.0] - 2026-08-29
 
 ### Added

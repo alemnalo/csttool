@@ -137,3 +137,100 @@ class TestRenderStreamlineOverlay:
             y = np.asarray(line.get_ydata())
             assert not np.any(np.abs(y - 50) < 5)
         plt.close(fig)
+
+
+class TestRenderMaskOverlay:
+    """The mask-overlay primitive, and the defect it exists to prevent.
+
+    A binary mask handed to ``imshow(cmap=...)`` is normalized before it is
+    coloured. A constant array normalizes to the colormap's *low* end, so a mask
+    drawn as ``cmap='Blues'`` renders near-white — while the legend swatch beside
+    it shows saturated blue. The overlay then does not mean what the legend says
+    it means, which is a labelling defect, not a styling preference.
+    """
+
+    def _mask(self):
+        m = np.zeros((10, 10, 10), dtype=np.uint8)
+        m[3:7, 3:7, 3:7] = 1
+        return m
+
+    def test_fill_is_the_requested_colour_not_a_colormap_low_end(self):
+        fig, ax = plt.subplots()
+        render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                   color="#1f77b4", fill_alpha=0.5,
+                                   outline=False)
+        rgba = ax.images[-1].get_array()
+        inside = rgba[5, 5]
+        assert inside[3] == pytest.approx(0.5), "alpha must be as requested"
+        # The drawn colour is #1f77b4, not a near-white colormap endpoint.
+        assert inside[0] == pytest.approx(0x1f / 255, abs=1e-3)
+        assert inside[1] == pytest.approx(0x77 / 255, abs=1e-3)
+        assert inside[2] == pytest.approx(0xb4 / 255, abs=1e-3)
+        plt.close(fig)
+
+    def test_outside_the_mask_is_fully_transparent(self):
+        fig, ax = plt.subplots()
+        render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                   color="#1f77b4", outline=False)
+        rgba = ax.images[-1].get_array()
+        assert rgba[0, 0][3] == pytest.approx(0.0)
+        plt.close(fig)
+
+    def test_outline_drawn_by_default_and_suppressible(self):
+        fig, ax = plt.subplots()
+        render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                   color="#2ca02c")
+        assert ax.collections, "outline should be drawn by default"
+        plt.close(fig)
+
+        fig, ax = plt.subplots()
+        render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                   color="#2ca02c", outline=False)
+        assert not ax.collections
+        plt.close(fig)
+
+    def test_fill_alpha_zero_gives_contour_only(self):
+        fig, ax = plt.subplots()
+        im = render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                        color="#2ca02c", fill_alpha=0.0)
+        assert im is None
+        assert not ax.images
+        assert ax.collections
+        plt.close(fig)
+
+    def test_preserves_radiological_inversion(self):
+        """An overlay must not undo the caller's finalize and mirror the panel."""
+        vol = np.zeros((10, 10, 10), dtype=np.float32)
+        vol[2:8, 2:8, 2:8] = 1.0
+        fig, ax = plt.subplots()
+        render.render_scalar_slice(ax, vol, LAS, "coronal", 5)
+        was_inverted = ax.xaxis_inverted()
+        render.render_mask_overlay(ax, self._mask(), LAS, "coronal", 5,
+                                   color="#1f77b4")
+        assert ax.xaxis_inverted() == was_inverted
+        plt.close(fig)
+
+    def test_empty_mask_draws_no_contour(self):
+        fig, ax = plt.subplots()
+        empty = np.zeros((10, 10, 10), dtype=np.uint8)
+        render.render_mask_overlay(ax, empty, RAS, "axial", 5, color="#2ca02c")
+        assert not ax.collections
+        plt.close(fig)
+
+    def test_rejects_bad_inputs(self):
+        fig, ax = plt.subplots()
+        with pytest.raises(ValueError):
+            render.render_mask_overlay(ax, self._mask(), RAS, "oblique", 5,
+                                       color="#1f77b4")
+        with pytest.raises(ValueError):
+            render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                       color="#1f77b4", fill_alpha=1.5)
+        plt.close(fig)
+
+    def test_creates_no_figure(self):
+        before = plt.get_fignums()
+        fig, ax = plt.subplots()
+        render.render_mask_overlay(ax, self._mask(), RAS, "axial", 5,
+                                   color="#1f77b4")
+        plt.close(fig)
+        assert plt.get_fignums() == before

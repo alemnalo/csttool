@@ -65,6 +65,10 @@ def plot_registration_comparison(
         ('Sagittal', subject_fa[mid_sag, :, :], mni_warped[mid_sag, :, :]),
     ]
     
+    # Column headers name the *column*, row labels name the view. They used to
+    # be written as f'{view_name}\n<column>' on row 0 only, so all three columns
+    # were headed "Axial" while the row labels down the left correctly read
+    # Axial/Coronal/Sagittal — a reader saw nine axial panels.
     for row, (view_name, fa_slice, mni_slice) in enumerate(views):
         padded_fa, padded_extent = _geo.pad_slice_to_square(
             fa_slice.T,
@@ -85,7 +89,7 @@ def plot_registration_comparison(
             vmax=1,
             extent=padded_extent
         )
-        axes[row, 0].set_title(f'{view_name}\nSubject FA' if row == 0 else '')
+        axes[row, 0].set_title('Subject FA' if row == 0 else '')
         axes[row, 0].axis('off')
         axes[row, 0].set_box_aspect(1)
         
@@ -96,7 +100,7 @@ def plot_registration_comparison(
             origin='lower',
             extent=padded_extent
         )
-        axes[row, 1].set_title(f'{view_name}\nMNI Warped' if row == 0 else '')
+        axes[row, 1].set_title('MNI template (warped)' if row == 0 else '')
         axes[row, 1].axis('off')
         axes[row, 1].set_box_aspect(1)
         
@@ -116,7 +120,7 @@ def plot_registration_comparison(
             origin='lower',
             extent=padded_extent
         )
-        axes[row, 2].set_title(f'{view_name}\nOverlay' if row == 0 else '')
+        axes[row, 2].set_title('Overlay' if row == 0 else '')
         axes[row, 2].axis('off')
         axes[row, 2].set_box_aspect(1)
         
@@ -131,10 +135,24 @@ def plot_registration_comparison(
             for c in range(3):
                 _geo.finalize_image_view(axes[row, c], affine, view)
 
+    # Name what the overlay column's colour is. Nothing on the figure said that
+    # the warm wash is the warped template over a grayscale subject FA, so the
+    # one panel carrying the actual registration claim was the one panel whose
+    # marks were undocumented.
+    from matplotlib.patches import Patch
+    fig.legend(
+        handles=[
+            Patch(facecolor='0.6', label='Subject FA (grayscale)'),
+            Patch(facecolor=plt.get_cmap('hot')(0.6), alpha=0.6,
+                  label='Warped MNI template (overlay column)'),
+        ],
+        loc='lower center', ncol=2, fontsize=11, frameon=False,
+    )
+
     fig_path = viz_dir / f"{prefix}registration_qc.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
-    
+
     if verbose:
         print(f"✓ Registration QC: {fig_path}")
     
@@ -278,7 +296,7 @@ def plot_roi_masks(
     fig.legend(handles=legend_elements, loc='lower center', ncol=3, fontsize=11)
     
     fig_path = viz_dir / f"{prefix}roi_masks.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -382,7 +400,7 @@ def plot_jacobian_map(
     cbar.set_label('Jacobian Determinant (1.0 = no change)')
 
     fig_path = viz_dir / f"{prefix}jacobian_map.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
 
     if verbose:
@@ -509,27 +527,24 @@ def plot_cst_extraction(
         # Radiological world orientation + L/R markers for X-bearing planes.
         _geo.finalize_world_plane(ax, d1)
     
-    # Add legend INSIDE the bottom-right plot (cleanest solution)
     from matplotlib.lines import Line2D
     legend_elements = [
         Line2D([0], [0], color=_style.LEFT, linewidth=2, label=f'Left ({stats["cst_left_count"]:,})'),
         Line2D([0], [0], color=_style.RIGHT, linewidth=2, label=f'Right ({stats["cst_right_count"]:,})'),
     ]
     
-    # Place legend in the bottom-right plot (axial view)
-    axes[1, 2].legend(handles=legend_elements, 
-                      loc='upper right',  # Or 'lower right' or 'center right'
-                      fontsize=10,
-                      frameon=True,
-                      fancybox=True,
-                      framealpha=0.9,
-                      edgecolor='gray')
+    # Below the grid, not inside a panel. At "upper right" it sat on top of the
+    # streamlines in the axial projection - the one panel where the two bundles
+    # are furthest apart and the corner is exactly where the superior fan lands.
+    fig.legend(handles=legend_elements,
+               loc='outside lower center', ncol=2,
+               fontsize=10, frameon=False)
     
     # Optional: Adjust the title of that specific plot
     axes[1, 2].set_title(f'{views_sl[2][0]}\n(Left: {stats["cst_left_count"]:,}, Right: {stats["cst_right_count"]:,})')
     
     fig_path = viz_dir / f"{prefix}cst_extraction.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -732,7 +747,7 @@ def plot_hemisphere_separation(
 
     # Save
     fig_path = viz_dir / f"{prefix}hemisphere_separation.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
 
     if verbose:
@@ -937,7 +952,7 @@ def create_extraction_summary(
                  bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
     
     fig_path = viz_dir / f"{prefix}extraction_summary.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:

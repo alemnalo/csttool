@@ -91,6 +91,17 @@ def apply_house_style():
 def save_figure(fig, path, **kwargs):
     """Save a figure with the uniform csttool policy (dpi=200, tight, white bg).
 
+    This is the **single** export path for every csttool figure. Call sites used
+    to carry their own ``dpi=150`` and their own bbox/facecolor arguments, which
+    meant the documented policy above described nothing that actually happened
+    and the QC PNGs disagreed with the report figures about resolution and
+    background. Anything needing to deviate passes an explicit override here, so
+    the deviation is visible at the call site rather than being the default.
+
+    For a figure laid out at an exact physical size, use
+    :func:`save_figure_exact` instead - ``bbox_inches="tight"`` would crop and
+    pad it by an unpredictable amount.
+
     Parameters
     ----------
     fig : matplotlib.figure.Figure
@@ -101,6 +112,20 @@ def save_figure(fig, path, **kwargs):
     params.update(kwargs)
     fig.savefig(path, **params)
     return path
+
+
+def save_figure_exact(fig, path, **kwargs):
+    """Save a figure at exactly the canvas size it was laid out at.
+
+    For figures built with :func:`csttool.viz.layout.figure_mm`, where the point
+    sizes in the source are the point sizes on paper. The house style's
+    ``savefig.bbox="tight"`` would crop-and-pad by an unpredictable amount and
+    silently change the printed dimensions, breaking that guarantee - and, for
+    the one-page report, its page budget. Passing the figure's own bbox pins it.
+    """
+    params = dict(bbox_inches=fig.bbox_inches)
+    params.update(kwargs)
+    return save_figure(fig, path, **params)
 
 
 def add_scalar_colorbar(fig, mappable, ax, label, orientation="vertical", **kwargs):

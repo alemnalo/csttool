@@ -285,7 +285,10 @@ def plot_cst_over_fa_panel(cst_left_path, cst_right_path, fa_path,
 
     rng = viz_rng(seed)
     fig = _figure()
-    ax = fig.add_axes([0.02, 0.02, 0.86, 0.82])
+    # Room reserved below the image for the key. It used to sit inside the
+    # panel at "upper right", directly over the anatomy the panel exists to
+    # show - and over the superior end of whichever bundle reached that corner.
+    ax = fig.add_axes([0.02, 0.13, 0.86, 0.73])
     render.render_scalar_slice(ax, fa, affine, "coronal", idx,
                                cmap=_style.ANATOMY_BG, norm=plt.Normalize(0, 1))
     render.render_streamline_overlay(ax, left, affine, "coronal", idx,
@@ -300,7 +303,8 @@ def plot_cst_over_fa_panel(cst_left_path, cst_right_path, fa_path,
     # Hemisphere legend + counts.
     leg = ax.legend(handles=_style.hemisphere_legend_handles(
         left_label=f"Left ({len(left)})", right_label=f"Right ({len(right)})"),
-        loc="upper right", fontsize=6, framealpha=0.85)
+        loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=2,
+        fontsize=6, frameon=False)
     fig.text(0.5, 0.005,
              f"coronal slice {idx} · slab {thickness_mm:.1f} mm · "
              f"rule: {prov['rule']} · drawn L={min(len(left), max_streamlines)} "
@@ -990,7 +994,7 @@ def plot_node_homology_panel(cst_left_path, cst_right_path, output_dir,
     ax_len.set_xlabel("Streamline length (mm)", fontsize=8)
     ax_len.set_ylabel("Count", fontsize=8)
     ax_len.tick_params(labelsize=7)
-    ax_z.set_xlabel(f"Profile node (0 = pontine, {n_points - 1} = precentral)",
+    ax_z.set_xlabel(f"Profile node (0 = inferior, {n_points - 1} = superior)",
                     fontsize=8)
 
     max_z = comparison["max_abs_z_difference_mm"]

@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz import layout as _layout
 from csttool.viz import style as _style
 from csttool.viz.utils import deterministic_subsample, viz_rng
 from csttool.metrics.modules.unilateral_analysis import TRACT_REGIONS
@@ -25,10 +26,24 @@ from csttool.metrics.modules.unilateral_analysis import TRACT_REGIONS
 # Display names for the regions defined in TRACT_REGIONS. The extents themselves are not
 # duplicated here: labels are positioned from TRACT_REGIONS so they always sit over the
 # stretch of tract whose value the report tabulates.
+#
+# These are **positional** names, not anatomical ones. The three bins are fixed
+# ranges of a 20-node normalized profile (0-35 / 35-70 / 70-100 %), assigned by
+# index after the bundle is reoriented inferior-to-superior. They are not
+# atlas-defined regions, they are not verified against any anatomical landmark,
+# and their extent in millimetres differs between subjects and between
+# hemispheres of the same subject. Labelling them "Pontine Level" / "PLIC" /
+# "Precentral Gyrus" asserted an anatomical correspondence the computation never
+# establishes — a reader could reasonably have taken a value in the "PLIC" row as
+# a measurement of the posterior limb of the internal capsule.
+#
+# The dict keys stay as they are: they are the schema of every persisted metrics
+# JSON, the batch CSV columns and `compute_localized_metrics`. Only what a reader
+# sees changes.
 _REGION_DISPLAY_NAMES = {
-    'pontine': 'Pontine Level',
-    'plic': 'PLIC',
-    'precentral': 'Precentral Gyrus',
+    'pontine': 'Inferior',
+    'plic': 'Central',
+    'precentral': 'Superior',
 }
 
 
@@ -153,7 +168,7 @@ def plot_tract_profiles(
     
     # Save figure
     fig_path = output_dir / f"{subject_id}_tract_profile_{scalar}.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     print(f"✓ Tract profile saved: {fig_path}")
@@ -266,7 +281,7 @@ def plot_stacked_profiles(
     plt.subplots_adjust(hspace=0.2, bottom=0.15)  # Minimize vertical space between plots
     
     fig_path = output_dir / f"{subject_id}_stacked_profiles.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     print(f"✓ Stacked profiles saved: {fig_path}")
@@ -390,7 +405,10 @@ _STRIP_MARKER_PT = 6.0
 _STRIP_NOTE_PT = 6.0       # the italic "not produced" overlay on a degraded panel
 _STRIP_ROI_LINEWIDTH = 0.8
 
-# Key-row metrics, in millimetres.
+# Key-row metrics, in millimetres. Kept as named constants because the vertical
+# budget above is reasoned about in terms of them, but the values now live in a
+# ``layout.KeyMetrics`` instance so the drawing primitives in ``viz.layout`` and
+# the band arithmetic here cannot disagree about a swatch width.
 _STRIP_SWATCH_MM = 2.2      # length of one colour swatch line
 _STRIP_SWATCH_GAP_MM = 0.9  # swatch -> its own label
 _STRIP_ENTRY_GAP_MM = 1.9   # between one entry and the next
@@ -442,6 +460,29 @@ _STRIP_CAPTION_MIN_PT = 5.5  # floor for the same auto-fit on the shared caption
 
 _STRIP_INK = '#333a45'      # caption and key type
 _STRIP_INK_MUTED = '#9aa3ae'  # an ROI that the display slab does not reach
+
+# The report strip's key metrics and vertical bands, expressed in the shared
+# layout types. These are the single source the drawing primitives read, so the
+# constants above and the marks on the page cannot drift apart.
+_STRIP_KEY_METRICS = _layout.KeyMetrics(
+    swatch_mm=_STRIP_SWATCH_MM,
+    swatch_gap_mm=_STRIP_SWATCH_GAP_MM,
+    entry_gap_mm=_STRIP_ENTRY_GAP_MM,
+    cap_frac=_STRIP_KEY_CAP_FRAC,
+    min_pt=_STRIP_KEY_MIN_PT,
+    ink=_STRIP_INK,
+)
+
+_STRIP_BANDS = _layout.PanelRowBands(
+    margin_top_mm=_STRIP_MARGIN_TOP_MM,
+    title_mm=_STRIP_TITLE_MM,
+    image_key_gap_mm=_STRIP_IMAGE_KEY_GAP_MM,
+    key_mm=_STRIP_KEY_MM,
+    key_caption_gap_mm=_STRIP_KEY_CAPTION_GAP_MM,
+    caption_mm=_STRIP_CAPTION_MM,
+    margin_bottom_mm=_STRIP_MARGIN_BOTTOM_MM,
+    gap_mm=_STRIP_GAP_MM,
+)
 
 # World-axis colours for the DEC direction key. Red/green/blue is the DEC
 # convention itself (it is what the image encodes), not a csttool palette
@@ -498,48 +539,20 @@ def qc_strip_geometry(canvas_w, canvas_h):
         data's) and ``box_aspect`` (the panel box's; they differ only when the
         image-height cap binds, and the difference is the letterbox).
     """
-    aspect = float(canvas_w) / float(canvas_h)
-
-    furniture_mm = (_STRIP_MARGIN_TOP_MM + _STRIP_TITLE_MM
-                    + _STRIP_IMAGE_KEY_GAP_MM + _STRIP_KEY_MM
-                    + _STRIP_KEY_CAPTION_GAP_MM + _STRIP_CAPTION_MM
-                    + _STRIP_MARGIN_BOTTOM_MM)
-
-    panel_w = (QC_STRIP_WIDTH_MM - 3 * _STRIP_GAP_MM) / 4.0
-    image_h = min(panel_w / aspect, _STRIP_IMAGE_MAX_MM)
-
-    height_mm = furniture_mm + image_h
-    clamped = min(max(height_mm, QC_STRIP_MIN_HEIGHT_MM), QC_STRIP_MAX_HEIGHT_MM)
-    # Only the floor can bind (furniture + the image cap is 46.9 mm), so the
-    # slack is non-negative; split it between the two margins so a very wide
-    # grid centres its content rather than hanging from the top.
-    slack = max(0.0, clamped - height_mm)
-    height_mm = clamped
-    margin_bottom = _STRIP_MARGIN_BOTTOM_MM + slack / 2.0
-
-    # Stacked from the bottom, with the two gaps as real bands rather than
-    # implied by the type's own leading — which is what let the key row and the
-    # caption sit a bare 0.9 mm apart and read as one block of five legends.
-    caption_y0 = margin_bottom
-    key_y0 = caption_y0 + _STRIP_CAPTION_MM + _STRIP_KEY_CAPTION_GAP_MM
-    image_y0 = key_y0 + _STRIP_KEY_MM + _STRIP_IMAGE_KEY_GAP_MM
-
-    row_w = 4 * panel_w + 3 * _STRIP_GAP_MM
-    x_start = (QC_STRIP_WIDTH_MM - row_w) / 2.0
-    panel_x0 = [x_start + i * (panel_w + _STRIP_GAP_MM) for i in range(4)]
-
-    return {
-        "width_mm": QC_STRIP_WIDTH_MM,
-        "height_mm": height_mm,
-        "panel_w_mm": panel_w,
-        "image_h_mm": image_h,
-        "panel_x0_mm": panel_x0,
-        "image_y0_mm": image_y0,
-        "key_y0_mm": key_y0,
-        "caption_y0_mm": caption_y0,
-        "aspect": aspect,
-        "box_aspect": panel_w / image_h,
-    }
+    # The arithmetic itself is :func:`csttool.viz.layout.panel_row_geometry`,
+    # generalized to N panels and an arbitrary canvas width. This function is
+    # what pins it to *the report's* four panels, content width and page budget;
+    # the shared version holds no document dimensions. Behaviour is unchanged -
+    # ``test_qc_strip_geometry_matches_shared_primitive`` asserts the two agree.
+    return _layout.panel_row_geometry(
+        canvas_w, canvas_h,
+        width_mm=QC_STRIP_WIDTH_MM,
+        n_panels=4,
+        bands=_STRIP_BANDS,
+        image_max_mm=_STRIP_IMAGE_MAX_MM,
+        min_height_mm=QC_STRIP_MIN_HEIGHT_MM,
+        max_height_mm=QC_STRIP_MAX_HEIGHT_MM,
+    )
 
 
 def _blend_on_white(color, alpha):
@@ -554,7 +567,7 @@ def _blend_on_white(color, alpha):
     return (1 - alpha + alpha * r, 1 - alpha + alpha * g, 1 - alpha + alpha * b)
 
 
-def _draw_region_strip(ax, band_note=False):
+def _draw_region_strip(ax, band_note=False, type_scale=1.0):
     """Draw the shared anatomical-region strip beneath the 2x2 profile matrix.
 
     One strip for the whole matrix, spanning both columns: a position rule from
@@ -586,9 +599,11 @@ def _draw_region_strip(ax, band_note=False):
             ax.axvspan(start * 100.0, end * 100.0, color=band_rgba,
                        linewidth=0, zorder=0)
         ax.text((start + end) * 50.0, rule_y - 0.52, _REGION_DISPLAY_NAMES[name],
-                ha='center', va='center', fontsize=_RPT_REGION_PT, color='#333a45')
+                ha='center', va='center',
+                fontsize=_RPT_REGION_PT * type_scale, color='#333a45')
 
-    ax.set_xlabel('Distance along tract (%)', fontsize=_RPT_LABEL_PT, labelpad=1)
+    ax.set_xlabel('Distance along tract (%)',
+                  fontsize=_RPT_LABEL_PT * type_scale, labelpad=1)
 
     if band_note:
         # The IQR band is named here rather than in the figure legend: a fourth
@@ -598,7 +613,8 @@ def _draw_region_strip(ax, band_note=False):
         # occupy the row above and the rightmost of them ("Precentral Gyrus") is
         # centred at 85 %, so a right-aligned note on that row would overlap it.
         ax.text(1.0, -0.62, _BAND_CAPTION, transform=ax.transAxes,
-                ha='right', va='center', fontsize=_RPT_BAND_NOTE_PT,
+                ha='right', va='center',
+                fontsize=_RPT_BAND_NOTE_PT * type_scale,
                 color='#5f6b7a')
 
 
@@ -649,19 +665,39 @@ def plot_profile_matrix(
     right_metrics,
     output_dir,
     subject_id,
+    *,
+    size_mm=None,
+    type_scale=1.0,
+    show_band_note=True,
+    filename=None,
 ):
     """2x2 along-tract profile matrix (FA / MD / RD / AD) for the PDF report.
 
     The scientific centerpiece of the report. Generated at its exact final print
-    size (:data:`PROFILE_MATRIX_SIZE_MM`) and placed in the template at that same
+    size (:data:`PROFILE_MATRIX_SIZE_MM`, or ``size_mm`` when a caller typesets
+    it on a different measure) and placed in the template at that same
     width, so 1 Matplotlib point = 1 printed point and the page budget is exact;
+
+    ``show_band_note`` draws the clause naming the IQR band. The report needs it
+    on the figure - an HTML page has no caption to put it in. A document that
+    does have one should say it there instead and pass ``False``: the note is
+    right-aligned on the axis-label line, so at a larger ``type_scale`` it grows
+    into "Distance along tract (%)" and the two collide.
+
+    ``type_scale`` multiplies every point size. The report's scale is tuned
+    against its own page, where the region labels and the band note are
+    deliberately the smallest things on the figure; a document set in 12 pt with
+    ~11 pt captions needs them larger, or they read as a different document.
+    Because point sizes are absolute, shrinking the canvas does *not* shrink the
+    type - so a caller on a narrower measure needs this rather than a smaller
+    ``size_mm``. Defaults to 1.0, which reproduces the report exactly.
     DPI only affects raster sharpness. the exact figure bbox is mandatory
     here — a "tight" bounding box would crop the canvas by an unpredictable
     amount and silently change the printed height.
 
     Layout
     ------
-    - One legend for the whole figure (Left CST / Right CST / PLIC region),
+    - One legend for the whole figure (Left CST / Right CST / the shaded bin),
       owned by Matplotlib so it can be placed against the subplot geometry. The
       HTML template deliberately carries no profile legend of its own.
     - One shared anatomical-region strip spanning both columns underneath the
@@ -699,14 +735,28 @@ def plot_profile_matrix(
         print("Warning: no profiles available for the profile matrix")
         return None
 
-    fig_width = PROFILE_MATRIX_SIZE_MM[0] / 25.4
-    fig_height = PROFILE_MATRIX_SIZE_MM[1] / 25.4
-    fig = plt.figure(figsize=(fig_width, fig_height))
+    # ``size_mm`` lets a caller typeset the same matrix on a different measure -
+    # a document whose text width is not the report's content width. It is a
+    # physical dimension, passed in, not a second constant in this module: the
+    # report owns its page, and nothing else's page belongs here. Everything
+    # else about the figure is identical, so the two remain the same figure.
+    size = PROFILE_MATRIX_SIZE_MM if size_mm is None else size_mm
+    fig = _layout.figure_mm(size[0], size[1])
+    # Margins are held constant in **millimetres**, not in figure fractions.
+    # A fraction that leaves room for a tick label at 194 mm leaves less at
+    # 160 mm, because the label's width is a point size and does not shrink with
+    # the canvas - which is how the right-hand "100" tick came to overhang the
+    # canvas edge and be clipped by the exact-bbox save. These constants
+    # reproduce the reviewed 194 mm geometry exactly.
+    _LEFT_MM, _RIGHT_MM, _BOTTOM_MM = 10.67, 2.91, 5.17
+    left_frac = _LEFT_MM / size[0]
+    right_frac = 1.0 - (_RIGHT_MM * type_scale) / size[0]
+    bottom_frac = _BOTTOM_MM / size[1]
     # Two panel rows + a short shared region strip spanning both columns.
     gs = fig.add_gridspec(
         3, 2, height_ratios=[1.0, 1.0, 0.13],
         hspace=0.30, wspace=0.16,
-        left=0.055, right=0.985, top=0.90, bottom=0.055,
+        left=left_frac, right=right_frac, top=0.90, bottom=bottom_frac,
     )
     axes = [
         fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]),
@@ -718,10 +768,10 @@ def plot_profile_matrix(
     legend_handles = _style.hemisphere_legend_handles(
         left_label='Left CST', right_label='Right CST'
     ) + [Patch(facecolor=band_rgba, edgecolor='#b9c2cd', linewidth=0.5,
-               label='PLIC region')]
+               label=f"{_REGION_DISPLAY_NAMES['plic']} bin")]
     fig.legend(
         handles=legend_handles, loc='upper center', ncol=3,
-        fontsize=_RPT_LEGEND_PT, frameon=False,
+        fontsize=_RPT_LEGEND_PT * type_scale, frameon=False,
         bbox_to_anchor=(0.5, 1.005), handlelength=1.8, columnspacing=1.6,
         handletextpad=0.6, borderpad=0.0,
     )
@@ -750,7 +800,8 @@ def plot_profile_matrix(
         ax.plot(x, right_profile, color=_style.RIGHT, linewidth=1.4,
                 label='Right CST', zorder=_Z_PROFILE_LINE)
 
-        ax.set_ylabel(m['ylabel'], fontsize=_RPT_LABEL_PT, labelpad=2)
+        ax.set_ylabel(m['ylabel'], fontsize=_RPT_LABEL_PT * type_scale,
+                      labelpad=2)
 
         # y-limits: existing fixed ranges with the existing auto-fallback, now
         # measured over the band extents as well as the lines. A band that
@@ -766,8 +817,8 @@ def plot_profile_matrix(
         else:
             ax.set_ylim(m['ylim'])
 
-        ax.set_title(m['title'], fontsize=_RPT_TITLE_PT, pad=2.5)
-        ax.tick_params(axis='both', labelsize=_RPT_TICK_PT, pad=1.5,
+        ax.set_title(m['title'], fontsize=_RPT_TITLE_PT * type_scale, pad=2.5)
+        ax.tick_params(axis='both', labelsize=_RPT_TICK_PT * type_scale, pad=1.5,
                        length=2, width=0.6)
         ax.set_xlim(0, 100)
         # Bands behind every panel; the shared strip below names them once.
@@ -782,13 +833,15 @@ def plot_profile_matrix(
         axes[j].text(0.5, 0.5, 'N/A', transform=axes[j].transAxes,
                      ha='center', va='center', fontsize=9, color='#888888')
 
-    _draw_region_strip(fig.add_subplot(gs[2, :]), band_note=any_band)
+    _draw_region_strip(fig.add_subplot(gs[2, :]),
+                       band_note=any_band and show_band_note,
+                       type_scale=type_scale)
 
-    fig_path = output_dir / f"{subject_id}_profile_matrix.png"
-    # Save the exact figure canvas. The house style's savefig.bbox="tight" would
+    fig_path = output_dir / (filename or f"{subject_id}_profile_matrix.png")
+    # Save the exact figure canvas: the house style's savefig.bbox="tight" would
     # crop-and-pad by an unpredictable amount and silently change the printed
-    # height, breaking the page budget; passing the figure's own bbox pins it.
-    _style.save_figure(fig, fig_path, bbox_inches=fig.bbox_inches)
+    # height, breaking the page budget. ``save_figure_exact`` pins it.
+    _style.save_figure_exact(fig, fig_path)
     plt.close(fig)
     _write_profile_matrix_sidecar(
         fig_path.with_suffix('.json'), subject_id, left_metrics, right_metrics,
@@ -993,125 +1046,29 @@ def _strip_caption_text(slice_index, provenance, slab_mm, *,
     return text
 
 
+# The three key-band primitives below now live in ``csttool.viz.layout`` so the
+# stage-QC figures and any publication composition draw their legends with the
+# same code and the same millimetre metrics. These wrappers keep the report's
+# call signatures and bind its own ``KeyMetrics``; they are the only thing in
+# this module that knows the report's swatch widths.
 def _fit_key_fontsize(ax, renderer, rows, start_pt, floor_pt=_STRIP_KEY_MIN_PT):
-    """The largest type at or below ``start_pt`` at which every key row fits.
-
-    One size for all four columns, not one per column: a key band whose columns
-    disagree about type size reads as four unrelated captions rather than one
-    row. The ROI key is the widest row and therefore normally the one that
-    decides, so the whole band tracks it.
-
-    Swatch and gap widths are fixed millimetres and text width scales with point
-    size, so the fit is solved directly from a single measurement per row rather
-    than by iterating.
-    """
-    box_w = ax.get_window_extent(renderer).width
-    px_per_mm = ax.figure.dpi / 25.4
-    scale = 1.0
-    for entries in rows:
-        if not entries:
-            continue
-        fixed = sum((_STRIP_SWATCH_MM + _STRIP_SWATCH_GAP_MM) * px_per_mm
-                    for color, *_ in entries if color)
-        fixed += _STRIP_ENTRY_GAP_MM * px_per_mm * (len(entries) - 1)
-        text = 0.0
-        for entry in entries:
-            probe = ax.text(0, 0, entry[1], fontsize=start_pt)
-            text += probe.get_window_extent(renderer).width
-            probe.remove()
-        if text <= 0:
-            continue
-        scale = min(scale, max(0.0, box_w - fixed) / text)
-    return max(floor_pt, min(start_pt, start_pt * scale))
+    """The largest type at or below ``start_pt`` at which every key row fits."""
+    return _layout.fit_key_fontsize(ax, renderer, rows, start_pt,
+                                    floor_pt=floor_pt,
+                                    metrics=_STRIP_KEY_METRICS)
 
 
 def _fit_caption_fontsize(ax, renderer, text, start_pt,
                           floor_pt=_STRIP_CAPTION_MIN_PT):
-    """The largest type at or below ``start_pt`` at which the caption fits.
-
-    Text width scales with point size, so the fit is solved from one
-    measurement rather than by iterating. Normally a no-op — the caption has
-    ~8 mm of slack on a typical subject — but the line grows with the slice
-    index, the rule name, the slab and the density note, and there is no
-    combination of those the figure may clip.
-    """
-    box_w = ax.get_window_extent(renderer).width
-    probe = ax.text(0, 0, text, fontsize=start_pt)
-    text_w = probe.get_window_extent(renderer).width
-    probe.remove()
-    if text_w <= 0 or text_w <= box_w:
-        return start_pt
-    return max(floor_pt, start_pt * box_w / text_w)
+    """The largest type at or below ``start_pt`` at which the caption fits."""
+    return _layout.fit_caption_fontsize(ax, renderer, text, start_pt,
+                                        floor_pt=floor_pt)
 
 
 def _draw_key_row(ax, renderer, entries, fontsize, *, y):
-    """Lay out one centred row of ``swatch + label`` pairs for a single panel.
-
-    This is the strip's one legend primitive: panels 1, 3 and 4 each get a row
-    of it in their own column of the key band, so a reader decodes a contour or
-    a trajectory without leaving the panel. Panel 2 cannot use it — a
-    continuous scale is not a set of swatches — and draws a colourbar into the
-    same band instead.
-
-    Each token is measured and placed in sequence because Matplotlib has no
-    rich text and the colour *is* the key. Measurement is a pure function of the
-    text, the font and the figure DPI, so the result is reproducible.
-
-    ``entries`` is a sequence of ``(colour, label)`` or
-    ``(colour, label, label_colour)``; a ``colour`` of None draws the label with
-    no swatch. Overflow is deliberately left visible rather than scaled away — a
-    key that does not fit its column is a layout defect and the tests assert
-    against it.
-
-    ``y`` is the row's **baseline** in axes fraction, and the type is set on it
-    with ``va='baseline'``. Centring instead (``va='center'``) centres each
-    string's bounding box, so a row of all-caps labels sits 0.127 mm off a row
-    with ascenders — visible as four legends that do not quite line up.
-    """
-    from matplotlib.lines import Line2D
-
-    ax.set_axis_off()
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    if not entries:
-        return
-
-    entries = [e if len(e) == 3 else (e[0], e[1], _STRIP_INK) for e in entries]
-    fig = ax.figure
-    px_per_mm = fig.dpi / 25.4
-    swatch = _STRIP_SWATCH_MM * px_per_mm
-    swatch_gap = _STRIP_SWATCH_GAP_MM * px_per_mm
-    entry_gap = _STRIP_ENTRY_GAP_MM * px_per_mm
-
-    widths = []
-    for color, label, _ in entries:
-        probe = ax.text(0, 0, label, fontsize=fontsize)
-        text_w = probe.get_window_extent(renderer).width
-        probe.remove()
-        widths.append(text_w + (swatch + swatch_gap if color else 0.0))
-
-    box = ax.get_window_extent(renderer)
-    total = sum(widths) + entry_gap * (len(entries) - 1)
-    x = max(0.0, (box.width - total) / 2.0)
-    # The swatch is a mark, not type, so it rides at the optical middle of the
-    # cap height rather than on the baseline the labels sit on.
-    band_mm = box.height / fig.dpi * 25.4
-    cap_mm = _STRIP_KEY_CAP_FRAC * fontsize * 25.4 / 72.0
-    mark_y = y + 0.35 * cap_mm / band_mm
-
-    for (color, label, label_color), width in zip(entries, widths):
-        if color:
-            ax.add_line(Line2D(
-                [x / box.width, (x + swatch) / box.width], [mark_y, mark_y],
-                transform=ax.transAxes, color=color, linewidth=1.6,
-                solid_capstyle='butt', clip_on=False,
-            ))
-            label_x = (x + swatch + swatch_gap) / box.width
-        else:
-            label_x = x / box.width
-        ax.text(label_x, y, label, transform=ax.transAxes, ha='left',
-                va='baseline', fontsize=fontsize, color=label_color)
-        x += width + entry_gap
+    """Lay out one centred row of ``swatch + label`` pairs for a single panel."""
+    return _layout.draw_key_row(ax, renderer, entries, fontsize, y=y,
+                                metrics=_STRIP_KEY_METRICS)
 
 
 def plot_report_qc_strip(
@@ -1594,7 +1551,7 @@ def plot_report_qc_strip(
 
     fig_path = output_dir / f"{subject_id}_report_qc_strip.png"
     # Exact canvas, not a tight bbox — see plot_profile_matrix.
-    _style.save_figure(fig, fig_path, bbox_inches=fig.bbox_inches)
+    _style.save_figure_exact(fig, fig_path)
     plt.close(fig)
 
     sidecar = {
@@ -1767,7 +1724,7 @@ def plot_tractogram_qc_preview(
 
     plt.tight_layout()
     fig_path = output_dir / f"{subject_id}_tractogram_qc_{slice_type}.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     print(f"✓ Tractogram QC preview saved: {fig_path}")
     return fig_path
@@ -1896,7 +1853,7 @@ def plot_tractogram_qc_triptych(
 
     fig_path = output_dir / f"{subject_id}_tractogram_qc_triptych.png"
     # Exact canvas, not a tight bbox — see plot_profile_matrix.
-    _style.save_figure(fig, fig_path, bbox_inches=fig.bbox_inches)
+    _style.save_figure_exact(fig, fig_path)
     plt.close(fig)
     print(f"✓ Tractogram QC triptych saved: {fig_path}")
     return fig_path
@@ -2025,7 +1982,7 @@ def plot_bilateral_comparison(
     
     # Save figure
     fig_path = output_dir / f"{subject_id}_bilateral_comparison.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     print(f"✓ Bilateral comparison saved: {fig_path}")
@@ -2192,7 +2149,7 @@ def create_summary_figure(
     
     # Save figure
     fig_path = output_dir / f"{subject_id}_summary.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     print(f"✓ Summary figure saved: {fig_path}")
@@ -2267,7 +2224,7 @@ def plot_asymmetry_radar(asymmetry, output_dir, subject_id):
     
     # Save
     fig_path = output_dir / f"{subject_id}_asymmetry_radar.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     print(f"✓ Asymmetry radar plot saved: {fig_path}")

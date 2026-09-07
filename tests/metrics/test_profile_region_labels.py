@@ -17,6 +17,14 @@ These tests deliberately do not read `TRACT_REGIONS` to assert positions, which 
 tautological now that the figure derives its labels from it. Instead they recover the bins
 empirically by probing `compute_localized_metrics` with one-hot profiles, so re-hardcoding
 a position fails the tests even if the constants stay put.
+
+The names themselves have since changed. The bins are fixed ranges of a 20-node normalized
+profile assigned by index; nothing in the computation verifies them against an anatomical
+landmark, and their extent in millimetres varies between subjects and between hemispheres
+of one subject. Calling them 'Pontine Level' / 'PLIC' / 'Precentral Gyrus' asserted a
+correspondence the pipeline never establishes, so they are now 'Inferior' / 'Central' /
+'Superior'. `TestPositionalTerminology` guards that: the *positions* tested above are
+unchanged, only what a reader is told they mean.
 """
 
 import matplotlib
@@ -110,3 +118,37 @@ def test_wrapped_labels_are_positioned_identically():
 
     for text, x in plain.items():
         assert wrapped[text.replace(' ', '\n')] == x
+
+
+class TestPositionalTerminology:
+    """The bins are positional; nothing user-facing may name them anatomically.
+
+    The JSON keys are deliberately excluded — 'pontine'/'plic'/'precentral' are
+    the schema of every persisted metrics JSON and every batch CSV column, and
+    renaming them would invalidate existing derivatives for a presentation
+    change. Only what a reader sees is under test.
+    """
+
+    ANATOMICAL = ("Pontine", "PLIC", "Precentral", "pontine level",
+                  "precentral gyrus")
+
+    def test_display_names_are_positional(self):
+        assert set(_REGION_DISPLAY_NAMES.values()) == {
+            "Inferior", "Central", "Superior"}
+
+    def test_display_names_carry_no_anatomical_claim(self):
+        for shown in _REGION_DISPLAY_NAMES.values():
+            for bad in self.ANATOMICAL:
+                assert bad.lower() not in shown.lower(), (
+                    f"{shown!r} names a positional bin as an anatomical region")
+
+    def test_report_table_rows_are_positional(self):
+        from csttool.metrics.modules.reports import _build_regional_metrics
+        block = {s: {"pontine": 0.4, "plic": 0.5, "precentral": 0.45}
+                 for s in ("fa", "md", "rd", "ad")}
+        rows = _build_regional_metrics(block, block, {})
+        assert [r["name"] for r in rows] == ["Inferior", "Central", "Superior"]
+
+    def test_json_keys_are_untouched(self):
+        """The schema must survive the display rename."""
+        assert set(_REGION_DISPLAY_NAMES) == {"pontine", "plic", "precentral"}

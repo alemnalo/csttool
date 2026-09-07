@@ -1271,3 +1271,56 @@ class TestAnnotationFitsWhateverItSays:
                 continue
             assert box[0] - cx0 >= 0.5, f"{text!r} crowds the left column edge"
             assert cx1 - box[2] >= 0.5, f"{text!r} crowds the right column edge"
+
+
+class TestSharedLayoutPrimitive:
+    """``qc_strip_geometry`` is now a binding of ``layout.panel_row_geometry``.
+
+    The arithmetic moved to ``csttool.viz.layout`` so stage-QC and publication
+    compositions can lay out a panel row with the same code. This function is
+    what pins it to *the report's* four panels, content width and page budget.
+    If the two ever disagree, the report has been re-laid-out by a change that
+    was meant to be a pure extraction.
+    """
+
+    @pytest.mark.parametrize("canvas_w,canvas_h", [
+        (96, 60), (128, 76), (160, 80), (80, 80), (24, 20), (200, 60),
+    ])
+    def test_matches_shared_primitive(self, canvas_w, canvas_h):
+        from csttool.viz import layout
+        from csttool.metrics.modules import visualizations as vis
+
+        mine = qc_strip_geometry(canvas_w, canvas_h)
+        theirs = layout.panel_row_geometry(
+            canvas_w, canvas_h,
+            width_mm=vis.QC_STRIP_WIDTH_MM,
+            n_panels=4,
+            bands=vis._STRIP_BANDS,
+            image_max_mm=vis._STRIP_IMAGE_MAX_MM,
+            min_height_mm=vis.QC_STRIP_MIN_HEIGHT_MM,
+            max_height_mm=vis.QC_STRIP_MAX_HEIGHT_MM,
+        )
+        assert mine == theirs
+
+    def test_bands_match_the_named_constants(self):
+        """The dataclass must not drift from the constants the comments reason about."""
+        from csttool.metrics.modules import visualizations as vis
+        b = vis._STRIP_BANDS
+        assert b.margin_top_mm == vis._STRIP_MARGIN_TOP_MM
+        assert b.title_mm == vis._STRIP_TITLE_MM
+        assert b.image_key_gap_mm == vis._STRIP_IMAGE_KEY_GAP_MM
+        assert b.key_mm == vis._STRIP_KEY_MM
+        assert b.key_caption_gap_mm == vis._STRIP_KEY_CAPTION_GAP_MM
+        assert b.caption_mm == vis._STRIP_CAPTION_MM
+        assert b.margin_bottom_mm == vis._STRIP_MARGIN_BOTTOM_MM
+        assert b.gap_mm == vis._STRIP_GAP_MM
+
+    def test_key_metrics_match_the_named_constants(self):
+        from csttool.metrics.modules import visualizations as vis
+        k = vis._STRIP_KEY_METRICS
+        assert k.swatch_mm == vis._STRIP_SWATCH_MM
+        assert k.swatch_gap_mm == vis._STRIP_SWATCH_GAP_MM
+        assert k.entry_gap_mm == vis._STRIP_ENTRY_GAP_MM
+        assert k.cap_frac == vis._STRIP_KEY_CAP_FRAC
+        assert k.min_pt == vis._STRIP_KEY_MIN_PT
+        assert k.ink == vis._STRIP_INK

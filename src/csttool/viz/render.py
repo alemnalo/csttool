@@ -204,6 +204,66 @@ def render_mask_contour(ax, mask, affine, view, index, *, color='yellow',
     return None
 
 
+def render_mask_overlay(ax, mask, affine, view, index, *, color,
+                        fill_alpha=0.35, outline=True, outline_linewidth=1.2,
+                        outline_alpha=1.0):
+    """Overlay a binary mask as a translucent fill, optionally outlined.
+
+    **Never routes a binary mask through a colormap.** A mask that reaches
+    ``imshow`` as ``cmap='Blues'`` is normalized before it is coloured, and a
+    constant-valued array normalizes to the colormap's *low* end - so a mask
+    drawn this way renders near-white while the legend swatch beside it shows
+    saturated blue, and the legend does not describe the mark. The fill is
+    therefore built as an explicit RGBA array at the requested colour, which is
+    the colour that appears.
+
+    Fill plus outline is the default because the two do different jobs. The fill
+    answers "which region is this?" at a glance, which is what a reader
+    identifying an ROI needs; the outline answers "exactly where does it stop?",
+    which is what a reader verifying a boundary needs, and it survives a fill
+    alpha low enough to leave the underlying anatomy legible. Either can be
+    turned off: ``fill_alpha=0`` gives contour-only, ``outline=False`` gives
+    fill-only.
+
+    Like :func:`render_density_overlay` this is an overlay, so it does not
+    finalize the view - but it must not *undo* the caller's finalize either.
+    ``imshow`` resets the axes limits, discarding the x-inversion
+    :func:`csttool.viz.geometry.enforce_radiological_image` applied when the
+    background was drawn, which would mirror the panel relative to its
+    neighbours. The inversion is captured and restored around the draw.
+
+    Returns the ``AxesImage`` for the fill, or ``None`` when ``fill_alpha`` is 0.
+    """
+    from matplotlib.colors import to_rgba
+
+    if view not in _geo.VIEW_AXES:
+        raise ValueError(f"unknown view {view!r}")
+    if not 0.0 <= fill_alpha <= 1.0:
+        raise ValueError(f"fill_alpha must lie in [0, 1], got {fill_alpha}")
+
+    sl = _geo.slice_2d(np.asarray(mask), view, index)
+    binary = sl > 0
+
+    im = None
+    if fill_alpha > 0:
+        rgba = np.zeros((*binary.shape, 4), dtype=float)
+        rgba[binary] = to_rgba(color, fill_alpha)
+        was_x_inverted = ax.xaxis_inverted()
+        was_y_inverted = ax.yaxis_inverted()
+        im = ax.imshow(rgba, origin='lower', aspect='equal',
+                       interpolation='nearest')
+        if ax.xaxis_inverted() != was_x_inverted:
+            ax.invert_xaxis()
+        if ax.yaxis_inverted() != was_y_inverted:
+            ax.invert_yaxis()
+
+    if outline and binary.any():
+        ax.contour(binary.astype(float), levels=[0.5], colors=[color],
+                   linewidths=outline_linewidth, alpha=outline_alpha)
+
+    return im
+
+
 def add_direction_legend(ax, *, loc='lower right', size=0.12):
     """Draw the three-axis RGB direction glyph in the axes corner.
 

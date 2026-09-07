@@ -355,9 +355,16 @@ def _build_global_metrics(left, right, asym):
 
 
 def _build_regional_metrics(left, right, asym):
-    """Build the regional metrics table rows (Pontine / PLIC / Precentral)."""
+    """Build the regional metrics table rows (Inferior / Central / Superior).
+
+    The row names are positional, matching the figure labels in
+    ``visualizations._REGION_DISPLAY_NAMES``: each row is a fixed range of the
+    20-node normalized profile, not an atlas-defined anatomical region. The
+    ``key`` half of each pair is the persisted JSON key and does not change.
+    """
     rows = []
-    for name, key in (("Pontine", "pontine"), ("PLIC", "plic"), ("Precentral", "precentral")):
+    for name, key in (("Inferior", "pontine"), ("Central", "plic"),
+                      ("Superior", "precentral")):
         rows.append({
             "name": name,
             "fa": format_localized(left, right, asym, "fa", key),
@@ -717,7 +724,7 @@ def save_csv_summary(comparison, output_dir, subject_id):
             'right_ad_mean_point_weighted': right['ad'].get('mean_point_weighted', 0.0),
         })
 
-    # Add localized metrics (pontine, plic, precentral) for each scalar
+    # Add localized metrics (inferior/central/superior bins) for each scalar
     regions = ['pontine', 'plic', 'precentral']
     scalars = ['fa', 'md', 'rd', 'ad']
 

@@ -9,12 +9,20 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for file saving
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, to_rgba
 from pathlib import Path
 
 from csttool.viz import geometry as _geo
+from csttool.viz import render as _render
 from csttool.viz import style as _style
 from csttool.viz.utils import deterministic_subsample, viz_rng
+
+# Mask overlay colours for the tracking QC figures. Deliberately outside the
+# LEFT/RIGHT hemisphere hues: neither mask carries laterality meaning, and a
+# blue fill that matched ``style.LEFT`` would invite exactly that misreading.
+_WM_MASK_COLOR = '#4c72b0'      # the FA-derived seeding/stopping mask
+_BRAIN_MASK_COLOR = '#d62728'   # the brain-mask boundary it is nested inside
+_BRAIN_MASK_FILL = '#4c72b0'    # brain-mask *area* on the tensor-maps column
 
 
 # =============================================================================
@@ -99,10 +107,14 @@ def plot_tensor_maps(
             axes[row, 1].set_title(f'MD (×10⁻³)\nmean={md_brain.mean()*1000:.2f}')
         axes[row, 1].axis('off')
         
-        # Brain mask overlay
+        # Brain mask overlay. Same defect as the white-matter panel had: a binary
+        # mask through ``cmap='Blues'`` normalizes to the colormap's low end and
+        # renders near-white, so the column showed a barely-tinted repeat of the
+        # FA panel beside it. Drawn as an explicit RGBA fill at the stated alpha.
         axes[row, 2].imshow(slicer(fa).T, cmap='gray', origin='lower', vmin=0, vmax=1)
-        mask_overlay = np.ma.masked_where(slicer(brain_mask).T == 0, slicer(brain_mask).T)
-        axes[row, 2].imshow(mask_overlay, cmap='Blues', alpha=0.3, origin='lower')
+        mask_rgba = np.zeros((*slicer(brain_mask).T.shape, 4), dtype=float)
+        mask_rgba[slicer(brain_mask).T > 0] = to_rgba(_BRAIN_MASK_FILL, 0.30)
+        axes[row, 2].imshow(mask_rgba, origin='lower', interpolation='nearest')
         if row == 0:
             axes[row, 2].set_title(f'Brain Mask\n{brain_mask.sum():,} voxels')
         axes[row, 2].axis('off')
@@ -129,7 +141,7 @@ def plot_tensor_maps(
                                'MD (×10⁻³ mm²/s)')
 
     fig_path = viz_dir / f"{stem}_tensor_maps.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -175,44 +187,52 @@ def plot_white_matter_mask(
                  f"FA threshold: {fa_thresh} | WM voxels: {wm_voxels:,} ({wm_fraction:.1f}% of brain)",
                  fontsize=14, fontweight='bold')
     
-    views = [
-        ('Axial', fa[:, :, mid_ax], white_matter[:, :, mid_ax], brain_mask[:, :, mid_ax]),
-        ('Coronal', fa[:, mid_cor, :], white_matter[:, mid_cor, :], brain_mask[:, mid_cor, :]),
-        ('Sagittal', fa[mid_sag, :, :], white_matter[mid_sag, :, :], brain_mask[mid_sag, :, :]),
-    ]
-    
-    for col, (view_name, fa_slice, wm_slice, mask_slice) in enumerate(views):
+    views = [('Axial', mid_ax), ('Coronal', mid_cor), ('Sagittal', mid_sag)]
+
+    for col, (view_name, index) in enumerate(views):
+        view = view_name.lower()
         # Row 0: FA map
-        axes[0, col].imshow(fa_slice.T, cmap='gray', origin='lower', vmin=0, vmax=1)
+        _render.render_scalar_slice(
+            axes[0, col], fa, affine, view, index,
+            cmap=_style.ANATOMY_BG, vmin=0, vmax=1, markers=affine is not None)
         axes[0, col].set_title(f'{view_name}\nFA map')
-        axes[0, col].axis('off')
-        
-        # Row 1: FA with WM overlay
-        axes[1, col].imshow(fa_slice.T, cmap='gray', origin='lower', vmin=0, vmax=1)
-        wm_overlay = np.ma.masked_where(wm_slice.T == 0, wm_slice.T)
-        axes[1, col].imshow(wm_overlay, cmap='Blues', alpha=0.5, origin='lower')
-        axes[1, col].contour(mask_slice.T, levels=[0.5], colors='red', 
-                            linewidths=1, linestyles='--')
-        axes[1, col].set_title(f'{view_name}\nWM mask (blue) + brain (red)')
+
+        # Row 1: FA with the white-matter mask over it, plus the brain-mask
+        # boundary. The mask is drawn by ``render_mask_overlay``, which builds an
+        # explicit RGBA fill: routing a binary mask through ``cmap='Blues'`` (as
+        # this did) normalizes a constant array to the colormap's low end, so the
+        # overlay rendered near-white while the legend swatch showed saturated
+        # blue. The legend now names the colour that is actually drawn.
+        _render.render_scalar_slice(
+            axes[1, col], fa, affine, view, index,
+            cmap=_style.ANATOMY_BG, vmin=0, vmax=1, markers=affine is not None)
+        _render.render_mask_overlay(
+            axes[1, col], white_matter, affine, view, index,
+            color=_WM_MASK_COLOR, fill_alpha=0.45, outline=False)
+        _render.render_mask_contour(
+            axes[1, col], brain_mask, affine, view, index,
+            color=_BRAIN_MASK_COLOR, linewidth=1.0)
+        axes[1, col].set_title(f'{view_name}\nWM mask + brain boundary')
         axes[1, col].axis('off')
 
-        if affine is not None:
-            _geo.finalize_image_view(axes[0, col], affine, view_name.lower())
-            _geo.finalize_image_view(axes[1, col], affine, view_name.lower())
-    
-    # Add legend
+    # Add legend. The mask drawn above is the *dilated* one that
+    # ``fit_tensors`` hands to seeding and stopping — ``binary_dilation`` of
+    # ``(FA > fa_thresh) & brain_mask``, one iteration. Labelling it
+    # "FA > 0.2" alone misstated what is on the page (and the voxel count in
+    # the title is likewise post-dilation), so the dilation is named.
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     legend_elements = [
-        Patch(facecolor='blue', alpha=0.5, label=f'White Matter (FA > {fa_thresh})'),
-        Line2D([0], [0], color='red', linestyle='--', label='Brain Mask'),
+        Patch(facecolor=_WM_MASK_COLOR, alpha=0.45,
+              label=f'White-matter mask (FA > {fa_thresh}, dilated 1 voxel)'),
+        Line2D([0], [0], color=_BRAIN_MASK_COLOR, label='Brain mask boundary'),
     ]
     fig.legend(handles=legend_elements, loc='lower center', ncol=2, fontsize=11)
     
     plt.tight_layout(rect=[0, 0.05, 1, 0.95])
     
     fig_path = viz_dir / f"{stem}_wm_mask_qc.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -364,7 +384,7 @@ def plot_streamlines_2d(
     plt.tight_layout()
 
     fig_path = viz_dir / f"{stem}_streamlines_2d.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -508,7 +528,7 @@ def plot_streamline_statistics(
     plt.tight_layout()
     
     fig_path = viz_dir / f"{stem}_streamline_stats.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -677,7 +697,7 @@ def create_tracking_summary(
     plt.tight_layout()
     
     fig_path = viz_dir / f"{stem}_tracking_summary.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:

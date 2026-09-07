@@ -140,7 +140,7 @@ def plot_denoising_comparison(
         _style.add_scalar_colorbar(fig, res_im, list(axes[:, 2]), 'Removed signal |Δ|')
 
     fig_path = viz_dir / f"{stem}_denoising_qc.png"
-    fig.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close(fig)
     
     if verbose:
@@ -256,7 +256,7 @@ def plot_gibbs_unringing_comparison(
         _style.add_scalar_colorbar(fig, res_im, list(axes[:, 2]), 'Removed signal |Δ|')
 
     fig_path = viz_dir / f"{stem}_gibbs_unringing_qc.png"
-    fig.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close(fig)
     
     if verbose:
@@ -362,7 +362,7 @@ def plot_brain_mask_overlay(
             _geo.finalize_image_view(axes[1, col], affine, view_name.lower())
 
     fig_path = viz_dir / f"{stem}_brain_mask_qc.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -498,7 +498,7 @@ def plot_motion_correction_summary(
              ha='center', fontsize=11, style='italic')
     
     fig_path = viz_dir / f"{stem}_motion_qc.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
@@ -714,7 +714,7 @@ def create_preprocessing_summary(
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     
     fig_path = viz_dir / f"{stem}_preprocessing_summary.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight', facecolor='white')
+    _style.save_figure(fig, fig_path)
     plt.close()
     
     if verbose:
