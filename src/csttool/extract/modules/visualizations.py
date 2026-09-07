@@ -35,13 +35,23 @@ def plot_registration_comparison(
     output_dir,
     subject_id=None,
     affine=None,
+    template_label="MNI template",
     verbose=True
 ):
     """
     Create registration QC visualization.
-    
-    Shows subject FA and warped MNI template side-by-side
-    in three orthogonal views for registration QC.
+
+    Shows subject FA and the warped template side-by-side in three orthogonal
+    views for registration QC.
+
+    Parameters
+    ----------
+    template_label : str, optional
+        Display name of the template used as the moving image, e.g.
+        "FMRIB58 FA template". Titles the middle column and the overlay legend.
+        The moving image is not always the bundled MNI152 T1 -- naming it here
+        keeps the figure from misattributing FSL-licensed data. Defaults to the
+        generic "MNI template" for callers that do not know.
     """
     output_dir = Path(output_dir)
     viz_dir = output_dir / "visualizations"
@@ -56,7 +66,8 @@ def plot_registration_comparison(
     
     # Create figure
     fig, axes = plt.subplots(3, 3, figsize=(12, 12), constrained_layout=True)
-    fig.suptitle(f"Registration QC - {subject_id or 'Subject'}\nMNI → Subject Space",
+    fig.suptitle(f"Registration QC - {subject_id or 'Subject'}"
+                 f"\n{template_label} → Subject Space",
                  fontsize=14, fontweight='bold')
     
     views = [
@@ -100,7 +111,7 @@ def plot_registration_comparison(
             origin='lower',
             extent=padded_extent
         )
-        axes[row, 1].set_title('MNI template (warped)' if row == 0 else '')
+        axes[row, 1].set_title(f'{template_label} (warped)' if row == 0 else '')
         axes[row, 1].axis('off')
         axes[row, 1].set_box_aspect(1)
         
@@ -144,7 +155,7 @@ def plot_registration_comparison(
         handles=[
             Patch(facecolor='0.6', label='Subject FA (grayscale)'),
             Patch(facecolor=plt.get_cmap('hot')(0.6), alpha=0.6,
-                  label='Warped MNI template (overlay column)'),
+                  label=f'Warped {template_label} (overlay column)'),
         ],
         loc='lower center', ncol=2, fontsize=11, frameon=False,
     )
@@ -973,6 +984,7 @@ def save_all_extraction_visualizations(
     output_dir,
     subject_id=None,
     mni_warped=None,
+    template_label="MNI template",
     jacobian_det=None,
     verbose=True
 ):
@@ -994,7 +1006,10 @@ def save_all_extraction_visualizations(
     subject_id : str, optional
         Subject identifier.
     mni_warped : ndarray, optional
-        Warped MNI template for registration QC.
+        Warped template for registration QC.
+    template_label : str, optional
+        Display name of the template behind ``mni_warped``; forwarded to
+        plot_registration_comparison so the QC panel names it correctly.
     jacobian_det : ndarray, optional
         Jacobian determinant map from registration for deformation QC.
     verbose : bool
@@ -1014,7 +1029,8 @@ def save_all_extraction_visualizations(
     # Registration QC (if MNI warped provided)
     if mni_warped is not None:
         viz_paths['registration_qc'] = plot_registration_comparison(
-            fa, mni_warped, output_dir, subject_id, affine=affine, verbose=verbose
+            fa, mni_warped, output_dir, subject_id, affine=affine,
+            template_label=template_label, verbose=verbose
         )
 
     # Jacobian map (if Jacobian data provided)

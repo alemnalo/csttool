@@ -408,10 +408,21 @@ def save_extraction_report(
     cst_result,
     output_paths,
     output_dir,
-    subject_id=None
+    subject_id=None,
+    registration=None
 ):
     """
     Save JSON report of CST extraction results.
+
+    Parameters
+    ----------
+    registration : dict, optional
+        Result of ``register_mni_to_subject``. Its 'template' descriptor is
+        recorded under a 'registration' key so the report states which template
+        was actually registered to the subject. That is a licensing fact -- the
+        pipeline falls back from FSL-licensed FMRIB58_FA to the permissively
+        licensed bundled MNI152 -- and it is otherwise unrecoverable from the
+        run artifacts.
     """
     import json
     from datetime import datetime
@@ -434,6 +445,13 @@ def save_extraction_report(
             'cst_combined': str(output_paths.get('cst_combined')) if output_paths.get('cst_combined') else None
         }
     }
+
+    if registration is not None and registration.get('template') is not None:
+        report['registration'] = {
+            'type': 'Affine + SyN',
+            'direction': 'template → subject',
+            'template': registration['template'],
+        }
     
     report_path = log_dir / f"{prefix}cst_extraction_report.json"
     with open(report_path, 'w') as f:

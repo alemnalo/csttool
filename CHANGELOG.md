@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The figure is otherwise identical, so the same function serves a document with
   a different text width instead of that document scaling the figure down.
 
+- **Registration template provenance in the extraction report.** Which template
+  served as the moving image is a licensing fact, not a tuning detail: the
+  pipeline prefers FSL-licensed FMRIB58_FA and silently falls back to the
+  permissively licensed bundled MNI152 when it has not been fetched. Nothing
+  recorded the outcome, so the licence attaching to a published registration
+  figure could only be reconstructed from pixel intensities and file mtimes.
+  `register_mni_to_subject` now resolves the choice once through
+  `describe_registration_template` and returns it as `result['template']` —
+  name, modality, tier, licence, source URL, manifest SHA-256, resolved path,
+  and the reason the preferred template was declined. It is written to the
+  registration report JSON and, via a new `registration=` argument to
+  `save_extraction_report`, to `registration.template` in the extraction report
+  JSON. Reports written without that argument keep their previous shape.
+
 ### Fixed
 
 - **Binary masks rendered through a continuous colormap.** The white-matter mask
@@ -47,6 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colormap's *low* end, so both overlays rendered near-white while their legend
   swatches showed saturated blue — the legend did not describe the mark. Both now
   draw an explicit RGBA fill at the stated colour and alpha.
+
+- **Registration QC figure misattributed the template it displayed.**
+  `plot_registration_comparison` hardcoded `MNI template` in the middle-column
+  title, the suptitle and the overlay legend, and took no argument saying what
+  had actually been registered. Whenever FMRIB58_FA was used — the default once
+  `fetch-data` has run — every QC PNG named the wrong template, and named the
+  permissively licensed one in place of the FSL-licensed one. The function now
+  takes `template_label` and the pipeline passes the resolved template's display
+  name; the default stays `MNI template` for callers that cannot know.
 
 - **The white-matter mask legend omitted the dilation.** The mask on the figure is
   `binary_dilation((FA > tau) & brain_mask, iterations=1)` — the mask that

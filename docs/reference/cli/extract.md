@@ -130,8 +130,14 @@ If validation fails, extraction stops with an error. This critical check prevent
 
 #### Step 1: Registration
 
-Registers the MNI152 template to the subject's FA map using:
+Registers a standard-space template to the subject's FA map using:
 
+- **Template**: the FMRIB58_FA template when it has been fetched
+  (`csttool fetch-data --accept-fsl-license`), giving a mono-modal FA-to-FA
+  registration; otherwise the bundled MNI152 T1. Both live on the MNI152 grid.
+  The template actually used — with its licence and source — is recorded under
+  `registration.template` in the extraction report JSON and named on the
+  registration QC figure, since the two carry different licences.
 - **Affine registration**: Coarse alignment (12 DOF)
 - **SyN registration**: Non-linear deformation field
 - **Control**: Use `--fast-registration` for reduced iterations (testing only)

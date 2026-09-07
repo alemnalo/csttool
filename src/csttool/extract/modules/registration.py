@@ -35,6 +35,90 @@ from ...data.loader import get_fmrib58_fa_path
 import json
 from datetime import datetime
 
+
+# Which template actually served as the moving image is a licensing fact, not
+# just a tuning detail: FMRIB58_FA is FSL data (non-commercial), while the
+# bundled MNI152 is permissively licensed. The pipeline silently falls back
+# between them, so the choice is resolved once here and then carried into the
+# report JSON and the QC figure title rather than being re-guessed downstream.
+_TEMPLATE_SPECS = {
+    "fmrib58_fa": {
+        "name": "FMRIB58_FA",
+        "display_name": "FMRIB58 FA template",
+        "modality": "FA",
+        "space": "MNI152",
+        "manifest_key": "fmrib58_fa/FMRIB58_FA_1mm.nii.gz",
+        "tier": "user-fetched",
+    },
+    "mni152_t1": {
+        "name": "MNI152_T1_1mm",
+        "display_name": "MNI152 T1 template",
+        "modality": "T1",
+        "space": "MNI152",
+        "manifest_key": "mni152/MNI152_T1_1mm.nii.gz",
+        "tier": "bundled",
+    },
+    "user_supplied": {
+        "name": "user-supplied",
+        "display_name": "user-supplied template",
+        "modality": None,
+        "space": None,
+        "manifest_key": None,
+        "tier": "user-supplied",
+    },
+}
+
+
+def describe_registration_template(kind, path=None, fallback_reason=None):
+    """
+    Build a JSON-serialisable descriptor of the template used as the moving image.
+
+    Parameters
+    ----------
+    kind : {'fmrib58_fa', 'mni152_t1', 'user_supplied'}
+        Which template was actually used.
+    path : str or Path, optional
+        Resolved path to the template file, when known.
+    fallback_reason : str, optional
+        Why the preferred template was not used, if it was not.
+
+    Returns
+    -------
+    dict
+        Descriptor carrying the template identity plus its licence and source
+        as recorded in the data manifest.
+    """
+    from ...data.manifest import get_manifest_entry
+
+    spec = _TEMPLATE_SPECS[kind]
+    info = {
+        "key": kind,
+        "name": spec["name"],
+        "display_name": spec["display_name"],
+        "modality": spec["modality"],
+        "space": spec["space"],
+        "tier": spec["tier"],
+        "path": str(path) if path is not None else None,
+        "license": None,
+        "source_url": None,
+        "version": None,
+        "sha256": None,
+        "fallback_reason": fallback_reason,
+    }
+    if spec["manifest_key"]:
+        try:
+            entry = get_manifest_entry(spec["manifest_key"])
+        except KeyError:
+            return info
+        info.update(
+            license=entry.get("license"),
+            source_url=entry.get("source_url"),
+            version=entry.get("version"),
+            sha256=entry.get("sha256"),
+        )
+    return info
+
+
 def load_mni_template(contrast="T1", verbose=True):
 
     if verbose:
@@ -58,6 +142,14 @@ def load_fmrib58_fa_template(target_shape, target_affine, verbose=True):
     FMRIB58_FA is a high-quality (1mm) whole-brain FA template in MNI space.
 
     The template must be fetched using 'csttool fetch-data --accept-fsl-license'.
+
+    Returns
+    -------
+    data, affine, status
+        ``data``/``affine`` are None when the template is unavailable. ``status``
+        is a dict with 'path' (resolved file, when loaded) and 'reason' (why it
+        was declined, when not), so the caller can record the fallback instead of
+        having to re-derive it.
     """
     from ...data.loader import DataNotInstalledError
 
@@ -69,7 +161,10 @@ def load_fmrib58_fa_template(target_shape, target_affine, verbose=True):
             print("  ⚠️ FMRIB58_FA template not found")
             print("  → Run 'csttool fetch-data --accept-fsl-license' to download")
             print("  → Falling back to standard MNI T1 template")
-        return None, None
+        return None, None, {
+            "path": None,
+            "reason": "FMRIB58_FA not installed (run 'csttool fetch-data --accept-fsl-license')",
+        }
 
     if verbose:
         print(f"    • Loading FMRIB58_FA template")
@@ -85,7 +180,10 @@ def load_fmrib58_fa_template(target_shape, target_affine, verbose=True):
     if np.count_nonzero(fa_data) < 200000:
         if verbose:
             print("  ⚠️ Template appears corrupt or sparse")
-        return None, None
+        return None, None, {
+            "path": str(template_path),
+            "reason": "FMRIB58_FA failed the non-zero voxel check (corrupt or sparse)",
+        }
 
     # Resample to target (MNI T1) grid
     if verbose:
@@ -108,7 +206,7 @@ def load_fmrib58_fa_template(target_shape, target_affine, verbose=True):
     if verbose:
         print(f"    • Resampled Shape: {resampled_data.shape}")
 
-    return resampled_data, resampled_affine
+    return resampled_data, resampled_affine, {"path": str(template_path), "reason": None}
 
 
 # use dipy.viz.regtools.overlay_slices to show comparison before and after registration
@@ -712,6 +810,9 @@ def register_mni_to_subject(
         - 'subject_shape': Subject image shape
         - 'mni_affine': MNI template affine matrix
         - 'mni_shape': MNI template shape
+        - 'template': descriptor of the template used as the moving image
+          (name, modality, tier, licence, source URL, resolved path, and the
+          fallback reason when the preferred template was unavailable)
         - 'warped_template_path': Path to warped template (if saved)
         - 'qc_before_path': Path to pre-registration QC image (if generated)
         - 'qc_after_path': Path to post-registration QC image (if generated)
@@ -763,9 +864,13 @@ def register_mni_to_subject(
     
     if mni_template_path is not None:
         mni_img = nib.load(mni_template_path)
+        template_info = describe_registration_template(
+            "user_supplied", path=mni_template_path
+        )
     else:
         mni_img, _, _ = load_mni_template(verbose=verbose)
-    
+        template_info = describe_registration_template("mni152_t1")
+
     mni_data = mni_img.get_fdata()
     mni_affine = mni_img.affine
     
@@ -780,8 +885,10 @@ def register_mni_to_subject(
             print("\n[Step 2b] Attempting to load FMRIB58 FA template...")
         
         # We pass the MNI grid settings so we can resample the FA template to it
-        fmrib58_data, fmrib58_affine = load_fmrib58_fa_template(mni_data.shape, mni_affine, verbose=verbose)
-        
+        fmrib58_data, fmrib58_affine, fmrib58_status = load_fmrib58_fa_template(
+            mni_data.shape, mni_affine, verbose=verbose
+        )
+
         if fmrib58_data is not None:
             if verbose:
                 print("    • Successfully loaded and resampled FMRIB58 FA template")
@@ -794,9 +901,16 @@ def register_mni_to_subject(
             # what we need to warp the Atlas (which is on MNI T1 Grid).
             mni_data = fmrib58_data
             # mni_affine remains the same (MNI T1 affine)
+            template_info = describe_registration_template(
+                "fmrib58_fa", path=fmrib58_status.get("path")
+            )
+            # The FA template is resampled onto the bundled T1's grid, so the
+            # geometry is the T1's even though the intensities are FMRIB58's.
+            template_info["resampled_to"] = _TEMPLATE_SPECS["mni152_t1"]["name"]
         else:
             if verbose:
                 print("    ! Failed to load FMRIB58 FA template, falling back to T1")
+            template_info["fallback_reason"] = fmrib58_status.get("reason")
 
 
     # -------------------------------------------------------------------------
@@ -886,6 +1000,8 @@ def register_mni_to_subject(
         'subject_shape': subject_data.shape,  # Shape after reorientation (same as original)
         'mni_affine': mni_affine,
         'mni_shape': mni_data.shape,
+        # Which template actually served as the moving image (licensing-relevant).
+        'template': template_info,
         'warped_template_path': None,
         'qc_before_path': None,
         'qc_after_path': None,
@@ -952,6 +1068,7 @@ def register_mni_to_subject(
             output_dir=output_dir,
             subject_id=subject_id,
             affine=subject_affine,
+            template_label=template_info['display_name'],
             verbose=verbose,
         )
         result['qc_after_path'] = qc_path
@@ -987,6 +1104,7 @@ def register_mni_to_subject(
         'mni': {
             'shape': list(mni_data.shape)
         },
+        'template': template_info,
         'outputs': {
             'warped_template': str(result['warped_template_path']) if result['warped_template_path'] else None,
             'qc_before': str(result['qc_before_path']) if result['qc_before_path'] else None,

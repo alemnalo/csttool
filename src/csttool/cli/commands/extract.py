@@ -231,7 +231,8 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
             verbose=verbose
         )
         
-        save_extraction_report(cst_result, output_paths, args.out, args.subject_id)
+        save_extraction_report(cst_result, output_paths, args.out, args.subject_id,
+                               registration=reg_result)
 
         # CST density volume (unconditional scientific data product, §2.5).
         # Written whenever the extraction stage runs, like FA/MD in the track
@@ -264,6 +265,8 @@ def cmd_extract(args: argparse.Namespace) -> dict | None:
             output_dir=args.out,
             subject_id=args.subject_id,
             jacobian_det=reg_result.get('jacobian_det'),
+            template_label=reg_result.get('template', {}).get(
+                'display_name', 'MNI template'),
             verbose=verbose
         )
         # CST density prototype panel (visualization-refactor M5). Reads the
@@ -445,7 +448,8 @@ def run_roi_seeded_extraction(
         verbose=verbose
     )
     
-    save_extraction_report(cst_result, output_paths, output_dir, subject_id)
+    save_extraction_report(cst_result, output_paths, output_dir, subject_id,
+                           registration=reg_result)
 
     # CST density volume (unconditional scientific data product, §2.5).
     from csttool.extract.modules.save_extract_outputs import write_cst_density_product
@@ -471,6 +475,8 @@ def run_roi_seeded_extraction(
             output_dir=output_dir,
             subject_id=subject_id,
             jacobian_det=reg_result.get('jacobian_det'),
+            template_label=reg_result.get('template', {}).get(
+                'display_name', 'MNI template'),
             verbose=verbose
         )
         # CST density prototype panel (visualization-refactor M5).
@@ -639,7 +645,8 @@ def run_bidirectional_extraction(
         verbose=verbose,
     )
 
-    save_extraction_report(cst_result, output_paths, output_dir, subject_id)
+    save_extraction_report(cst_result, output_paths, output_dir, subject_id,
+                           registration=reg_result)
 
     # CST density volume (unconditional scientific data product, §2.5).
     from csttool.extract.modules.save_extract_outputs import write_cst_density_product
@@ -664,6 +671,8 @@ def run_bidirectional_extraction(
             output_dir=output_dir,
             subject_id=subject_id,
             jacobian_det=reg_result.get('jacobian_det'),
+            template_label=reg_result.get('template', {}).get(
+                'display_name', 'MNI template'),
             verbose=verbose,
         )
         # CST density prototype panel (visualization-refactor M5).
