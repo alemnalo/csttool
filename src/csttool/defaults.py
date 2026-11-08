@@ -93,6 +93,34 @@ DEFAULT_MAX_LENGTH_PASSTHROUGH = 200.0
 DEFAULT_DILATE_BRAINSTEM = 2        # dilation iterations for brainstem ROI
 DEFAULT_DILATE_MOTOR = 1            # dilation iterations for motor cortex ROI
 
+# --- White-matter mask sources (whole-brain tracking) ---
+#
+# Policy chain, in precedence order (see tracking/modules/wm_mask.py):
+# external --wm-mask > DAM tissue segmentation > legacy FA-threshold mask.
+# 'auto' follows the chain; 'dam' / 'legacy' pin a source so results are
+# reproducible. 'legacy' is the historical dilate((FA > fa_thr) & brain_mask)
+# and stays the effective default for single-shell acquisitions, which DAM
+# cannot segment (it fits a slope across >= 2 non-b0 shells).
+DEFAULT_WM_METHOD = "auto"
+
+# DAM classifier thresholds. wm_threshold is the P-map slope cut below which a
+# voxel counts as white matter (0.5 is the value used in DIPY's own tissue
+# segmentation example; treat it as a starting point, not a calibrated constant
+# — it is recorded in the provenance block either way). low_signal_threshold
+# is in raw DWI signal units and gates voxels whose b=0 mean is too low to fit;
+# a dataset rescaled to small magnitudes would need it lowered or every voxel
+# is rejected and the mask falls back to legacy with a warning.
+DEFAULT_DAM_WM_THRESHOLD = 0.5
+DEFAULT_DAM_LOW_SIGNAL = 50.0
+
+# --- Preferred CST pipeline (--tracking-mode preferred) ---
+# Role-separated, PLIC-seeded, dual-target. Legacy FA behaviour is preserved
+# under --tracking-mode legacy-fa. The default is set by the validation gates.
+DEFAULT_TRACKING_MODE = "legacy-fa"
+DEFAULT_PLIC_SEED_DENSITY = 4      # seeds per voxel in the PLIC seed region
+DEFAULT_PREFERRED_MIN_LENGTH = 40.0   # mm — a plausible CST is long
+DEFAULT_PREFERRED_MAX_LENGTH = 300.0  # mm
+
 # --- Midline exclusion (passthrough filtering) ---
 DEFAULT_MIDLINE_TOLERANCE_MM = 8.0  # allowed medial excursion before exclusion
 

@@ -64,6 +64,13 @@ finalization — they are never part of the final output.
     │       │   ├── sub-<id>_ses-<label>_space-orig_model-DTI_param-MD_dwimap.nii.gz
     │       │   ├── sub-<id>_ses-<label>_space-orig_model-DTI_param-RD_dwimap.nii.gz
     │       │   ├── sub-<id>_ses-<label>_space-orig_model-DTI_param-AD_dwimap.nii.gz
+    │       │   ├── sub-<id>_ses-<label>_space-orig_desc-preferredSeedLeft_mask.nii.gz
+    │       │   ├── sub-<id>_ses-<label>_space-orig_desc-preferredSeedRight_mask.nii.gz
+    │       │   ├── transforms/
+    │       │   │   ├── <subject>_mni_to_subject_affine.npy
+    │       │   │   ├── <subject>_syn_forward_displacement.nii.gz
+    │       │   │   ├── <subject>_syn_backward_displacement.nii.gz
+    │       │   │   └── <subject>_registration_transform.json
     │       │   └── tractography/
     │       │       ├── sub-<id>_ses-<label>_space-orig_desc-wholebrain_tractogram.trk
     │       │       ├── sub-<id>_ses-<label>_space-orig_desc-CSTleft_tractogram.trk
@@ -74,7 +81,7 @@ finalization — they are never part of the final output.
     │       │   ├── sub-<id>_ses-<label>_stage-preproc_qc-denoising.png
     │       │   ├── sub-<id>_ses-<label>_stage-tracking_qc-tensormaps.png
     │       │   ├── sub-<id>_ses-<label>_stage-extraction_qc-registration.png
-    │       │   └── ...
+    │       │   └── ... (JSON sidecars accompany auditable QC panels)
     │       └── reports/
     │           ├── sub-<id>_ses-<label>_report.html
     │           ├── sub-<id>_ses-<label>_report.pdf
@@ -134,11 +141,34 @@ dataset (so that `SourceDatasets: bids::` resolves correctly):
 
 | Flag | Description |
 | --- | --- |
-| `--fa-thr <f>` | FA threshold for stopping and seeding (default: 0.2) |
-| `--seed-density <n>` | Seeds per voxel (default: 1) |
+| `--fa-thr <f>` | FA threshold for legacy stopping and FA-derived WM support (default: 0.2); preferred mode does not use FA as a hard stopping surface |
+| `--seed-density <n>` | Seeds per voxel axis (default: 1) |
 | `--step-size <mm>` | Tracking step size (default: 0.5) |
-| `--sh-order <n>` | Spherical harmonic order for CSA ODF (default: 6) |
+| `--sh-order <n>` | Requested spherical harmonic order for single-shell CSA ODF (default: 6; reduced when the selected shell has insufficient directions) |
 | `--brain-mask <path>` | Use this DWI-space brain mask (NIfTI) instead of csttool's automatic background segmentation. Must be 3D and already on the DWI grid (same shape and affine) — it is never resampled; any nonzero voxel counts as brain. Omit for automatic masking. |
+| `--wm-mask <path>` | Use this DWI-space white matter mask (NIfTI) verbatim as the seeding and peak-estimation territory. Must be 3D and already on the DWI grid (same shape and affine) — it is never resampled and never morphologically edited; any nonzero voxel counts as white matter. Takes precedence over `--wm-method`. |
+| `--wm-method <m>` | How to obtain the WM mask when `--wm-mask` is absent: `auto` (default) uses DIPY's DAM tissue segmentation when the acquisition has ≥2 non-b0 shells and falls back to the legacy `dilate(FA > --fa-thr)` mask otherwise; `dam` forces DAM (falls back with a warning if inapplicable); `legacy` pins the historical mask for bit-exact reproducibility. |
+| `--dam-wm-threshold <f>` | P-map slope cut below which DAM calls a voxel white matter (default 0.5, DAM only). |
+| `--dam-low-signal <f>` | b=0 signal level below which DAM refuses to classify a voxel (default 50; lower for small-magnitude data). |
+
+#### CST reconstruction architecture (`--tracking-mode`)
+
+| Flag | Description |
+| --- | --- |
+| `--tracking-mode <m>` | `preferred` = role-separated, PLIC-seeded, dual-target pipeline (brain support, model mask, seed mask and stopping resolved independently; JHU posterior-limb-of-internal-capsule seeds; registration masks converted from the internal RAS grid to the original DWI grid before tracking; automatic supported single-shell CSA; CMC when PVE maps are supplied, else ROI-constrained DWI-only). `legacy-fa` (default) retains FA-seeded/FA-stopped behaviour for comparison. |
+| `--model-mask <path>` | Optional DWI-grid mask over which CSA peaks are estimated in preferred mode (never resampled; must match the FA grid). Omit to use the permissive brain mask (recommended). An external WM mask here informs peak estimation only — it does not become the seed or the stopping boundary. |
+| `--seed-mask <path>` | Optional DWI-grid binary seed region overriding the JHU PLIC seeds in preferred mode (never resampled; must match the FA grid). |
+| `--wm-pve <path>` / `--gm-pve <path>` / `--csf-pve <path>` | Continuous WM/GM/CSF partial-volume maps (DWI grid) enabling CMC stopping in preferred mode (GM = valid termination, CSF = invalid). All three required together; hard label maps are refused. Omit for the ROI-constrained DWI-only domain. |
+| `--midline-tolerance-mm <mm>` | Allowed medial excursion before a streamline is excluded as commissural/contralateral (default 8). |
+
+> Preferred mode is deterministic and remains opt-in. The residual validation
+> investigation found two independent correctness defects: registration-derived
+> RAS arrays had been paired with the original LAS DWI affine during tracking,
+> and CSA had pooled every shell despite being a single-shell model. Preferred
+> mode now inverse-reorients every registration mask to the DWI grid, validates
+> physical hemisphere placement, and records the automatically selected shell.
+> `legacy-fa` remains the default pending validation beyond the two-subject
+> regression cohort; this is a cohort-evidence decision, not a silent fallback.
 
 ### Extraction
 

@@ -1,5 +1,6 @@
 def seed_and_stop(fa, affine, white_matter=None, brain_mask=None, fa_thresh=0.2, density=1,
-                  use_binary=False, use_brain_mask_stop=False, verbose=False):
+                  use_binary=False, use_brain_mask_stop=False, seed_mask=None,
+                  verbose=False):
     """Generate seeds and stopping criterion for tractography.
 
     Args:
@@ -12,6 +13,12 @@ def seed_and_stop(fa, affine, white_matter=None, brain_mask=None, fa_thresh=0.2,
         use_binary (bool): If True, use binary stopping on WM mask. If False (default), use FA threshold stopping.
         use_brain_mask_stop (bool): If True, also stop tracking at brain mask boundary.
             This provides a safety constraint to prevent streamlines from leaving the brain.
+        seed_mask (ndarray, optional): Explicit seeding territory. When given,
+            seeds come from this mask instead of ``fa >= fa_thresh``; the FA
+            threshold *stopping* rule is unchanged. This is how an external or
+            DAM white-matter mask replaces the FA-threshold seed territory in
+            the default (non-binary) mode while keeping stopping orthogonal.
+            None (the default) preserves the historical behaviour exactly.
         verbose (bool): Print processing details.
 
     Returns:
@@ -39,8 +46,10 @@ def seed_and_stop(fa, affine, white_matter=None, brain_mask=None, fa_thresh=0.2,
             print(f"    • Total seeds (density={density}): {len(seeds):,}")
 
     else:
-        # FA-based approach (default)
-        seed_mask = fa >= fa_thresh
+        # Explicit seeding territory (external/DAM WM mask) overrides the
+        # historical FA-threshold seed territory; stopping stays FA-based.
+        if seed_mask is None:
+            seed_mask = fa >= fa_thresh
 
         # If brain mask stopping is enabled, combine FA with brain mask
         if use_brain_mask_stop and brain_mask is not None:

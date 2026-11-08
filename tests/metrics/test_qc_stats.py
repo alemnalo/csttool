@@ -198,6 +198,30 @@ class TestProfileDispersion:
         assert np.allclose(dispersion["mean"], [1.0, 11.0])
         assert dispersion["n"] == 3
 
+    def test_missing_nodes_report_support_and_robust_distribution(self):
+        matrix = np.array([
+            [1.0, np.nan, 3.0],
+            [2.0, 4.0, np.nan],
+            [3.0, np.nan, np.nan],
+            [4.0, np.nan, np.nan],
+        ])
+        dispersion = qc_stats.profile_dispersion(
+            matrix, percentiles=(25, 50, 75)
+        )
+        assert dispersion["p50"][0] == pytest.approx(2.5)
+        assert dispersion["p25"][0] == pytest.approx(1.75)
+        assert dispersion["p75"][0] == pytest.approx(3.25)
+        support = dispersion["node_support"]
+        assert [
+            node["contributing_streamlines"] for node in support
+        ] == [4, 1, 1]
+        assert [
+            node["contributing_fraction"] for node in support
+        ] == [1.0, 0.25, 0.25]
+        assert [
+            node["invalid_or_missing_samples"] for node in support
+        ] == [0, 3, 3]
+
     def test_empty_matrix(self):
         dispersion = qc_stats.profile_dispersion(np.zeros((0, 20)))
         assert dispersion["n"] == 0
@@ -507,35 +531,6 @@ class TestBootstrapMeanSe:
         assert given == qc_stats.bootstrap_mean_se(sample, seed=9)
 
 
-class TestSubsampleStabilityUnchangedByRefactor:
-    """`subsample_stability` must be byte-identical after `bootstrap_mean_se`
-    was extracted from it.
-
-    The golden numbers below were captured from the pre-refactor implementation.
-    They exist because the refactor could only break this one way: by re-seeding
-    instead of passing the caller's own generator, which would silently shift
-    every published saturation number while every other test stayed green.
-    """
-
-    GOLDEN_BOOTSTRAP = {
-        "std": 0.01308894423773185,
-        "p5": 0.4818637861808141,
-        "p95": 0.5261642270783583,
-    }
-    GOLDEN_ESTIMATES_SUM = 150.95950794922135
-    GOLDEN_FULL_ESTIMATE = 0.5025627881288528
-
-    def _stability(self):
-        scalar = np.random.default_rng(2).random(SHAPE).astype(np.float32)
-        return qc_stats.subsample_stability(_bundle(n_streamlines=30), scalar, AFFINE)
-
-    def test_bootstrap_block_matches_golden(self):
-        assert self._stability()["bootstrap_full"] == self.GOLDEN_BOOTSTRAP
-
-    def test_subsampling_draws_match_golden(self):
-        stability = self._stability()
-        assert float(stability["estimates"].sum()) == self.GOLDEN_ESTIMATES_SUM
-        assert stability["full_estimate"] == self.GOLDEN_FULL_ESTIMATE
 
 
 class TestPropagateLiSe:

@@ -38,7 +38,8 @@ def analyze_cst_hemisphere(
     rd_map=None,
     ad_map=None,
     affine=None,
-    hemisphere='unknown'
+    hemisphere='unknown',
+    tensor_valid_mask=None,
 ):
     """
     Complete analysis of a single CST hemisphere.
@@ -92,7 +93,13 @@ def analyze_cst_hemisphere(
     ]
     for _name, _map, _is_diffusivity in _scalar_inputs:
         if _map is not None and affine is not None:
-            metrics[_name] = _compute_scalar_metrics(streamlines, _map, affine)
+            metrics[_name] = _compute_scalar_metrics(
+                streamlines,
+                _map,
+                affine,
+                scalar_name=_name,
+                tensor_valid_mask=tensor_valid_mask,
+            )
             if metrics[_name]['n_streamlines'] > 0:
                 _fmt = '.3e' if _is_diffusivity else '.3f'
                 print(f"  {_name.upper()}: {metrics[_name]['mean']:{_fmt}} "
@@ -114,39 +121,14 @@ def _scalar_summary(values):
     }
 
 
-def _compute_scalar_metrics(streamlines, scalar_map, affine):
-    """Build the per-scalar metric block emitted by `analyze_cst_hemisphere`.
+def _compute_scalar_metrics(streamlines, scalar_map, affine, *,
+                            scalar_name=None, tensor_valid_mask=None):
+    """Build one scalar block with explicit, non-interchangeable populations.
 
-    Two summaries coexist, both honestly named so the headline and its preserved
-    length-biased counterpart cannot be confused (audit finding AU10):
-
-    - **Headline** (``mean``/``std``/``median``/``min``/``max``/``n_streamlines``):
-      per-streamline. Each streamline contributes one value — the mean of its sampled
-      points — so the summary is length-unbiased. The report's global table and the global
-      laterality indices consume this. ``std`` is the between-streamline SD of streamline
-      means (the spread of the quantity whose mean is reported), not the point-pool
-      scatter; ``min``/``max`` bound the same per-streamline distribution.
-    - **Point-pool** (``mean_point_weighted`` … ``n_samples``): every sampled point,
-      length-biased (longer streamlines vote more). Preserved for QC and bias auditing
-      per the AU5/AU24 instinct of labelling constructed numbers rather than removing
-      them; not used as the headline.
-    - **Profile** (``profile``/``pontine``/``plic``/``precentral``): per-streamline-
-      normalised along-tract curve, arc-length resampled; unchanged.
-
-    The headline uses the per-streamline mean rather than the profile-derived mean because
-    the profile resamples to a fixed arc length and drops streamlines with fewer than five
-    valid points — a different population. See `docs/explanation/design-decisions.md`.
-    - **Dispersion** (``profile_p25``/``profile_p75``/``profile_n``): the per-node
-      interquartile range across the streamlines that contributed to ``profile``, so the
-      report can draw a band behind the line and a reader can tell a consensus from an
-      average over dissent. Same population, same pass — the profile is now derived from
-      `qc_stats.profile_matrix` rather than recomputed by `compute_tract_profile`, which
-      costs nothing (one sampling pass replaces one) and emits values byte-identical to it.
-      ``profile_median`` is deliberately absent: nothing consumes it, and its presence
-      would invite plotting it as the centre line, which would change every regional value.
-    - **Uncertainty** (``bootstrap_se`` and the three ``*_se`` regional keys): nonparametric
-      bootstrap standard errors, conditional on the retained bundle. See the ``uncertainty``
-      block `save_json_report` writes for the scope this does and does not cover.
+    The headline gives each retained streamline one vote. The diagnostic point
+    pool gives each valid point one vote. The profile gives each streamline one
+    value per normalized node, reports mean plus IQR, and leaves nodes below the
+    minimum support fraction missing rather than drawing through them.
     """
     # Local import: qc_stats imports orient_streamlines_inferior_to_superior,
     # sample_scalar_per_streamline and _sample_streamline_values from this module,
@@ -154,25 +136,59 @@ def _compute_scalar_metrics(streamlines, scalar_map, affine):
     from . import qc_stats
 
     n_points = 20
-    point_values = sample_scalar_along_tract(streamlines, scalar_map, affine)
-    streamline_means = sample_scalar_per_streamline(streamlines, scalar_map, affine)
-
-    matrix, _attrition = qc_stats.profile_matrix(
-        streamlines, scalar_map, affine, n_points=n_points
+    point_values, point_validity = sample_scalar_along_tract(
+        streamlines,
+        scalar_map,
+        affine,
+        tensor_valid_mask=tensor_valid_mask,
+        scalar_name=scalar_name,
+        return_validity=True,
     )
-    dispersion = qc_stats.profile_dispersion(matrix, percentiles=(25, 75))
-    # matrix.mean(axis=0) reproduces compute_tract_profile exactly (enforced by
-    # tests/metrics/test_qc_stats.py); the zeros fall back to its empty return.
-    profile = (matrix.mean(axis=0).tolist() if matrix.size
-               else np.zeros(n_points).tolist())
+    streamline_means = sample_scalar_per_streamline(
+        streamlines,
+        scalar_map,
+        affine,
+        tensor_valid_mask=tensor_valid_mask,
+        scalar_name=scalar_name,
+    )
+
+    matrix, attrition = qc_stats.profile_matrix(
+        streamlines,
+        scalar_map,
+        affine,
+        n_points=n_points,
+        tensor_valid_mask=tensor_valid_mask,
+        scalar_name=scalar_name,
+    )
+    dispersion = qc_stats.profile_dispersion(matrix, percentiles=(25, 50, 75))
+    def _json_vector(values):
+        if values is None:
+            return [None] * n_points
+        return [
+            float(value) if np.isfinite(value) else None
+            for value in np.asarray(values, dtype=float)
+        ]
+    if matrix.size:
+        with np.errstate(invalid="ignore"):
+            mean_profile = np.nanmean(matrix, axis=0)
+        adequate = np.asarray(dispersion["support_fraction"]) >= 0.5
+        profile = [
+            float(value) if keep and np.isfinite(value) else None
+            for value, keep in zip(mean_profile, adequate)
+        ]
+    else:
+        profile = [None] * n_points
     localized = compute_localized_metrics(profile)
 
     headline = _scalar_summary(streamline_means)
     point_pool = _scalar_summary(point_values)
 
-    empty_band = np.zeros(n_points).tolist()
+    empty_band = [None] * n_points
     return {
         **headline,
+        'headline_weighting': (
+            'one mean per retained streamline; each streamline has equal weight'
+        ),
         'n_streamlines': int(len(streamline_means)),
         'bootstrap_se': qc_stats.bootstrap_mean_se(streamline_means),
         'mean_point_weighted': point_pool['mean'],
@@ -181,12 +197,20 @@ def _compute_scalar_metrics(streamlines, scalar_map, affine):
         'min_point_weighted': point_pool['min'],
         'max_point_weighted': point_pool['max'],
         'n_samples': int(len(point_values)),
+        'point_pool_weighting': (
+            'each valid sampled streamline point has equal weight'
+        ),
+        'sample_validity': point_validity,
         'profile': profile,
-        'profile_p25': (dispersion['p25'].tolist() if dispersion['p25'] is not None
-                        else empty_band),
-        'profile_p75': (dispersion['p75'].tolist() if dispersion['p75'] is not None
-                        else empty_band),
+        'profile_center': 'mean',
+        'profile_band': 'interquartile range',
+        'profile_minimum_support_fraction': 0.5,
+        'profile_p25': _json_vector(dispersion['p25']),
+        'profile_median': _json_vector(dispersion['p50']),
+        'profile_p75': _json_vector(dispersion['p75']),
         'profile_n': int(dispersion['n']),
+        'node_support': dispersion['node_support'],
+        'profile_attrition': attrition,
         'pontine': localized['pontine'],
         'plic': localized['plic'],
         'precentral': localized['precentral'],
@@ -213,10 +237,11 @@ def _regional_bootstrap_se(matrix):
     n = matrix.shape[1]
     out = {}
     for name, start, end in TRACT_REGIONS:
-        # Identical binning to compute_localized_metrics, so the SE qualifies the
-        # value actually published rather than a neighbouring one.
         region = matrix[:, int(start * n):int(end * n)]
-        out[f'{name}_se'] = qc_stats.bootstrap_mean_se(region.mean(axis=1))
+        with np.errstate(invalid="ignore"):
+            per_streamline = np.nanmean(region, axis=1)
+        per_streamline = per_streamline[np.isfinite(per_streamline)]
+        out[f'{name}_se'] = qc_stats.bootstrap_mean_se(per_streamline)
     return out
 
 
@@ -260,6 +285,10 @@ def compute_morphology(streamlines, affine):
             'max_length': 0.0,
             'tract_volume': 0.0,
             'bootstrap_se_length': None,
+            'length_weighting': 'one geometric length per retained streamline',
+            'volume_definition': (
+                'union of nearest-voxel indices traversed by the bounded bundle'
+            ),
         }
     
     # Compute streamline lengths
@@ -303,6 +332,10 @@ def compute_morphology(streamlines, affine):
         'max_length': float(np.max(lengths)),
         'tract_volume': float(tract_volume),
         'bootstrap_se_length': qc_stats.bootstrap_mean_se(lengths),
+        'length_weighting': 'one geometric length per retained streamline',
+        'volume_definition': (
+            'union of nearest-voxel indices traversed by the bounded bundle'
+        ),
     }
     
     print(f"  Morphology: {morphology['n_streamlines']} streamlines, "
@@ -312,98 +345,200 @@ def compute_morphology(streamlines, affine):
     return morphology
 
 
-def _sample_streamline_values(streamline, scalar_map, affine):
-    """In-bounds scalar values at each point of a single streamline.
+def sample_scalar_nodes(points, scalar_map, affine, *,
+                        tensor_valid_mask=None, scalar_name=None):
+    """Trilinearly sample points with explicit support/validity reasons.
 
-    Shared by `sample_scalar_along_tract`, `sample_scalar_per_streamline` and
-    `compute_tract_profile` so the world→voxel lookup, bounds check and
-    nearest-neighbour sampling are defined once. Values from out-of-bounds points are
-    dropped.
+    When no tensor mask is supplied this retains the historical nearest-voxel
+    behavior. Preferred tractometry supplies the persisted fit-validity mask;
+    then all interpolation corners must lie inside that domain.
     """
-    values = []
-    for point in streamline:
-        voxel_coord = world_to_voxel(point, affine)
-        if (0 <= voxel_coord[0] < scalar_map.shape[0] and
-                0 <= voxel_coord[1] < scalar_map.shape[1] and
-                0 <= voxel_coord[2] < scalar_map.shape[2]):
-            values.append(scalar_map[voxel_coord[0], voxel_coord[1], voxel_coord[2]])
-    return values
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    scalar_map = np.asarray(scalar_map)
+    reasons = {
+        "out_of_bounds": 0,
+        "outside_tensor_fit_domain": 0,
+        "nonfinite": 0,
+        "mathematically_invalid": 0,
+    }
+    if len(points) == 0:
+        return np.zeros(0, dtype=float), np.zeros(0, dtype=bool), reasons
+
+    homogeneous = np.c_[points, np.ones(len(points))]
+    coords = (np.linalg.inv(affine) @ homogeneous.T).T[:, :3]
+    values = np.full(len(points), np.nan, dtype=float)
+    valid = np.zeros(len(points), dtype=bool)
+
+    if tensor_valid_mask is None:
+        rounded = np.round(coords).astype(int)
+        inside = ((rounded >= 0) & (rounded < np.asarray(scalar_map.shape))).all(axis=1)
+        reasons["out_of_bounds"] = int(np.count_nonzero(~inside))
+        if inside.any():
+            rv = rounded[inside]
+            sampled = scalar_map[rv[:, 0], rv[:, 1], rv[:, 2]].astype(float)
+            finite = np.isfinite(sampled)
+            selected = np.flatnonzero(inside)
+            values[selected[finite]] = sampled[finite]
+            valid[selected[finite]] = True
+            reasons["nonfinite"] = int(np.count_nonzero(~finite))
+        return values, valid, reasons
+
+    tensor_valid_mask = np.asarray(tensor_valid_mask, dtype=bool)
+    if tensor_valid_mask.shape != scalar_map.shape:
+        raise ValueError(
+            "tensor validity mask and scalar map must share a grid, got "
+            f"{tensor_valid_mask.shape} and {scalar_map.shape}"
+        )
+    lower = np.floor(coords).astype(int)
+    upper = np.ceil(coords).astype(int)
+    inside = ((lower >= 0) & (upper < np.asarray(scalar_map.shape))).all(axis=1)
+    reasons["out_of_bounds"] = int(np.count_nonzero(~inside))
+
+    support = np.zeros(len(points), dtype=bool)
+    for index in np.flatnonzero(inside):
+        x0, y0, z0 = lower[index]
+        x1, y1, z1 = upper[index]
+        support[index] = bool(
+            tensor_valid_mask[x0:x1 + 1, y0:y1 + 1, z0:z1 + 1].all()
+        )
+    reasons["outside_tensor_fit_domain"] = int(
+        np.count_nonzero(inside & ~support)
+    )
+
+    usable = inside & support
+    if usable.any():
+        from scipy.ndimage import map_coordinates
+        sampled = map_coordinates(
+            scalar_map,
+            coords[usable].T,
+            order=1,
+            mode="constant",
+            cval=np.nan,
+            prefilter=False,
+        ).astype(float)
+        finite = np.isfinite(sampled)
+        mathematically_valid = finite.copy()
+        name = (scalar_name or "").lower()
+        if name == "fa":
+            mathematically_valid &= (sampled >= 0.0) & (sampled <= 1.0)
+        elif name in {"md", "rd", "ad"}:
+            mathematically_valid &= sampled >= 0.0
+        selected = np.flatnonzero(usable)
+        values[selected[mathematically_valid]] = sampled[mathematically_valid]
+        valid[selected[mathematically_valid]] = True
+        reasons["nonfinite"] = int(np.count_nonzero(~finite))
+        reasons["mathematically_invalid"] = int(
+            np.count_nonzero(finite & ~mathematically_valid)
+        )
+    return values, valid, reasons
 
 
-def sample_scalar_along_tract(streamlines, scalar_map, affine):
-    """Sample scalar values at every point along all streamlines (point pool).
+def _sample_streamline_values(streamline, scalar_map, affine, *,
+                              tensor_valid_mask=None, scalar_name=None):
+    values, valid, _ = sample_scalar_nodes(
+        streamline,
+        scalar_map,
+        affine,
+        tensor_valid_mask=tensor_valid_mask,
+        scalar_name=scalar_name,
+    )
+    return values[valid].tolist()
 
-    Every in-bounds point of every streamline is pooled into one flat array, so this is
-    invariant to streamline orientation and to point order; it deliberately does not
-    reorient (unlike `compute_tract_profile`). Summary statistics derived from it are
-    therefore unaffected by AU9.
 
-    The pool is **point-weighted**: a streamline with twice as many points casts twice
-    as many votes. When streamline length is correlated with the scalar (it is, weakly,
-    on in-vivo CST data) this biases the mean. `sample_scalar_per_streamline` is the
-    length-unbiased counterpart (one vote per streamline); the report's headline mean and
-    the global laterality indices use that one, not this. This function is retained for
-    QC, for the reproducibility stability tests, and as the basis of the preserved
-    ``mean_point_weighted`` summary.
-
-    Parameters
-    ----------
-    streamlines : Streamlines
-        Input streamlines in world coordinates (mm)
-    scalar_map : ndarray
-        3D scalar map (e.g., FA or MD)
-    affine : ndarray
-        4x4 affine transformation matrix
-
-    Returns
-    -------
-    scalar_values : ndarray
-        Array of all sampled scalar values (flattened across all streamlines)
-    """
-    if len(streamlines) == 0:
-        return np.array([])
-
+def sample_scalar_along_tract(streamlines, scalar_map, affine, *,
+                              tensor_valid_mask=None, scalar_name=None,
+                              return_validity=False):
+    """Return the valid point pool, optionally with rejected-sample reasons."""
     all_values = []
-    for streamline in streamlines:
-        all_values.extend(_sample_streamline_values(streamline, scalar_map, affine))
-    return np.array(all_values)
+    summary = {
+        "total_samples": 0,
+        "valid_samples": 0,
+        "invalid_samples": 0,
+        "rejected_by_reason": {
+            "out_of_bounds": 0,
+            "outside_tensor_fit_domain": 0,
+            "nonfinite": 0,
+            "mathematically_invalid": 0,
+        },
+        "interpolation": (
+            "trilinear; all interpolation corners inside tensor-fit domain"
+            if tensor_valid_mask is not None else "nearest voxel"
+        ),
+        "numeric_threshold_clipping": False,
+        "observed_valid_extrema": {
+            "minimum": None,
+            "maximum": None,
+            "interpretation": (
+                "Observed mathematically valid extrema are retained and "
+                "reported for review; they are not exclusion thresholds."
+            ),
+        },
+    }
+    for streamline_index, streamline in enumerate(streamlines):
+        points = np.asarray(streamline, dtype=float)
+        values, valid, reasons = sample_scalar_nodes(
+            points,
+            scalar_map,
+            affine,
+            tensor_valid_mask=tensor_valid_mask,
+            scalar_name=scalar_name,
+        )
+        valid_indices = np.flatnonzero(valid)
+        all_values.extend(values[valid])
+        if len(valid_indices):
+            extrema = summary["observed_valid_extrema"]
+            for label, local_index in (
+                ("minimum", int(np.argmin(values[valid]))),
+                ("maximum", int(np.argmax(values[valid]))),
+            ):
+                point_index = int(valid_indices[local_index])
+                candidate = {
+                    "value": float(values[point_index]),
+                    "streamline_index": int(streamline_index),
+                    "point_index": point_index,
+                    "world_coordinate_mm": [
+                        float(coordinate) for coordinate in points[point_index]
+                    ],
+                }
+                current = extrema[label]
+                if (
+                    current is None
+                    or (label == "minimum"
+                        and candidate["value"] < current["value"])
+                    or (label == "maximum"
+                        and candidate["value"] > current["value"])
+                ):
+                    extrema[label] = candidate
+        summary["total_samples"] += int(len(values))
+        summary["valid_samples"] += int(valid.sum())
+        for reason, count in reasons.items():
+            summary["rejected_by_reason"][reason] += int(count)
+    summary["invalid_samples"] = (
+        summary["total_samples"] - summary["valid_samples"]
+    )
+    summary["valid_fraction"] = (
+        summary["valid_samples"] / summary["total_samples"]
+        if summary["total_samples"] else None
+    )
+    result = np.asarray(all_values, dtype=float)
+    return (result, summary) if return_validity else result
 
 
-def sample_scalar_per_streamline(streamlines, scalar_map, affine):
-    """Mean scalar per streamline (one value per streamline, length-unbiased).
-
-    Each streamline that has at least one in-bounds point contributes exactly one value —
-    the mean of its sampled points — regardless of how many points it has. Summary
-    statistics derived from the returned array are therefore **not** weighted by
-    streamline length, unlike `sample_scalar_along_tract`. This is the population the
-    report's headline ``mean``/``std``/``median``/``min``/``max`` and the global
-    laterality indices describe (audit finding AU10).
-
-    A streamline's point-mean is order-invariant, so this is unaffected by AU9 as well.
-
-    Parameters
-    ----------
-    streamlines : Streamlines
-        Input streamlines in world coordinates (mm)
-    scalar_map : ndarray
-        3D scalar map (e.g., FA or MD)
-    affine : ndarray
-        4x4 affine transformation matrix
-
-    Returns
-    -------
-    streamline_means : ndarray
-        Mean scalar value for each streamline with at least one in-bounds point.
-    """
-    if len(streamlines) == 0:
-        return np.array([])
-
+def sample_scalar_per_streamline(streamlines, scalar_map, affine, *,
+                                 tensor_valid_mask=None, scalar_name=None):
+    """Mean scalar per streamline; every retained streamline has one vote."""
     means = []
     for streamline in streamlines:
-        vals = _sample_streamline_values(streamline, scalar_map, affine)
-        if len(vals) > 0:
+        vals = _sample_streamline_values(
+            streamline,
+            scalar_map,
+            affine,
+            tensor_valid_mask=tensor_valid_mask,
+            scalar_name=scalar_name,
+        )
+        if vals:
             means.append(float(np.mean(vals)))
-    return np.array(means)
+    return np.asarray(means, dtype=float)
 
 
 def _end_to_end_delta(points, axis):
@@ -531,37 +666,30 @@ def compute_tract_profile(streamlines, scalar_map, affine, n_points=20):
     streamlines = orient_streamlines_inferior_to_superior(streamlines)
 
     all_profiles = []
-    
     for streamline in streamlines:
         if len(streamline) < 2:
             continue
-
-        # Sample scalar values at each point (shared per-point lookup)
-        streamline_scalars = _sample_streamline_values(streamline, scalar_map, affine)
-
-        if len(streamline_scalars) < 5:  # Need minimum points
+        streamline_scalars = _sample_streamline_values(
+            streamline, scalar_map, affine
+        )
+        if len(streamline_scalars) < 5:
             continue
-        
-        # Normalize to n_points
         if len(streamline_scalars) >= n_points:
-            # Downsample
-            indices = np.linspace(0, len(streamline_scalars)-1, n_points).astype(int)
+            indices = np.linspace(
+                0, len(streamline_scalars) - 1, n_points
+            ).astype(int)
             normalized_profile = np.array(streamline_scalars)[indices]
         else:
-            # Upsample with interpolation
             x_original = np.linspace(0, 1, len(streamline_scalars))
             x_target = np.linspace(0, 1, n_points)
-            normalized_profile = np.interp(x_target, x_original, streamline_scalars)
-        
+            normalized_profile = np.interp(
+                x_target, x_original, streamline_scalars
+            )
         all_profiles.append(normalized_profile)
-    
+
     if len(all_profiles) == 0:
         return np.zeros(n_points)
-    
-    # Average across all streamlines
-    final_profile = np.mean(all_profiles, axis=0)
-    
-    return final_profile.tolist()  # Convert to list for JSON serialization
+    return np.mean(all_profiles, axis=0).tolist()
 
 
 def world_to_voxel(world_point, affine):
@@ -626,13 +754,17 @@ def compute_localized_metrics(profile):
             'precentral': 0.0
         }
 
-    profile_arr = np.array(profile)
+    profile_arr = np.array([
+        np.nan if value is None else float(value) for value in profile
+    ])
     n = len(profile_arr)
-
-    return {
-        name: float(np.mean(profile_arr[int(start * n):int(end * n)]))
-        for name, start, end in TRACT_REGIONS
-    }
+    localized = {}
+    for name, start, end in TRACT_REGIONS:
+        values = profile_arr[int(start * n):int(end * n)]
+        localized[name] = (
+            float(np.nanmean(values)) if np.isfinite(values).any() else None
+        )
+    return localized
 
 
 def print_hemisphere_summary(metrics):

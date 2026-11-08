@@ -635,3 +635,158 @@ residual motion an external tool left behind).
 to csttool's own stages, because it happened before csttool received the data. A
 thesis-style run serialises as external TOPUP/EDDY → csttool denoise → mask, so no
 report can imply csttool denoised before corrections that preceded it.
+
+## White-matter mask: a resolved policy chain, not a threshold
+
+The historical WM mask was a fixed rule — `dilate((FA > fa_thr) & brain_mask)`
+— with no source selection at all. It worked, but its failures (an `fa_thr`
+too high for low-FA CST in pathology; a brain mask that nibbles the brainstem)
+were invisible everywhere in the PDF report, and the users who *have* a
+trustworthy mask had no way to supply one.
+
+The WM mask is now resolved by an explicit policy chain, in precedence order:
+
+1. **External** (`--wm-mask`): a user-supplied DWI-space mask, validated
+   against the DWI grid and binarised, never resampled, never morphologically
+   edited. Same contract as `--brain-mask`, for the same reason: the mask is
+   anatomically intended and silently resampling or editing it would produce
+   something the user never gave.
+2. **DAM** (`dipy.segment.tissue.dam_classifier`, Cheng et al. 2020):
+   classifies WM/GM from the directional-average behaviour of the diffusion
+   signal across shells. Chosen because it needs **no T1w** — the datasets
+   csttool must support include acquisitions without structural images — and
+   because it is deterministic (per-voxel linear regression; nothing to seed).
+   Its hard requirement of ≥2 distinct non-b0 shells means single-shell DTI
+   acquisitions can never use it; for those the chain degrades to legacy with
+   a recorded reason rather than a failure.
+3. **Legacy** — the historical rule, kept as the last line of defence and
+   pinned behind `--wm-method legacy` so earlier results stay bit-reproducible
+   (the thesis baseline in particular). Only the legacy mask is dilated: the
+   one-iteration dilation exists to push the FA threshold to the GM/WM
+   interface, and applying it to an external or DAM mask would edit exactly
+   the mask the user or the classifier chose.
+
+Three consequences are deliberate:
+
+**The FA stopping rule is orthogonal.** A non-legacy WM mask replaces the
+*seeding territory* and the CSA peak-estimation mask, but tracking still stops
+on `FA < fa_thr` (or the brain-mask boundary with `--use-brain-mask-stop`).
+Where a streamline may start and where it must stop are different controls;
+conflating them would make `--fa-thr` change meaning whenever `--wm-method`
+changes.
+
+**Failures fall back with a named reason, they do not abort.** An empty or
+inapplicable DAM result yields the legacy mask plus a `fallback_reason` in the
+provenance block, the product sidecar and (via the source label) the report QC
+strip. An empty mask is a valid, visible outcome — the AU31 philosophy — not a
+crash.
+
+**The mask the run used is persisted and shown.** `track` writes the resolved
+mask as `{stem}_wm_mask.nii.gz` (BIDS `desc-WM_mask`) with a sidecar naming the
+source, and the report QC strip's second panel renders that product — the
+seeding territory the streamlines in panel 4 actually came from, with the
+source in its key. It replaced the CST density panel, which answered (where is
+the bundle, is it coherent) a question the CST-over-FA panel answers more
+legibly; the density volume itself is unchanged and still feeds the standalone
+density panel, the tissue-plausibility panel and the strip's slice selection.
+
+The DAM thresholds are parameters, not constants to trust: `wm_threshold` (the
+P-map cut) defaults to the value used in DIPY's own example and is under
+empirical validation on the project's subjects; `low_signal_threshold` is in
+raw signal units, so a dataset with small signal magnitudes will need it
+lowered or every voxel is rejected and the chain falls back to legacy with the
+warning that says exactly that. Both are recorded in the provenance either way.
+
+## Brain extraction, tissue classification, model support, seeding and stopping are five separate operations
+
+The 2026-09-22 investigation showed what happens when they are conflated. One
+FA-derived white-matter mask had been serving as brain support, model-fit mask,
+seed territory *and* stopping boundary at once; feeding an anatomical WM mask
+into that single slot collapsed CST recovery from ~1000 to **1 left / 17 right**
+target-valid streamlines. FA-threshold stopping terminated streamlines at the
+cortical rim the anatomical mask also excluded from seeding, so the motor-ROI
+endpoint filter starved. The fix is to stop overloading one object.
+
+`--tracking-mode preferred` resolves five roles independently:
+
+- **`brain_mask`** — valid intracranial DWI support (median Otsu or external).
+  This is *brain extraction*, nothing else. Median Otsu is never described or
+  used as a white-matter segmentation.
+- **tissue classification** — DAM (`--wm-method dam`) is DWI-based tissue
+  classification for the legacy whole-brain path, eligible only on suitable
+  multi-shell data. Preferred mode does not compute or report an unused DAM
+  mask. DAM is not interchangeable with median Otsu and is never a preferred
+  hard stopping surface.
+- **`model_mask`** — where CSA peaks are estimated. Default = the brain mask
+  (permissive: deep + subcortical WM + the grey-white interface). **FA ≥ 0.2 is
+  not used** as a hard boundary for peak estimation. FA is a microstructural
+  measurement, not an anatomical tissue label.
+- **`seed_mask`** — where streamlines originate: the bilateral posterior limb of
+  the internal capsule (JHU ICBM-DTI-81, labels 19/20), warped by the existing
+  SyN atlas transform, hemisphere-clamped and validated (non-empty, correct
+  side, no L/R overlap) before seeding. Deep in the CST, so tracking does not
+  depend on seeding a dilated cortical rim.
+- **`stopping_model`** — CMC (`CmcStoppingCriterion.from_pve`) when co-registered
+  continuous WM/GM/CSF partial-volume maps are supplied (GM a valid terminal,
+  CSF invalid); otherwise an explicitly recorded
+  `BinaryStoppingCriterion(brain_mask)`. The latter stops propagation at the
+  brain-mask boundary; it is not ACT and it does not apply an FA, GFA,
+  peak-amplitude or DAM threshold. CMC is reserved for genuine continuous PVE;
+  a hard FreeSurfer label map is rejected, not silently treated as a
+  partial-volume estimate.
+
+A valid CST trajectory must connect the PLIC seed to an **ipsilateral motor
+target** and a **caudal target** — the cerebral peduncle / brainstem, kept as an
+independent inferior inclusion target. `LocalTracking` tracks bidirectionally
+from each seed; acceptance also applies full-trajectory length and curved
+midline exclusions. The complete accepted trajectory is preserved as a
+diagnostic artifact. The standard CST derivative used for volume, length,
+global scalar summaries, regional summaries and profiles is a separate
+inferior→superior analysis segment: the last inferior-target sample before the
+first motor-target sample, inclusive. This removes propagation tails beyond
+the registered anatomical targets without altering tracking or inventing a
+numeric scalar cutoff.
+
+All registration-derived masks are created on the registration routine's
+canonical RAS grid, then inverse-reoriented to the original on-disk DWI grid
+before they are handed to `LocalTracking`. Shape equality is not sufficient:
+the CDMD inputs are LAS, so applying the RAS arrays with the LAS affine silently
+mirrored the PLIC and motor targets in physical left/right space. The tracking
+grid contract now records the orientation transform and rejects masks whose
+physical centroids are on the wrong side.
+
+Model fitting also follows the acquisition support rather than pooling all
+shells. DTI uses all b0 volumes plus diffusion-weighted volumes at
+$b \leq 1200\ \mathrm{s/mm^2}$ (or the lowest shell with at least six
+directions when that range is unavailable). CSA-ODF uses all b0 volumes plus
+one supported shell: the best-sampled shell from 700–3000 s/mm², with ties
+resolved nearest 2000 s/mm². The selected shell, fitted-volume counts and
+validated SH order are persisted. This avoids treating the 15-shell,
+$b=200$–17800 CDMD acquisition as one single-shell CSA or tensor fit.
+
+Preferred scalar sampling is valid only where the fitted tensor is supported:
+inside the brain fit domain, finite ordered non-negative eigenvalues and finite
+$0 \leq \mathrm{FA} \leq 1$. Trilinear samples require every interpolation
+corner to satisfy that domain. Diffusivities must be finite and non-negative;
+there is no arbitrary upper “normal range” clip. Observed valid extrema and
+their streamline point/world coordinates remain in the metrics JSON for
+review. Global scalar headlines give one mean per streamline equal weight;
+the separately named point-pool summaries give each valid sampled point equal
+weight; tract volume is the union of voxels traversed by the bounded bundle.
+Profiles report mean, median, interquartile range and per-node contributing
+support. Nodes below 50% streamline support are serialized as missing and
+shown as gaps rather than connected through.
+
+**Validation and the default.** End-to-end runs with the corrected grid and
+model support recover **652 left / 570 right** streamlines for sub_005
+(count LI +0.067) and **1265 / 1363** for sub_024 (LI −0.037). Both pass the
+bilateral recovery, motor-coverage, inferior-continuity, no-collapse,
+plausibility and asymmetry gates. The former systematic right deficit was an
+orientation-frame artifact, not evidence of biological asymmetry: RAS masks had
+been indexed as LAS. Repeated fixed runs use seed 42 and reproduce the retained
+bundles exactly.
+
+`DEFAULT_TRACKING_MODE` nevertheless remains `legacy-fa`. Two subjects can
+falsify the defective implementation and validate this repair, but they are
+not a cohort-wide basis for changing a public default. Preferred mode stays
+explicit until broader validation covers different acquisitions and pathology.

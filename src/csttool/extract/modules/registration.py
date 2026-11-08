@@ -742,6 +742,71 @@ def compute_jacobian_hemisphere_stats(mapping, subject_affine, hemisphere_mask=N
     return stats, jacobian_det
 
 
+def save_registration_transforms(mapping, affine_map, output_dir, subject_id):
+    """Persist the complete affine + SyN transform with its grid geometry."""
+    transform_dir = Path(output_dir) / "transforms"
+    transform_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"{subject_id}_"
+
+    affine_path = transform_dir / f"{prefix}mni_to_subject_affine.npy"
+    np.save(affine_path, np.asarray(affine_map.affine, dtype=np.float64))
+
+    disp_affine = (
+        np.asarray(mapping.disp_grid2world, dtype=np.float64)
+        if mapping.disp_grid2world is not None else np.eye(4)
+    )
+    field_paths = {}
+    for direction, field in (
+        ("forward", mapping.get_forward_field()),
+        ("backward", mapping.get_backward_field()),
+    ):
+        path = transform_dir / f"{prefix}syn_{direction}_displacement.nii.gz"
+        image = nib.Nifti1Image(np.asarray(field, dtype=np.float32), disp_affine)
+        image.header.set_intent("vector")
+        nib.save(image, path)
+        field_paths[direction] = path
+
+    def _array_or_none(value):
+        return None if value is None else np.asarray(value).tolist()
+
+    metadata_path = transform_dir / f"{prefix}registration_transform.json"
+    metadata = {
+        "format_version": 1,
+        "direction": "MNI template to subject",
+        "displacement_units": "physical millimetres",
+        "dipy_mapping": {
+            "dimension": int(mapping.dim),
+            "is_inverse": bool(mapping.is_inverse),
+            "displacement_shape": _array_or_none(mapping.disp_shape),
+            "displacement_grid_to_world": _array_or_none(
+                mapping.disp_grid2world
+            ),
+            "domain_shape": _array_or_none(mapping.domain_shape),
+            "domain_grid_to_world": _array_or_none(
+                mapping.domain_grid2world
+            ),
+            "codomain_shape": _array_or_none(mapping.codomain_shape),
+            "codomain_grid_to_world": _array_or_none(
+                mapping.codomain_grid2world
+            ),
+            "prealign": _array_or_none(mapping.prealign),
+        },
+        "affine_matrix": np.asarray(affine_map.affine).tolist(),
+        "files": {
+            "affine": str(affine_path),
+            "syn_forward": str(field_paths["forward"]),
+            "syn_backward": str(field_paths["backward"]),
+        },
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+    return {
+        "affine": affine_path,
+        "syn_forward": field_paths["forward"],
+        "syn_backward": field_paths["backward"],
+        "metadata": metadata_path,
+    }
+
+
 def register_mni_to_subject(
     subject_fa_path,
     output_dir,
@@ -1019,6 +1084,12 @@ def register_mni_to_subject(
         'midline_x': midline_x,
         'midline_distance': midline_distance,
     }
+    transform_paths = save_registration_transforms(
+        mapping, affine_map, output_dir, subject_id
+    )
+    result['transform_paths'] = transform_paths
+    if verbose:
+        print(f"    ✓ Registration transforms: {transform_paths['metadata']}")
     
     # Save warped template
     if save_warped:
@@ -1108,8 +1179,13 @@ def register_mni_to_subject(
         'outputs': {
             'warped_template': str(result['warped_template_path']) if result['warped_template_path'] else None,
             'qc_before': str(result['qc_before_path']) if result['qc_before_path'] else None,
-            'qc_after': str(result['qc_after_path']) if result['qc_after_path'] else None
-        }
+            'qc_after': str(result['qc_after_path']) if result['qc_after_path'] else None,
+            'transforms': {
+                key: str(path) for key, path in transform_paths.items()
+            },
+        },
+        'affine_matrix': np.asarray(affine_map.affine).tolist(),
+        'jacobian_hemisphere_statistics': jacobian_stats,
     }
     
     report_path = log_dir / f"{subject_id}_registration_report.json"

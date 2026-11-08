@@ -158,9 +158,12 @@ def test_headline_mean_unchanged_by_reversal(synthetic_z_gradient_data, syntheti
         assert np.isclose(fa_mixed[key], fa_fwd[key], atol=1e-6), (
             f"headline {key} is order-dependent: {fa_fwd[key]} vs {fa_mixed[key]}"
         )
-    # The point-pool summary is a single flat sum, so it stays bit-exact under reversal.
+    # Reversal preserves the point population; floating-point reduction order
+    # may differ by one ulp, so assert the observable numeric contract.
     for key in ('mean_point_weighted', 'std_point_weighted'):
-        assert fa_mixed[key] == fa_fwd[key], f"point-pool {key} is order-dependent"
+        assert np.isclose(fa_mixed[key], fa_fwd[key], atol=1e-12), (
+            f"point-pool {key} is order-dependent"
+        )
 
 
 def test_input_streamlines_not_mutated(synthetic_z_gradient_data, synthetic_affine):

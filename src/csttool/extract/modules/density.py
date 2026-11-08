@@ -173,11 +173,9 @@ def save_cst_density(density, meta, affine, out_dir, stem, *,
         # The volume's true maximum. It was computed and printed but never
         # persisted, so the one number that says how dense the densest voxel
         # actually got could not be recovered from the derivatives.
-        #
-        # This is NOT the report's colour-scale cap. The QC strip saturates its
-        # scale at the 99th percentile of non-zero voxels and records that
-        # separately as DensityDisplayVmax; on a real subject the true maximum
-        # is roughly twice it. Do not use one where the other is meant.
+        # The QC strip no longer renders the density volume (it drives slice
+        # selection and the standalone panels instead), so this is now purely
+        # a property of the data product.
         "MaxFraction": float(meta["max_fraction"]),
     }
     if extra:

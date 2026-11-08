@@ -2,6 +2,7 @@
 import argparse
 import json
 from pathlib import Path
+import numpy as np
 from dipy.io.streamline import load_tractogram
 from dipy.io.image import load_nifti
 
@@ -112,6 +113,34 @@ def _resolve_density_path(args) -> Path | None:
         return None
     candidates = sorted(scalar_maps.glob('*_cst_density.nii.gz'))
     return candidates[0] if candidates else None
+
+
+
+def _resolve_wm_mask_path(args) -> Path | None:
+    """Locate the white-matter mask product for the QC strip's WM panel.
+
+    ``csttool run`` passes the path explicitly (``wm_mask``); this fallback
+    only serves a hand-run ``csttool metrics``, mirroring the dseg lookup:
+    beside the FA map in a BIDS ``dwi/`` directory (``*_desc-WM_mask.nii.gz``,
+    where the reorganiser moves it) and in the tracking stage's
+    ``scalar_maps/`` (``*_wm_mask.nii.gz``, where ``save_tracking_outputs``
+    leaves it). Returns None when absent — the panel degrades in place.
+    """
+    explicit = getattr(args, 'wm_mask', None)
+    if explicit and Path(explicit).exists():
+        return Path(explicit)
+
+    # Beside the FA map, under either filename: the BIDS ``dwi/`` name the
+    # reorganiser writes (``*_desc-WM_mask.nii.gz``) or the stage name
+    # ``save_tracking_outputs`` writes (``*_wm_mask.nii.gz``) — the hand-run
+    # pipeline leaves FA and mask side by side in tracking/scalar_maps/.
+    fa = getattr(args, 'fa', None)
+    if fa:
+        for pattern in ('*_desc-WM_mask.nii.gz', '*_wm_mask.nii.gz'):
+            candidates = sorted(Path(fa).parent.glob(pattern))
+            if candidates:
+                return candidates[0]
+    return None
 
 
 def _resolve_roi_dseg_path(args) -> Path | None:
@@ -356,6 +385,30 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
             ad_map, _ = load_nifti(str(args.ad))
         else:
             print(f"  ⚠️ AD map not found: {args.ad}")
+
+    tensor_valid_mask = None
+    tensor_valid_path = getattr(args, 'tensor_valid_mask', None)
+    if tensor_valid_path:
+        if Path(tensor_valid_path).exists():
+            print(f"  → Loading tensor-validity mask: {tensor_valid_path}")
+            tensor_valid_mask, tensor_valid_affine = load_nifti(
+                str(tensor_valid_path)
+            )
+            tensor_valid_mask = np.asarray(tensor_valid_mask, dtype=bool)
+            if fa_map is not None and tensor_valid_mask.shape != fa_map.shape:
+                raise ValueError(
+                    "Tensor-validity mask and scalar maps do not share a grid."
+                )
+            if fa_affine is not None and not np.allclose(
+                tensor_valid_affine, fa_affine, rtol=0.0, atol=1e-5
+            ):
+                raise ValueError(
+                    "Tensor-validity mask affine does not match scalar maps."
+                )
+        else:
+            raise FileNotFoundError(
+                f"Tensor-validity mask not found: {tensor_valid_path}"
+            )
     
     affine = fa_affine if fa_affine is not None else sft_left.affine
     
@@ -369,7 +422,8 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
             rd_map=rd_map,
             ad_map=ad_map,
             affine=affine,
-            hemisphere='left'
+            hemisphere='left',
+            tensor_valid_mask=tensor_valid_mask,
         )
         if verbose:
             print_hemisphere_summary(left_metrics)
@@ -386,7 +440,8 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
             rd_map=rd_map,
             ad_map=ad_map,
             affine=affine,
-            hemisphere='right'
+            hemisphere='right',
+            tensor_valid_mask=tensor_valid_mask,
         )
         if verbose:
             print_hemisphere_summary(right_metrics)
@@ -419,16 +474,46 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
     # Get pipeline metadata passed from run.py (or empty if standalone)
     pipeline_metadata = getattr(args, 'pipeline_metadata', {})
     
-    # Build metadata for reports from pipeline data
+    extraction_qc = pipeline_metadata.get('extraction', {}) or {}
     metadata = {
         'acquisition': pipeline_metadata.get('acquisition', {}),
         'processing': {},
-        'qc_thresholds': {
-            'fa_threshold': getattr(args, 'fa_threshold', None),
-            'min_length': getattr(args, 'min_length', None),
-            'max_length': getattr(args, 'max_length', None),
-        }
+        'qc_thresholds': extraction_qc.get('qc_thresholds', {}),
+        'qc': extraction_qc.get('preferred_qc', {}),
+        'tractography_qc': extraction_qc.get('tractography_qc', {}),
+        'coordinate_frame_qc': extraction_qc.get(
+            'coordinate_frame_qc', {}
+        ),
+        'analysis_segment': extraction_qc.get('analysis_segment', {}),
     }
+    if metadata["qc"]:
+        asymmetry = comparison.get("asymmetry", {})
+        count_li = asymmetry.get(
+            "streamline_count", {}
+        ).get("laterality_index")
+        volume_li = asymmetry.get("volume", {}).get("laterality_index")
+        count_limit = metadata["qc_thresholds"].get(
+            "maximum_absolute_count_laterality_index"
+        )
+        metadata["qc"]["headline_asymmetry"] = {
+            "streamline_count": {
+                "measured_signed_li": count_li,
+                "maximum_absolute_li": count_limit,
+                "pass": (
+                    abs(count_li) <= count_limit
+                    if count_li is not None and count_limit is not None
+                    else None
+                ),
+            },
+            "bounded_tract_volume": {
+                "measured_signed_li": volume_li,
+                "maximum_absolute_li": None,
+                "pass": None,
+                "interpretation": (
+                    "Measured and reported; no validated production threshold."
+                ),
+            },
+        }
     
     # Build processing metadata from tracking params if available
     tracking_params = pipeline_metadata.get('tracking', {})
@@ -458,8 +543,6 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
     if extraction_meta is not None:
         metadata['processing']['extraction'] = extraction_meta
 
-    # Remove None values from qc_thresholds
-    metadata['qc_thresholds'] = {k: v for k, v in metadata['qc_thresholds'].items() if v is not None}
 
     
     json_path = None
@@ -537,7 +620,6 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
                         slice_type=view,
                         set_title=False,
                     )
-                    print(f"  ✓ Saved: {viz_paths[f'tractogram_qc_{view}']}")
         except Exception as e:
             print(f"  ⚠️ Could not generate tractogram QC: {e}")
 
@@ -551,6 +633,11 @@ def cmd_metrics(args: argparse.Namespace) -> dict | None:
                     fa_path=args.fa,
                     v1_path=_resolve_v1_path(args),
                     density_path=_resolve_density_path(args),
+                    wm_mask_path=_resolve_wm_mask_path(args),
+                    mask_label=getattr(
+                        args, 'report_mask_label', 'White matter mask'
+                    ),
+                    mask_source=getattr(args, 'report_mask_source', None),
                     roi_dseg_path=_resolve_roi_dseg_path(args),
                     cst_left_path=args.cst_left,
                     cst_right_path=args.cst_right,

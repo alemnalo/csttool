@@ -255,6 +255,9 @@ class TestBidsReorgNiftiSurvival:
         for vdir, name in [(trk_viz, "dec_fa"), (ext_viz, "cst_density"),
                            (met_viz, "cst_over_fa")]:
             (vdir / f"{stem}_{name}.png").write_bytes(b"\x89PNG fake")
+            (vdir / f"{stem}_{name}.json").write_text(json.dumps({
+                "Panel": name,
+            }))
         return v1_path, dens_path
 
     def test_v1_and_density_survive_reorg(self, tmp_path):
@@ -298,10 +301,104 @@ class TestBidsReorgNiftiSurvival:
         assert any("stage-tracking_qc-decfa" in n for n in names)
         assert any("stage-extraction_qc-density" in n for n in names)
         assert any("stage-metrics_qc-cstoverfa" in n for n in names)
+        for fig in figs:
+            assert fig.with_suffix(".json").exists()
         assert not any("stage-misc" in n for n in names)
         # Stage dirs are gone (rmtree ran).
         assert not (out_root / "tracking").exists()
         assert not (out_root / "extraction").exists()
+
+
+    def test_preferred_seed_masks_survive_reorg(self, tmp_path):
+        from csttool.cli.commands.run import _write_bids_derivatives
+
+        out_root = tmp_path / "work"
+        out_root.mkdir()
+        stem = "sub-004"
+        self._setup_fake_tree(out_root, stem)
+
+        import argparse
+        import json
+        import nibabel as nib
+        import numpy as np
+
+        nifti_dir = out_root / "extraction" / "nifti"
+        nifti_dir.mkdir(parents=True, exist_ok=True)
+        affine = np.diag([2.0, 2.0, 2.0, 1.0])
+        for side in ("left", "right"):
+            seed = nifti_dir / (
+                f"{stem}_space-orig_desc-preferredSeed-{side}_mask.nii.gz"
+            )
+            nib.save(
+                nib.Nifti1Image(np.ones((4, 4, 4), np.uint8), affine),
+                seed,
+            )
+            seed.with_name(seed.name.replace(".nii.gz", ".json")).write_text(
+                json.dumps({"Hemisphere": side, "VoxelCount": 64})
+            )
+        transform_dir = out_root / "extraction" / "transforms"
+        transform_dir.mkdir(parents=True, exist_ok=True)
+        transform_files = {
+            "affine": transform_dir / "affine.npy",
+            "syn_forward": transform_dir / "syn_forward.nii.gz",
+            "syn_backward": transform_dir / "syn_backward.nii.gz",
+        }
+        for transform in transform_files.values():
+            transform.write_bytes(b"transform")
+        transform_metadata = transform_dir / "registration_transform.json"
+        transform_metadata.write_text(json.dumps({
+            "files": {
+                key: str(path) for key, path in transform_files.items()
+            }
+        }))
+        fa_path = (
+            out_root / "tracking" / "scalar_maps" / f"{stem}_fa.nii.gz"
+        )
+        nib.save(
+            nib.Nifti1Image(np.zeros((4, 4, 4), np.float32), affine),
+            fa_path,
+        )
+        bids_out = tmp_path / "derivatives"
+        args = argparse.Namespace(out=out_root, bids_in=None, raw_bids=None)
+
+        _write_bids_derivatives(
+            args,
+            subject_id=stem,
+            session_id=None,
+            bids_out=bids_out,
+            step_results={},
+            tractogram_path=None,
+            fa_path=fa_path,
+            md_path=None,
+            rd_path=None,
+            ad_path=None,
+            cst_left_path=None,
+            cst_right_path=None,
+            cst_combined_path=None,
+            preproc_path=None,
+            pipeline_metadata={},
+            verbose=False,
+        )
+
+        dwi = bids_out / stem / "dwi"
+        for desc in ("preferredSeedLeft", "preferredSeedRight"):
+            mask = next(dwi.glob(f"*desc-{desc}_mask.nii.gz"))
+            assert mask.with_name(mask.name.replace(".nii.gz", ".json")).exists()
+        preserved_transforms = dwi / "transforms"
+        assert {path.name for path in preserved_transforms.iterdir()} == {
+            "affine.npy",
+            "syn_forward.nii.gz",
+            "syn_backward.nii.gz",
+            "registration_transform.json",
+        }
+        metadata = json.loads(
+            (preserved_transforms / "registration_transform.json").read_text()
+        )
+        assert metadata["files"] == {
+            "affine": "affine.npy",
+            "syn_forward": "syn_forward.nii.gz",
+            "syn_backward": "syn_backward.nii.gz",
+        }
 
     def test_bilateral_tractogram_survives_reorg(self, tmp_path):
         """The bilateral CST must reach the BIDS tree, not the rmtree.

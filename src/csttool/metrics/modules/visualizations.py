@@ -331,7 +331,7 @@ _Z_PROFILE_LINE = 3
 # The CSS places each image at exactly this width, and the figures are saved
 # with their own figure bbox so the rendered height is exactly the second value.
 # These two numbers are the whole figure half of the one-page A4 budget.
-PROFILE_MATRIX_SIZE_MM = (194.0, 94.0)
+PROFILE_MATRIX_SIZE_MM = (194.0, 86.0)
 QC_TRIPTYCH_SIZE_MM = (116.0, 38.0)
 
 # The 1x4 report QC strip that replaces the triptych. Full content width, so the
@@ -412,42 +412,15 @@ _STRIP_ROI_LINEWIDTH = 0.8
 _STRIP_SWATCH_MM = 2.2      # length of one colour swatch line
 _STRIP_SWATCH_GAP_MM = 0.9  # swatch -> its own label
 _STRIP_ENTRY_GAP_MM = 1.9   # between one entry and the next
-# Panel 2's colourbar. The bar is thick enough to read as a scale rather than a
-# rule, and its width is *measured* rather than fixed (see the drawing code): the
-# two end ticks flank it, and a subject whose endpoint needs more digits must eat
-# into the bar, never into the neighbouring panel.
-_STRIP_CBAR_MM = 2.2        # the bar itself
-_STRIP_CBAR_MAX_FRAC = 0.72  # widest the bar may be, as a fraction of the panel
-_STRIP_CBAR_MIN_FRAC = 0.42  # narrowest, before the ticks are allowed to crowd
-_STRIP_CBAR_GAP_MM = 0.7    # key label row -> the bar below it
-_STRIP_CBAR_EDGE_MM = 0.8   # outer margin, so an end tick never touches the column
-                            # edge — without it the bar-width solve lands the
-                            # wider tick exactly on the boundary
-
-# What the density colourbar measures. The denominator is the *bilateral*
-# retained population (n_left + n_right), which is the one thing a reader cannot
-# guess and the one thing the old "streamline fraction" wording omitted: that
-# label could equally have meant a fraction of one streamline, of one
-# hemisphere's streamlines, or of every streamline generated. Naming the
-# denominator is what makes the scale readable, so it is named in full.
-#
-# It also explains the ceiling. A voxel every left streamline visits and no
-# right streamline visits reads n_left / (n_left + n_right) — about 43% on the
-# validation subject, not 100% — so a reader who assumes a per-hemisphere
-# denominator will read every value as roughly half what they expected.
-_DENSITY_CBAR_LABEL = "Fraction of bilateral CST streamlines"
-
-# Percentile the display scale is capped at, over voxels the bundle actually
-# visits. Measured maxima are ~0.10 and ~0.29 on the two validation subjects, so
-# a fixed [0, 1] scale renders both panels nearly uniformly dark; the cap is a
-# *display* decision and never touches the stored volume.
-_DENSITY_DISPLAY_PERCENTILE = 99.0
+# (The colourbar constants this section used to hold were removed with the
+# density panel: panel 2 is now a binary WM mask with a swatch key like the
+# other three columns, so there is no continuous scale to draw.)
 
 # Padding from the top of the key band to the cap height of its label row. The
-# label row is the alignment anchor shared by all four columns: panels 1, 3 and 4
-# put their swatches on it and panel 2 puts its quantity name there, with the bar
-# beneath. Every label is set on one shared baseline, derived from the cap-height
-# fraction below, so glyph content cannot shift a column off the row.
+# label row is the alignment anchor shared by all four columns: every panel
+# puts its swatches on it. Every label is set on one shared baseline, derived
+# from the cap-height fraction below, so glyph content cannot shift a column
+# off the row.
 _STRIP_KEY_TEXT_PAD_MM = 0.35
 _STRIP_KEY_CAP_FRAC = 0.72  # cap height as a fraction of the em, for DejaVu Sans
 
@@ -781,10 +754,28 @@ def plot_profile_matrix(
         ax = axes[i]
         key = m['key']
         scale = m['scale']
-        left_profile = np.array(left_metrics[key]['profile']) * scale
-        right_profile = np.array(right_metrics[key]['profile']) * scale
+        left_profile = np.array(
+            left_metrics[key]['profile'], dtype=float
+        ) * scale
+        right_profile = np.array(
+            right_metrics[key]['profile'], dtype=float
+        ) * scale
         n_points = len(left_profile)
         x = np.linspace(0, 100, n_points)
+        inadequate_x = set()
+        for block, profile in (
+            (left_metrics[key], left_profile),
+            (right_metrics[key], right_profile),
+        ):
+            support = block.get("node_support", [])
+            minimum = block.get("profile_minimum_support_fraction", 0.0)
+            if support:
+                inadequate = np.array([
+                    node["contributing_fraction"] < minimum
+                    for node in support
+                ])
+                profile[inadequate] = np.nan
+                inadequate_x.update(x[inadequate].tolist())
 
         # Bands first, and behind: the lines are the data and must stay legible
         # wherever the two hemispheres' bands overlap.
@@ -799,6 +790,18 @@ def plot_profile_matrix(
                 label='Left CST', zorder=_Z_PROFILE_LINE)
         ax.plot(x, right_profile, color=_style.RIGHT, linewidth=1.4,
                 label='Right CST', zorder=_Z_PROFILE_LINE)
+        if inadequate_x:
+            ax.scatter(
+                sorted(inadequate_x),
+                [0.03] * len(inadequate_x),
+                marker="x",
+                color="#5f6b7a",
+                s=10,
+                linewidths=0.7,
+                transform=ax.get_xaxis_transform(),
+                zorder=_Z_PROFILE_LINE,
+                label="support < 50%",
+            )
 
         ax.set_ylabel(m['ylabel'], fontsize=_RPT_LABEL_PT * type_scale,
                       labelpad=2)
@@ -811,9 +814,13 @@ def plot_profile_matrix(
             [left_profile, right_profile]
             + [edge for extent in band_extents if extent for edge in extent]
         )
-        if np.min(all_data) < m['ylim'][0] or np.max(all_data) > m['ylim'][1]:
-            margin = (np.max(all_data) - np.min(all_data)) * 0.1
-            ax.set_ylim(max(0, np.min(all_data) - margin), np.max(all_data) + margin)
+        finite_data = all_data[np.isfinite(all_data)]
+        if finite_data.size == 0:
+            ax.set_ylim(m['ylim'])
+        elif finite_data.min() < m['ylim'][0] or finite_data.max() > m['ylim'][1]:
+            span = finite_data.max() - finite_data.min()
+            margin = span * 0.1 if span else max(abs(finite_data.max()) * 0.1, 0.1)
+            ax.set_ylim(max(0, finite_data.min() - margin), finite_data.max() + margin)
         else:
             ax.set_ylim(m['ylim'])
 
@@ -973,42 +980,8 @@ def _load_optional(path, fa_shape, fa_affine, name):
     return img
 
 
-def format_density_percent(fraction, *, saturated=False):
-    """Render a density *fraction* as a percentage label for display only.
 
-    The stored volume is a fraction in ``[0, 1]``; showing it as ``0.074`` asks
-    the reader to do the conversion, so the colourbar shows ``7.4%``. This
-    formats the label and nothing else — the underlying float is never touched.
-
-    ``saturated=True`` prefixes ``≥``, which is the honest form whenever the
-    scale is capped below the volume's true maximum: voxels at or above the cap
-    all carry the top colour, so a bare ``7.4%`` would read as the maximum when
-    the real one is nearly twice that.
-
-    Precision follows the magnitude — one decimal where that is the meaningful
-    digit, two significant figures below 1%, and no trailing ``.0``:
-
-    >>> format_density_percent(0.074)
-    '7.4%'
-    >>> format_density_percent(0.074, saturated=True)
-    '≥7.4%'
-    >>> format_density_percent(0.5)
-    '50%'
-    >>> format_density_percent(0.0)
-    '0%'
-    """
-    pct = float(fraction) * 100.0
-    if pct <= 0:
-        return "0%"
-    if pct < 1.0:
-        text = f"{pct:.2g}"
-    else:
-        text = f"{pct:.1f}".rstrip("0").rstrip(".")
-    return f"{'≥' if saturated else ''}{text}%"
-
-
-def _strip_caption_text(slice_index, provenance, slab_mm, *,
-                        density_scale_note=False):
+def _strip_caption_text(slice_index, provenance, slab_mm):
     """The one shared caption line — only what is true of all four panels.
 
     The hemisphere counts and the ROI colour key used to live here too, which
@@ -1018,32 +991,15 @@ def _strip_caption_text(slice_index, provenance, slab_mm, *,
     chose it, the display slab, and the orientation convention (previously
     implied only by the per-panel R/L glyphs).
 
-    The slab governs panels 3 and 4 only, but it is a property of how the
-    composite is displayed rather than of either panel's science, so it stays
-    shared rather than being printed twice.
-
-    The density clipping rule is the one exception to "nothing panel-specific
-    here", and it earns the place: it is a statement about how a *colour scale*
-    was built rather than about what the density panel shows, it is the same
-    class of fact as the slab and the orientation convention, and the density
-    column has no room left for a second line of type. The panel's own key
-    carries the ``≥`` that marks the endpoint as a cap; this says what the cap
-    is.
-
-    It appears whenever a density panel was drawn, not only when the scale
-    happens to saturate: the rule describes how the scale top was *chosen*, and
-    a caption that explained the scale for some subjects and not others would be
-    the harder thing to read. Whether values actually exceed the cap is the
-    separate question the ``≥`` answers.
+    The slab governs panels 2, 3 and 4 (the mask and ROI panels are projected
+    through it; the streamlines are drawn within it), but it is a property of
+    how the composite is displayed rather than of either panel's science, so it
+    stays shared rather than being printed three times.
     """
     rule = str(provenance.get('rule', 'unknown')).replace('_', ' ')
-    text = (f"Coronal slice {slice_index} · selected by {rule} · "
+    return (f"Coronal slice {slice_index} · selected by {rule} · "
             f"{slab_mm:g} mm display slab · "
             f"radiological convention (R at viewer left)")
-    if density_scale_note:
-        text += (" · density scale capped at non-zero "
-                 f"P{_DENSITY_DISPLAY_PERCENTILE:g}")
-    return text
 
 
 # The three key-band primitives below now live in ``csttool.viz.layout`` so the
@@ -1075,26 +1031,26 @@ def plot_report_qc_strip(
     fa_path,
     v1_path,
     density_path,
+    wm_mask_path,
     roi_dseg_path,
     cst_left_path,
     cst_right_path,
     output_dir,
     subject_id,
     *,
+    mask_label="White matter mask",
+    mask_source=None,
     slab_mm=_geo.DEFAULT_SLAB_MM,
     max_streamlines=500,
     seed=None,
 ):
-    """1x4 report QC strip: DEC-FA, CST density, extraction ROIs, CST over FA.
+    """Render the report's 1x4 tractography QC strip.
 
-    Replaces the 1x3 triptych, which showed the same information (streamlines
-    over FA) from three angles. These four panels answer four different
-    questions on **one** shared coronal slice:
-
-    1. does the local diffusion field support the expected CST orientation?
-    2. is the reconstructed bundle spatially coherent?
-    3. were the intended anatomical constraints applied?
-    4. is the final tract anatomically plausible?
+    Panel 2 shows the mask that constrained the reported tracking result.  For
+    legacy tracking this is the white-matter seed/model mask.  Preferred PLIC
+    tracking instead passes its brain model domain and labels the panel
+    ``Model mask``; it must not display the unused whole-brain DAM mask.
+    The density volume still feeds shared-slice selection but is not rendered.
 
     One figure, one owner
     ---------------------
@@ -1108,13 +1064,13 @@ def plot_report_qc_strip(
     benefit here.
 
     That ownership extends to **every panel-level annotation**: titles, the DEC
-    direction key, the density colourbar, the ROI key and the hemisphere counts
-    are all drawn here, and the HTML template contributes only the section
-    heading. Only the Figure knows where the panels actually landed, so only the
-    Figure can align a key to a panel column; and a key drawn from
-    ``style.LEFT`` / ``style.BRAINSTEM`` / ``style.DENSITY_CMAP`` cannot drift
-    from the marks it describes, which a CSS copy can. This is the same rule
-    ``plot_profile_matrix`` already follows.
+    direction key, the WM mask key (with its source), the ROI key and the
+    hemisphere counts are all drawn here, and the HTML template contributes
+    only the section heading. Only the Figure knows where the panels actually
+    landed, so only the Figure can align a key to a panel column; and a key
+    drawn from ``style.LEFT`` / ``style.BRAINSTEM`` / ``style.WM_MASK``
+    cannot drift from the marks it describes, which a CSS copy can. This is
+    the same rule ``plot_profile_matrix`` already follows.
 
     Layout
     ------
@@ -1155,14 +1111,15 @@ def plot_report_qc_strip(
     fa_path : path
         Required. Supplies the grid, the backgrounds and the level-4 slice
         fallback.
-    v1_path, density_path, roi_dseg_path : path or None
-        Optional persisted products, each on the FA grid. A volume that is
-        present but on a different grid raises ``ValueError`` rather than being
-        resampled silently.
+    v1_path, density_path, wm_mask_path, roi_dseg_path : path or None
+        Optional persisted products, each on the FA grid. ``density_path`` no
+        longer renders — the density volume feeds slice selection only.
+        A volume that is present but on a different grid raises ``ValueError``
+        rather than being resampled silently.
     cst_left_path, cst_right_path : path or None
         The two persisted tractograms.
     slab_mm : float
-        Physical slab thickness for panels 3 and 4.
+        Physical slab thickness for panels 2, 3 and 4.
     max_streamlines : int
         Per-hemisphere subsample cap for panel 4.
     seed : int, optional
@@ -1177,9 +1134,8 @@ def plot_report_qc_strip(
     -------
     pathlib.Path
         The saved PNG. A JSON sidecar beside it records the slice, the rule that
-        chose it, the slab, the counts, the density maximum and the display cap
-        that differs from it, the per-ROI slab
-        voxel counts and which panels degraded.
+        chose it, the slab, the counts, the WM mask product and its source, the
+        per-ROI slab voxel counts and which panels degraded.
     """
     import json
 
@@ -1201,10 +1157,30 @@ def plot_report_qc_strip(
 
     v1_img = _load_optional(v1_path, fa.shape, affine, "V1 field")
     density_img = _load_optional(density_path, fa.shape, affine, "CST density")
+    wm_mask_img = _load_optional(wm_mask_path, fa.shape, affine, "WM mask")
     dseg_img = _load_optional(roi_dseg_path, fa.shape, affine, "ROI segmentation")
 
     density = density_img.get_fdata().astype(np.float32) if density_img is not None else None
+    wm_mask = (np.asarray(wm_mask_img.dataobj) > 0
+               if wm_mask_img is not None else None)
     dseg = np.asarray(dseg_img.dataobj) if dseg_img is not None else None
+
+    # The product's sidecar names the source (external / DAM / legacy) and its
+    # parameters; the panel key and the strip sidecar repeat it so a reader of
+    # the report knows which territory they are looking at without opening the
+    # derivatives tree.
+    wm_mask_source = mask_source
+    wm_mask_product_sidecar = None
+    if wm_mask is not None and wm_mask_path is not None:
+        sidecar_path = Path(str(wm_mask_path).replace(".nii.gz", ".json"))
+        if sidecar_path.exists():
+            try:
+                wm_mask_product_sidecar = json.loads(
+                    sidecar_path.read_text(encoding="utf-8"))
+                if wm_mask_source is None:
+                    wm_mask_source = wm_mask_product_sidecar.get("WmMaskSource")
+            except Exception:
+                pass
 
     def _load_streamlines(path):
         if path is None or not Path(path).exists():
@@ -1295,41 +1271,37 @@ def plot_report_qc_strip(
         _unavailable(axes[0], "DEC-FA", "world-frame V1 not produced")
         degraded.append("dec_fa")
 
-    # ---- panel 2: CST density -------------------------------------------
-    # Two different numbers, deliberately named apart. The *display* cap is a
-    # presentation choice; the *true* maximum is a property of the data. The old
-    # single ``vmax`` carried the first under a name that reads like the second,
-    # which is exactly the confusion the endpoint label has to avoid.
-    density_max_fraction = None      # the volume's real maximum, in [0, 1]
-    density_display_vmax = None      # where the colour scale saturates
-    density_display_clipped = False  # True when real values exceed that cap
-    density_image = None
-    if density is not None:
-        nonzero = density[density > 0]
-        # Subject-adaptive: a fixed [0, 1] scale renders real subjects nearly
-        # uniformly dark, because the bilateral denominator puts even a fully
-        # occupied unilateral voxel near 0.5 and real maxima far below that. No
-        # log or power stretch: that would be a second normalization on top of
-        # the persisted definition and would make two subjects incomparable.
-        density_max_fraction = float(density.max()) if density.size else 0.0
-        density_display_vmax = (
-            float(np.percentile(nonzero, _DENSITY_DISPLAY_PERCENTILE))
-            if nonzero.size else 1.0
-        )
-        # Saturation is a fact about this subject, not an assumption: on the
-        # validation subject the true maximum is 1.9x the cap, so 71 voxels
-        # share the top colour and a bare endpoint would misname the maximum.
-        # Where the cap happens to reach the maximum, no "≥" is claimed.
-        density_display_clipped = density_max_fraction > density_display_vmax
+    # ---- panel 2: tracking model/seed mask -------------------------------
+    # Legacy tracking shows the persisted WM mask; preferred PLIC tracking
+    # passes the brain-mask model domain instead.
+    # A slab projection shows the 3-D territory more honestly than one plane.
+    # Fill + same-hue outline at a saturated magenta (see
+    # style.WM_MASK): the 20260922 print review showed that a translucent
+    # muted-blue fill alone disappeared against the FA background at ~48 mm
+    # panel width; the territory is the content, so it must be readable.
+    wm_mask_voxels = None
+    wm_slab_voxels = None
+    if wm_mask is not None:
         _background(axes[1])
-        density_image = _render.render_density_overlay(
-            axes[1], density, affine, "coronal", slice_index,
-            cmap=_style.DENSITY_CMAP, vmax=density_display_vmax,
+        projected, n_voxels = _slab_projected_volume(
+            wm_mask, affine, "coronal", slice_index, slab_mm
         )
-        _title(axes[1], "CST density")
+        wm_mask_voxels = int(wm_mask.sum())
+        wm_slab_voxels = int(n_voxels)
+        _render.render_mask_overlay(
+            axes[1], projected, affine, "coronal", slice_index,
+            color=_style.WM_MASK, fill_alpha=0.45, outline=True,
+            outline_linewidth=1.0,
+        )
+        _title(axes[1], mask_label)
     else:
-        _unavailable(axes[1], "CST density", "density map not produced")
-        degraded.append("density")
+        missing_mask_note = (
+            "WM mask not produced"
+            if mask_label == "White matter mask"
+            else f"{mask_label} not produced"
+        )
+        _unavailable(axes[1], mask_label, missing_mask_note)
+        degraded.append("wm_mask")
 
     # ---- panel 3: extraction ROIs ---------------------------------------
     roi_slab_voxels = {}
@@ -1414,9 +1386,16 @@ def plot_report_qc_strip(
     # whole content of a DEC image.
     rows = [list(_DEC_AXIS_KEY) if v1_img is not None else []]
 
-    # Panel 2's label row is measured as a single centred token so it takes part
-    # in the common fit; its two numeric ticks flank the bar and are short.
-    rows.append([(None, _DENSITY_CBAR_LABEL)] if density_image is not None else [])
+    # Panel 2: the mask swatch plus the source that produced it. The source is
+    # the whole point of the panel — external / DAM / legacy is what the
+    # reader must be able to audit — and it names a colour that is otherwise
+    # just a fill. An unknown source (older product without a sidecar)
+    # degrades to the bare label rather than guessing.
+    rows.append(
+        [(_style.WM_MASK, f"{mask_label.lower()} ({wm_mask_source})")]
+        if (wm_mask is not None and wm_mask_source)
+        else ([(_style.WM_MASK, mask_label.lower())]
+              if wm_mask is not None else []))
 
     # Panel 3: the ROI colour key, beside the contours it names. An ROI the
     # display slab never reaches is greyed rather than dropped, so a zero count
@@ -1446,101 +1425,29 @@ def plot_report_qc_strip(
     key_pt = _fit_key_fontsize(key_axes[0], renderer, rows, _STRIP_KEY_PT)
 
     # The label row is the alignment anchor for all four columns: swatches for
-    # panels 1, 3 and 4, the quantity name for panel 2. One shared baseline,
-    # placed so the cap heights meet the band's top pad, and derived from the
-    # fitted type size rather than fixed so the row holds whatever the auto-fit
-    # settles on.
+    # panels 1, 2, 3 and 4. One shared baseline, placed so the cap heights meet
+    # the band's top pad, and derived from the fitted type size rather than
+    # fixed so the row holds whatever the auto-fit settles on.
     text_h_mm = key_pt * 25.4 / 72.0
     cap_mm = _STRIP_KEY_CAP_FRAC * text_h_mm
     label_baseline_mm = _STRIP_KEY_MM - _STRIP_KEY_TEXT_PAD_MM - cap_mm
     label_y = label_baseline_mm / _STRIP_KEY_MM
 
     _draw_key_row(key_axes[0], renderer, rows[0], key_pt, y=label_y)
+    _draw_key_row(key_axes[1], renderer, rows[1], key_pt, y=label_y)
     _draw_key_row(key_axes[2], renderer, rows[2], key_pt, y=label_y)
     _draw_key_row(key_axes[3], renderer, rows[3], key_pt, y=label_y)
 
-    # Panel 2: a continuous scale is not a set of swatches, so this column gets
-    # the colourbar. Its quantity name sits on the shared label row with the
-    # other three keys and the bar hangs beneath it, so the four columns still
-    # read as one row of legends. The name is static and the number is dynamic,
-    # so they are set separately: as one string the label measured 47.45 mm
-    # inside a 48.05 mm column and overflowed into the neighbouring panels as
-    # soon as the endpoint reached two integer digits.
-    if density_image is not None:
-        key_ax = key_axes[1]
-        key_ax.text(0.5, label_y, _DENSITY_CBAR_LABEL,
-                    transform=key_ax.transAxes, ha='center', va='baseline',
-                    fontsize=key_pt, color=_STRIP_INK)
-
-        # Percentages, not raw fractions: the stored value is a fraction but a
-        # reader should not have to convert 0.074 in their head. The upper tick
-        # says "≥" whenever the scale saturates below the true maximum, so it
-        # can never be misread as the maximum itself.
-        #
-        # The bar's width is what is left after the two end ticks have their
-        # room, so an endpoint needing more digits narrows the bar instead of
-        # pushing a number into panel 1 or panel 3.
-        tick_texts = (
-            format_density_percent(0.0),
-            format_density_percent(density_display_vmax,
-                                   saturated=density_display_clipped),
-        )
-        tick_w_mm = []
-        for text in tick_texts:
-            probe = key_ax.text(0, 0, text, fontsize=key_pt)
-            tick_w_mm.append(probe.get_window_extent(renderer).width
-                             / fig.dpi * 25.4)
-            probe.remove()
-        gap_mm = _STRIP_SWATCH_GAP_MM
-        # The bar is centred in the column, so each tick has (panel - bar) / 2
-        # to live in and the *wider* of the two is what binds — using their sum
-        # lets the longer one hang past the column edge.
-        allowed = (panel_mm - 2 * gap_mm - 2 * max(tick_w_mm)
-                   - 2 * _STRIP_CBAR_EDGE_MM)
-        bar_w = min(allowed, _STRIP_CBAR_MAX_FRAC * panel_mm)
-        bar_w = max(bar_w, _STRIP_CBAR_MIN_FRAC * panel_mm)
-        # An endpoint wide enough to fight the minimum takes the bar down with it
-        # rather than clipping: a short bar is legible, a truncated number is not.
-        bar_w = max(min(bar_w, allowed), 0.15 * panel_mm)
-
-        bar_top_mm = label_baseline_mm - _STRIP_CBAR_GAP_MM
-        bar_x0_mm = geom["panel_x0_mm"][1] + (panel_mm - bar_w) / 2.0
-        cbar_ax = fig.add_axes([
-            bar_x0_mm / width_mm,
-            (geom["key_y0_mm"] + bar_top_mm - _STRIP_CBAR_MM) / height_mm,
-            bar_w / width_mm,
-            _STRIP_CBAR_MM / height_mm,
-        ])
-        cbar = fig.colorbar(density_image, cax=cbar_ax, orientation='horizontal',
-                            ticks=[])
-        cbar.outline.set_linewidth(0.4)
-
-        # Ticks flank the bar, on a baseline set so their cap height straddles
-        # the bar's middle, so bar and endpoints read as one object rather than
-        # three stacked lines.
-        bar_lo = (panel_mm - bar_w) / 2.0
-        tick_baseline_mm = bar_top_mm - _STRIP_CBAR_MM / 2.0 - cap_mm / 2.0
-        tick_y = tick_baseline_mm / _STRIP_KEY_MM
-        for x_mm, text, align in (
-            ((bar_lo - gap_mm) / panel_mm, tick_texts[0], 'right'),
-            ((bar_lo + bar_w + gap_mm) / panel_mm, tick_texts[1], 'left'),
-        ):
-            key_ax.text(x_mm, tick_y, text, transform=key_ax.transAxes,
-                        ha=align, va='baseline', fontsize=key_pt,
-                        color=_STRIP_INK)
 
     # ---- shared caption --------------------------------------------------
     caption_ax = fig.add_axes([0.0, geom["caption_y0_mm"] / height_mm, 1.0,
                                _STRIP_CAPTION_MM / height_mm])
     caption_ax.set_axis_off()
-    caption_text = _strip_caption_text(
-        slice_index, provenance, slab_mm,
-        density_scale_note=density_image is not None,
-    )
+    caption_text = _strip_caption_text(slice_index, provenance, slab_mm)
     # Measured and shrunk if need be, exactly as the key rows are. The caption
-    # grows with the slice index, the rule name, the slab and the density note,
-    # and the figure is saved with its exact bbox, so an overlong line would be
-    # silently cut off at the canvas edge rather than wrap.
+    # grows with the slice index, the rule name and the slab, and the figure is
+    # saved with its exact bbox, so an overlong line would be silently cut off
+    # at the canvas edge rather than wrap.
     caption_pt = _fit_caption_fontsize(caption_ax, renderer, caption_text,
                                        _STRIP_CAPTION_PT)
     caption_ax.text(
@@ -1557,7 +1464,7 @@ def plot_report_qc_strip(
     sidecar = {
         "Subject": str(subject_id),
         "Panel": "report-qc-strip",
-        "Panels": ["DEC-FA", "CST density", "Extraction ROIs", "CST over FA"],
+        "Panels": ["DEC-FA", mask_label, "Extraction ROIs", "CST over FA"],
         "SliceIndex": int(slice_index),
         "SliceSelectionRule": provenance.get("rule"),
         "SliceSelectionProvenance": provenance,
@@ -1565,15 +1472,14 @@ def plot_report_qc_strip(
         "StreamlineCounts": {"left": len(left), "right": len(right)},
         "StreamlinesDrawn": {"left": min(len(left), max_streamlines),
                              "right": min(len(right), max_streamlines)},
-        # Three separate facts, because the old single "DensityVmax" held the
-        # display cap under a name that reads like a data maximum.
-        "DensityMaxFraction": density_max_fraction,
-        "DensityDisplayVmax": density_display_vmax,
-        "DensityDisplayPercentile": (_DENSITY_DISPLAY_PERCENTILE
-                                     if density_display_vmax is not None else None),
-        "DensityDisplayPercentileBasis": ("non-zero voxels"
-                                          if density_display_vmax is not None else None),
-        "DensityDisplayClipped": density_display_clipped,
+        # What panel 2 shows, disclosed so the panel can be audited without
+        # opening the derivatives tree: the source recorded by the mask
+        # product's own sidecar, plus the counts the reader sees projected.
+        "WmMaskProduct": (str(wm_mask_path) if wm_mask is not None else None),
+        "WmMaskSource": wm_mask_source,
+        "MaskLabel": mask_label,
+        "WmMaskVoxels": wm_mask_voxels,
+        "WmMaskSlabVoxels": wm_slab_voxels,
         "RoiSlabVoxelCounts": roi_slab_voxels,
         "DegradedPanels": degraded,
         "Seed": int(seed),

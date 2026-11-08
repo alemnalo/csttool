@@ -20,7 +20,13 @@ from ..defaults import (
     DEFAULT_MIN_LENGTH_PASSTHROUGH,
     DEFAULT_MAX_LENGTH_PASSTHROUGH,
     DEFAULT_SEED_FA_THRESHOLD,
+    DEFAULT_WM_METHOD,
+    DEFAULT_DAM_WM_THRESHOLD,
+    DEFAULT_DAM_LOW_SIGNAL,
+    DEFAULT_TRACKING_MODE,
+    DEFAULT_MIDLINE_TOLERANCE_MM,
 )
+from csttool.tracking.modules.wm_mask import WM_METHODS
 from .utils import add_io_arguments
 from .commands.check import cmd_check
 from .commands.doctor import cmd_doctor
@@ -378,6 +384,49 @@ def main() -> None:
         "--use-brain-mask-stop",
         action="store_true",
         help="Stop tracking at brain mask boundary in addition to FA threshold."
+    )
+    p_track.add_argument(
+        "--wm-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Path to a DWI-space white matter mask (NIfTI) to use as the "
+             "seeding and peak-estimation territory instead of csttool's "
+             "own segmentation. Must be 3D and already on the DWI grid "
+             "(same shape and affine); it is never resampled and never "
+             "morphologically edited. Any nonzero voxel counts as white "
+             "matter. Omit to select automatically (DAM on multi-shell "
+             "data, else the legacy FA-threshold mask)."
+    )
+    p_track.add_argument(
+        "--wm-method",
+        type=str,
+        default=DEFAULT_WM_METHOD,
+        choices=list(WM_METHODS),
+        help=f"How to obtain the white matter mask when --wm-mask is not "
+             f"given: 'auto' (default) uses DIPY's DAM tissue segmentation "
+             f"when the acquisition has >= 2 non-b0 shells and falls back to "
+             f"the legacy FA-threshold mask otherwise; 'dam' forces DAM "
+             f"(falls back with a warning if inapplicable); 'legacy' pins "
+             f"the historical dilate(FA > --fa-thr) mask for bit-exact "
+             f"reproducibility of earlier results."
+    )
+    p_track.add_argument(
+        "--dam-wm-threshold",
+        type=float,
+        default=DEFAULT_DAM_WM_THRESHOLD,
+        help=f"P-map slope threshold below which the DAM classifier calls a "
+             f"voxel white matter (default {DEFAULT_DAM_WM_THRESHOLD}). Only "
+             f"used when the DAM method is selected."
+    )
+    p_track.add_argument(
+        "--dam-low-signal",
+        type=float,
+        default=DEFAULT_DAM_LOW_SIGNAL,
+        help=f"Raw b=0 signal level below which the DAM classifier refuses to "
+             f"classify a voxel (default {DEFAULT_DAM_LOW_SIGNAL}). Lower this "
+             f"for datasets whose signal magnitude is small, or every voxel "
+             f"will be rejected and the mask falls back to legacy."
     )
     p_track.add_argument(
         "--out",
@@ -754,6 +803,109 @@ def main() -> None:
              "fitting and tracking. Must be 3D and already on the DWI grid "
              "(same shape and affine); it is never resampled. Any nonzero "
              "voxel counts as brain. Omit to use automatic masking."
+    )
+    p_run.add_argument(
+        "--wm-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Path to a DWI-space white matter mask (NIfTI) to use as the "
+             "seeding and peak-estimation territory instead of csttool's "
+             "own segmentation. Must be 3D and already on the DWI grid "
+             "(same shape and affine); it is never resampled and never "
+             "morphologically edited. Any nonzero voxel counts as white "
+             "matter. Omit to select automatically (DAM on multi-shell "
+             "data, else the legacy FA-threshold mask)."
+    )
+    p_run.add_argument(
+        "--wm-method",
+        type=str,
+        default=DEFAULT_WM_METHOD,
+        choices=list(WM_METHODS),
+        help="How to obtain the white matter mask when --wm-mask is not "
+             "given: 'auto' (default) uses DIPY's DAM tissue segmentation "
+             "when the acquisition has >= 2 non-b0 shells and falls back to "
+             "the legacy FA-threshold mask otherwise; 'dam' forces DAM "
+             "(falls back with a warning if inapplicable); 'legacy' pins "
+             "the historical dilate(FA > --fa-thr) mask for bit-exact "
+             "reproducibility of earlier results."
+    )
+    p_run.add_argument(
+        "--dam-wm-threshold",
+        type=float,
+        default=DEFAULT_DAM_WM_THRESHOLD,
+        help=f"P-map slope threshold below which the DAM classifier calls a "
+             f"voxel white matter (default {DEFAULT_DAM_WM_THRESHOLD}). Only "
+             f"used when the DAM method is selected."
+    )
+    p_run.add_argument(
+        "--dam-low-signal",
+        type=float,
+        default=DEFAULT_DAM_LOW_SIGNAL,
+        help=f"Raw b=0 signal level below which the DAM classifier refuses "
+             f"to classify a voxel (default {DEFAULT_DAM_LOW_SIGNAL}). Lower "
+             f"this for datasets whose signal magnitude is small."
+    )
+    p_run.add_argument(
+        "--tracking-mode",
+        type=str,
+        default=DEFAULT_TRACKING_MODE,
+        choices=["preferred", "legacy-fa"],
+        help="CST reconstruction architecture. 'preferred' is the role-"
+             "separated, PLIC-seeded, dual-target pipeline (brain support, "
+             "model mask, seed mask and stopping resolved independently; JHU "
+             "posterior-limb-of-internal-capsule seeds; permissive domain; "
+             "CMC when PVE maps are supplied, else ROI-constrained DWI-only). "
+             "'legacy-fa' reproduces the historical FA-seeded/FA-stopped "
+             f"behaviour for comparison (default: {DEFAULT_TRACKING_MODE})."
+    )
+    p_run.add_argument(
+        "--model-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Optional DWI-grid mask over which CSA peaks are estimated in "
+             "preferred mode. Never resampled; must match the FA grid. Omit to "
+             "use the (permissive) brain mask — the recommended default. An "
+             "external WM mask supplied here informs peak estimation only; it "
+             "does not become the seed or the stopping boundary."
+    )
+    p_run.add_argument(
+        "--seed-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Optional DWI-grid binary seed region overriding the JHU PLIC "
+             "seeds in preferred mode (e.g. a subject-specific deep-WM ROI). "
+             "Never resampled; must match the FA grid."
+    )
+    p_run.add_argument(
+        "--wm-pve", type=Path, default=None, metavar="PATH",
+        help="Continuous white-matter partial-volume map (DWI grid) for CMC "
+             "stopping in preferred mode. Requires --gm-pve and --csf-pve too."
+    )
+    p_run.add_argument(
+        "--gm-pve", type=Path, default=None, metavar="PATH",
+        help="Continuous grey-matter partial-volume map for CMC stopping."
+    )
+    p_run.add_argument(
+        "--csf-pve", type=Path, default=None, metavar="PATH",
+        help="Continuous CSF partial-volume map for CMC stopping."
+    )
+    p_run.add_argument(
+        "--midline-tolerance-mm",
+        type=float,
+        default=DEFAULT_MIDLINE_TOLERANCE_MM,
+        help=f"Allowed medial excursion before a streamline is excluded as "
+             f"commissural/contralateral (default {DEFAULT_MIDLINE_TOLERANCE_MM})."
+    )
+    p_run.add_argument(
+        "--save-tracking-diagnostics",
+        action="store_true",
+        help="In preferred mode, save one branch-level record per PLIC seed "
+             "direction plus all initiated branches. This runs a second, "
+             "deterministic tracking pass and can substantially increase "
+             "runtime and output size."
     )
 
     # Extraction options

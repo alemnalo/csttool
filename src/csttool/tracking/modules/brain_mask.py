@@ -28,18 +28,25 @@ AFFINE_ATOL = 1e-3
 AFFINE_RTOL = 1e-5
 
 
-def load_external_brain_mask(mask_path, dwi_shape, dwi_affine, verbose=False):
-    """Load, validate, and binarise a user-supplied DWI-space brain mask.
+def load_external_mask(mask_path, dwi_shape, dwi_affine, mask_name="mask",
+                       verbose=False):
+    """Load, validate, and binarise a user-supplied DWI-space mask.
+
+    Shared by the brain-mask and white-matter-mask resolvers, whose validation
+    contract is identical: 3D, already on the DWI grid, never resampled, any
+    nonzero finite voxel inside. ``mask_name`` only feeds the messages so a
+    failure names the mask the user actually supplied.
 
     Args:
-        mask_path (str | Path): Path to the NIfTI brain mask.
+        mask_path (str | Path): Path to the NIfTI mask.
         dwi_shape (tuple): Shape of the DWI array the mask must match. Only the
             first three axes are compared.
         dwi_affine (ndarray): 4x4 affine of the DWI the mask must match.
+        mask_name (str): Human-readable name for error and status messages.
         verbose (bool): Print mask statistics.
 
     Returns:
-        ndarray: 3D boolean mask, True inside the brain.
+        ndarray: 3D boolean mask, True inside the mask.
 
     Raises:
         FileNotFoundError: The mask file does not exist.
@@ -50,13 +57,13 @@ def load_external_brain_mask(mask_path, dwi_shape, dwi_affine, verbose=False):
 
     mask_path = Path(mask_path)
     if not mask_path.exists():
-        raise FileNotFoundError(f"External brain mask not found: {mask_path}")
+        raise FileNotFoundError(f"External {mask_name} not found: {mask_path}")
 
     try:
         mask_img = nib.load(str(mask_path))
     except Exception as exc:
         raise ValueError(
-            f"External brain mask could not be read as a NIfTI image "
+            f"External {mask_name} could not be read as a NIfTI image "
             f"({mask_path}): {type(exc).__name__}: {exc}"
         ) from exc
 
@@ -64,7 +71,7 @@ def load_external_brain_mask(mask_path, dwi_shape, dwi_affine, verbose=False):
 
     if mask_data.ndim != 3:
         raise ValueError(
-            f"External brain mask must be 3D, got {mask_data.ndim}D with shape "
+            f"External {mask_name} must be 3D, got {mask_data.ndim}D with shape "
             f"{mask_data.shape} ({mask_path}). Extract a single 3D volume first."
         )
 
@@ -72,9 +79,9 @@ def load_external_brain_mask(mask_path, dwi_shape, dwi_affine, verbose=False):
     mask_spatial = tuple(int(x) for x in mask_data.shape)
     if mask_spatial != dwi_spatial:
         raise ValueError(
-            f"External brain mask shape {mask_spatial} does not match the DWI "
+            f"External {mask_name} shape {mask_spatial} does not match the DWI "
             f"spatial shape {dwi_spatial} ({mask_path}). csttool does not "
-            f"resample brain masks — supply a mask already on the DWI grid."
+            f"resample masks — supply a mask already on the DWI grid."
         )
 
     dwi_affine = np.asarray(dwi_affine, dtype=float)
@@ -82,12 +89,12 @@ def load_external_brain_mask(mask_path, dwi_shape, dwi_affine, verbose=False):
     if not np.allclose(mask_affine, dwi_affine, rtol=AFFINE_RTOL, atol=AFFINE_ATOL):
         max_diff = float(np.abs(mask_affine - dwi_affine).max())
         raise ValueError(
-            f"External brain mask affine is not compatible with the DWI affine "
+            f"External {mask_name} affine is not compatible with the DWI affine "
             f"(max element difference {max_diff:.6g}, tolerance atol="
             f"{AFFINE_ATOL:g}/rtol={AFFINE_RTOL:g}) ({mask_path}).\n"
             f"  mask affine:\n{mask_affine}\n"
             f"  DWI affine:\n{dwi_affine}\n"
-            f"csttool does not resample brain masks — supply a mask already on "
+            f"csttool does not resample masks — supply a mask already on "
             f"the DWI grid."
         )
 
@@ -97,25 +104,25 @@ def load_external_brain_mask(mask_path, dwi_shape, dwi_affine, verbose=False):
     if not np.isfinite(numeric).all():
         n_bad = int((~np.isfinite(numeric)).sum())
         raise ValueError(
-            f"External brain mask contains {n_bad:,} non-finite (NaN/Inf) "
+            f"External {mask_name} contains {n_bad:,} non-finite (NaN/Inf) "
             f"values ({mask_path})."
         )
 
     # Any nonzero finite value counts as inside the mask: this accepts 0/1
     # masks, 0/255 masks, and probability maps thresholded upstream.
-    brain_mask = numeric != 0
+    mask = numeric != 0
 
-    n_inside = int(brain_mask.sum())
+    n_inside = int(mask.sum())
     if n_inside == 0:
         raise ValueError(
-            f"External brain mask contains no nonzero voxels ({mask_path})."
+            f"External {mask_name} contains no nonzero voxels ({mask_path})."
         )
 
     if verbose:
-        coverage = n_inside / brain_mask.size * 100
+        coverage = n_inside / mask.size * 100
         print(f"    • External mask: {n_inside:,} voxels ({coverage:.1f}%)")
 
-    return brain_mask
+    return mask
 
 
 def apply_brain_mask(data, brain_mask):
@@ -169,10 +176,11 @@ def resolve_brain_mask(data, gtab, affine, brain_mask_path=None, verbose=False):
         if verbose:
             print(f"  → Brain mask source: external brain mask: {brain_mask_path}")
 
-        brain_mask = load_external_brain_mask(
+        brain_mask = load_external_mask(
             brain_mask_path,
             dwi_shape=np.asarray(data).shape,
             dwi_affine=affine,
+            mask_name="brain mask",
             verbose=verbose,
         )
         masked_data = apply_brain_mask(data, brain_mask)

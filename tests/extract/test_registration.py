@@ -1,10 +1,14 @@
-import pytest
-import numpy as np
+import json
 from unittest.mock import patch, MagicMock
+
+import nibabel as nib
+import numpy as np
+import pytest
 from csttool.extract.modules.registration import (
     compute_affine_registration,
     compute_syn_registration,
-    load_mni_template
+    load_mni_template,
+    save_registration_transforms,
 )
 
 def test_load_mni_template():
@@ -63,3 +67,38 @@ def test_compute_syn_registration(synthetic_image_data, synthetic_affine):
         
         mock_syn_inst.optimize.assert_called()
         assert result == mock_mapping
+
+
+def test_save_registration_transforms_preserves_fields_and_geometry(tmp_path):
+    mapping = MagicMock()
+    mapping.dim = 3
+    mapping.is_inverse = False
+    mapping.disp_shape = np.array([3, 4, 5])
+    mapping.disp_grid2world = np.diag([2.0, 2.0, 2.0, 1.0])
+    mapping.domain_shape = np.array([3, 4, 5])
+    mapping.domain_grid2world = mapping.disp_grid2world
+    mapping.codomain_shape = np.array([6, 7, 8])
+    mapping.codomain_grid2world = np.diag([1.0, 1.0, 1.0, 1.0])
+    mapping.prealign = np.diag([1.1, 1.0, 0.9, 1.0])
+    forward = np.zeros((3, 4, 5, 3), dtype=np.float32)
+    backward = np.ones_like(forward)
+    mapping.get_forward_field.return_value = forward
+    mapping.get_backward_field.return_value = backward
+    affine_map = MagicMock()
+    affine_map.affine = mapping.prealign
+
+    paths = save_registration_transforms(
+        mapping, affine_map, tmp_path, "sub-test"
+    )
+
+    np.testing.assert_array_equal(np.load(paths["affine"]), mapping.prealign)
+    np.testing.assert_array_equal(
+        np.asarray(nib.load(paths["syn_forward"]).dataobj), forward
+    )
+    np.testing.assert_array_equal(
+        np.asarray(nib.load(paths["syn_backward"]).dataobj), backward
+    )
+    metadata = json.loads(paths["metadata"].read_text())
+    assert metadata["displacement_units"] == "physical millimetres"
+    assert metadata["dipy_mapping"]["displacement_shape"] == [3, 4, 5]
+    assert metadata["dipy_mapping"]["codomain_shape"] == [6, 7, 8]

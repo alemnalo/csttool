@@ -256,3 +256,65 @@ def test_sample_scalar_per_streamline_empty(synthetic_affine):
     fa = _gradient_fa_map()
     out = sample_scalar_per_streamline([], fa, synthetic_affine)
     assert len(out) == 0
+
+
+def test_preferred_sampling_uses_tensor_domain_and_not_normal_thresholds():
+    from csttool.metrics.modules.unilateral_analysis import sample_scalar_nodes
+
+    scalar = np.full((4, 4, 4), 0.001, dtype=float)
+    scalar[1, 1, 1] = 0.025
+    tensor_valid = np.ones_like(scalar, dtype=bool)
+    tensor_valid[2, 2, 2] = False
+    points = np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]])
+
+    values, valid, reasons = sample_scalar_nodes(
+        points,
+        scalar,
+        np.eye(4),
+        tensor_valid_mask=tensor_valid,
+        scalar_name="md",
+    )
+    assert values[0] == pytest.approx(0.025)
+    assert valid.tolist() == [True, False]
+    assert reasons["outside_tensor_fit_domain"] == 1
+    assert reasons["mathematically_invalid"] == 0
+
+
+def test_preferred_sampling_rejects_only_mathematically_invalid_diffusivity():
+    from csttool.metrics.modules.unilateral_analysis import sample_scalar_nodes
+
+    scalar = np.full((3, 3, 3), 0.001, dtype=float)
+    scalar[1, 1, 1] = -0.001
+    values, valid, reasons = sample_scalar_nodes(
+        [[1.0, 1.0, 1.0]],
+        scalar,
+        np.eye(4),
+        tensor_valid_mask=np.ones_like(scalar, dtype=bool),
+        scalar_name="rd",
+    )
+    assert np.isnan(values[0])
+    assert valid.tolist() == [False]
+    assert reasons["mathematically_invalid"] == 1
+
+
+def test_valid_extrema_include_streamline_point_and_world_location():
+    scalar = np.full((4, 4, 4), 0.001, dtype=float)
+    scalar[2, 1, 1] = 0.025
+    streamline = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+    values, validity = sample_scalar_along_tract(
+        [streamline],
+        scalar,
+        np.eye(4),
+        tensor_valid_mask=np.ones_like(scalar, dtype=bool),
+        scalar_name="ad",
+        return_validity=True,
+    )
+    assert values.max() == pytest.approx(0.025)
+    maximum = validity["observed_valid_extrema"]["maximum"]
+    assert maximum == {
+        "value": pytest.approx(0.025),
+        "streamline_index": 0,
+        "point_index": 1,
+        "world_coordinate_mm": [2.0, 1.0, 1.0],
+    }
+    assert validity["numeric_threshold_clipping"] is False

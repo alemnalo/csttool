@@ -57,7 +57,9 @@ The session level (`ses-<label>/`) is omitted when `--session-id` is not set.
 | `*_space-orig_model-DTI_param-RD_dwimap.nii.gz` | Radial diffusivity |
 | `*_space-orig_model-DTI_param-AD_dwimap.nii.gz` | Axial diffusivity |
 | `*_space-orig_desc-V1_dwimap.nii.gz` | Principal diffusion eigenvector (V1) in the anatomical world (RAS+) frame. Written as a 5-D `(X,Y,Z,1,3)` float32 volume with `NIFTI_INTENT_VECTOR` so the header alone declares it a vector field. The eigenvectors are rotated from the b-vec (voxel) frame into the world frame by the orthonormal polar factor of the affine; the sidecar records `VectorFrame: "world-RAS"`, the affine determinant, obliquity and shear diagnostics so a reader can reproduce the DEC from this file + the FA map. Unconditional whenever `track` runs. |
-| `*_space-orig_desc-CSTdensity_dwimap.nii.gz` | CST streamline density: the fraction of distinct retained bilateral CST streamlines that visit each voxel at least once. `float32`, range `[0,1]`, on the native FA grid. The sidecar records the exact definition, the denominator (`StreamlineCountLeft + StreamlineCountRight`), the volume's true maximum (`MaxFraction`) and whether a step-size gap guard densified the streamlines. `MaxFraction` is the data's maximum and is **not** the report's colour-scale cap — the QC strip saturates at the 99th percentile of non-zero voxels and records that separately as `DensityDisplayVmax`. Unconditional whenever `extract` runs. |
+| `*_space-orig_desc-CSTdensity_dwimap.nii.gz` | CST streamline density: the fraction of distinct retained bilateral CST streamlines that visit each voxel at least once. `float32`, range `[0,1]`, on the native FA grid. The sidecar records the exact definition, the denominator (`StreamlineCountLeft + StreamlineCountRight`), the volume's true maximum (`MaxFraction`) and whether a step-size gap guard densified the streamlines. Feeds the standalone density panel, the tissue-plausibility panel and the report QC strip's slice selection. Unconditional whenever `extract` runs. |
+| `*_space-orig_desc-WM_mask.nii.gz` | White-matter mask used by the whole-brain tracking stage (`uint8`, 0/1, native DWI/FA grid). Source per the `--wm-mask`/`--wm-method` policy chain (external → DAM → legacy FA-threshold); the sidecar records `WmMaskSource`, `WmMethod`, parameters, voxel count and fallback state. Preferred PLIC extraction does **not** use this product: its CSA model domain is the brain mask and is reported separately. |
+| `*_space-orig_desc-preferredSeed{Left,Right}_mask.nii.gz` | Exact hemisphere-specific seed masks consumed by preferred-mode `LocalTracking` (`uint8`, 0/1, original DWI grid). Written only for preferred mode. Sidecars record voxel count, physical hemisphere, atlas/external source, original↔RAS orientation transform, final physical centroids and registration provenance. |
 
 Each scalar map has a `.json` derivative sidecar recording `Sources`, `Description`,
 `CommandLine`, and `GeneratedAt`. The V1 and density sidecars additionally carry
@@ -77,6 +79,22 @@ FA grid specifically so a reader (and the report's QC strip) can overlay it on
 FA, the density volume and the streamlines with no resampling. Its sidecar
 carries `Labels` (the value → name map), `Space: "orig (FA grid)"` and
 `VoxelCounts` per label alongside the standard keys.
+
+#### `transforms/` — exact registration products
+
+Preferred extraction preserves the registration objects that generated its
+atlas-derived masks under `dwi/transforms/`:
+
+| File | Description |
+| --- | --- |
+| `{subject}_mni_to_subject_affine.npy` | Exact 4×4 affine transform used before SyN |
+| `{subject}_syn_forward_displacement.nii.gz` | Forward SyN displacement field |
+| `{subject}_syn_backward_displacement.nii.gz` | Backward SyN displacement field |
+| `{subject}_registration_transform.json` | Transform direction, fixed/moving grids, orientation metadata and the three file names above |
+
+These files are ancillary registration products rather than standard BIDS
+entities. Paths inside the JSON are basenames so the record remains valid after
+the staging directories are moved into the derivatives tree.
 
 #### `tractography/` — tractograms
 
@@ -187,7 +205,7 @@ profile sampling, not the ones extraction retained; the difference is recorded a
 | `tissue` | Density-weighted FA–MD joint histogram with the free-water corner outlined |
 | `v1angle` | Streamline tangent vs local V1, along the tract (median, IQR, 5–95) |
 | `dispersion-fa` | FA profile dispersion across streamlines (median, IQR, 5–95) |
-| `qc-strip` | The 1×4 report QC strip embedded in the PDF (DEC-FA, CST density, extraction ROIs, CST over FA on one shared coronal slice) |
+| `qc-strip` | The 1×4 report QC strip embedded in the PDF (DEC-FA, white matter mask, extraction ROIs, CST over FA on one shared coronal slice) |
 | `saturation` | Mean FA vs subsample size, with the bootstrap SE at full N |
 | `attrition` | Streamline survival funnel from extraction to profile, plus per-point retention |
 | `nodehomology` | Per-node world Z and streamline-length distributions, left vs right |
@@ -209,7 +227,7 @@ placed by CSS at that same width, so the printed height is the designed height:
 | Figure | Size | Contents |
 | --- | --- | --- |
 | Along-tract profile matrix | 194 × 94 mm | FA / MD / RD / AD profiles, left and right, each line backed by the per-node **interquartile range across contributing streamlines**. The centre line is the mean — the same array the twelve regional values are derived from — so the band is dispersion around the published number, not a different statistic. |
-| Report QC strip | 194 mm wide, 42–46.9 mm tall | 1×4: DEC-FA, CST density, extraction ROIs, final CST over FA, all on **one** shared coronal slice. Each panel carries its own title and its own key — the DEC axis key, the density colourbar, the ROI colours, the hemisphere counts — with a single shared caption underneath for the facts common to all four. The density colourbar is labelled **Fraction of bilateral CST streamlines** (the denominator is `n_left + n_right`, so a voxel every left streamline visits reads `n_left / n_total`, not 100%), its endpoints are shown as percentages, and its upper endpoint carries `≥` because the colour scale is capped at the 99th percentile of non-zero voxels rather than at the true maximum. Replaces the earlier 1×3 triptych, which showed the same information from three angles. |
+| Report QC strip | 194 mm wide, 42–46.9 mm tall | 1×4: DEC-FA, white matter mask, extraction ROIs, final CST over FA, all on **one** shared coronal slice. Each panel carries its own title and its own key — the DEC axis key, the WM mask swatch with its source, the ROI colours, the hemisphere counts — with a single shared caption underneath for the facts common to all four. The WM panel shows the persisted `desc-WM_mask` product slab-projected through the display slab, so the reader sees the actual seeding/stopping territory and the source that produced it (external / DAM / legacy). Replaces the earlier 1×3 triptych. |
 
 Every panel is the same three zones in the same order — title, image, then a
 fixed-height key region — so the four columns align band for band whatever their
@@ -218,14 +236,15 @@ strip's height is derived from the subject's coronal aspect ratio rather than
 fixed, so the panels keep the same physical scale on any acquisition matrix; it
 is bounded so the one-page budget holds. The CSS sets the width only.
 
-Every strip panel degrades independently: a missing world-frame V1, density
-volume or ROI segmentation leaves a labelled grayscale-FA slot in place rather
+Every strip panel degrades independently: a missing world-frame V1, WM mask
+product or ROI segmentation leaves a labelled grayscale-FA slot in place rather
 than reflowing the strip to three panels, so a reader can see *which* question
 went unanswered. The shared slice comes from the same documented fallback chain
 the standalone panels use (`bilateral_occupancy` → `surviving_hemisphere` →
-`roi_occupancy` → `anatomical_centroid`), recorded with the slab thickness,
-streamline counts, density `vmax` and per-ROI slab voxel counts in the strip's
-JSON sidecar.
+`roi_occupancy` → `anatomical_centroid`, still driven by the CST density volume
+even though that volume no longer renders), recorded with the slab thickness,
+streamline counts, WM mask voxel counts and per-ROI slab voxel counts in the
+strip's JSON sidecar.
 
 #### Tabular outputs
 
@@ -284,8 +303,8 @@ the flat table.
 | `*_log-import.json` | DICOM import report: converter used, `fallback_used`, warnings, scanner manufacturer |
 | `*_log-series.json` | DICOM series analysis: acquisition parameters, suitability score |
 | `*_log-preproc.json` | Preprocessing report: ordered stage ledger, provenance block, legacy parameter summary — see [below](#preprocessing-report) |
-| `*_log-tracking.json` | Tracking report: parameters, streamline counts, timing |
-| `*_log-extraction.json` | Extraction report: ROI approach, streamline counts per hemisphere |
+| `*_log-tracking.json` | Tracking report: actual low-b tensor selection, selected CSA shell and fitted volume counts, mask sources, tracking parameters, streamline counts and timing |
+| `*_log-extraction.json` | Extraction report: actual extraction/tracking mode, seed/model/stopping roles, direction-model selection, registration orientation/transform files, QC gates and streamline counts per hemisphere |
 
 ---
 

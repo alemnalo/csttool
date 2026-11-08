@@ -24,6 +24,16 @@ In **probabilistic** tractography, the local direction at each step is sampled f
 
 **csttool uses deterministic tractography by design.** The motivation is methodological transparency: identical inputs must produce identical streamlines so that downstream metric differences are attributable to data, not stochasticity. This rationale and its trade-offs are discussed further in [Design Decisions](design-decisions.md) and [Known Limitations](limitations.md).
 
+## Tensor scalars: low-b DTI
+
+FA, MD, RD, AD and the principal tensor direction are fitted from b0 images
+plus diffusion-weighted observations at \(b \leq 1200\) s/mm². Higher-b
+observations are excluded because the mono-exponential tensor signal model is
+not valid across high-b multi-shell data. If fewer than six low-b observations
+exist, csttool uses the lowest shell with at least six observations and records
+that fallback. The tracking report records the input and fitted volume counts,
+maximum fitted b-value and fit method.
+
 ## Direction estimation: CSA-ODF
 
 The raw DTI eigenvector $\mathbf{v}_1$ is a reasonable propagation direction in voxels with a single dominant fibre, but it fails in crossing-fibre voxels (see [Diffusion MRI](diffusion-mri.md#dti-limitations-in-crossing-fibre-voxels)). csttool therefore uses the **constant solid angle ODF** (CSA-ODF) of [Aganj et al., 2010](references.md#aganj2010reconstruction).
@@ -36,17 +46,32 @@ The $r^2$ factor — the spherical volume element — distinguishes CSA-ODF from
 
 $$ \mathrm{ODF}(\hat{u}) = \tfrac{1}{4\pi} + \tfrac{1}{16\pi^2}\, \mathrm{FRT}\!\left\{\nabla_b^2 \ln\!\left(-\ln \tilde{E}(\hat{u})\right)\right\} $$
 
-where FRT is the Funk-Radon transform and $\nabla_b^2$ is the Laplace-Beltrami operator. csttool expands $\ln(-\ln \tilde{E})$ in a real symmetric spherical-harmonic basis of order $l$ (default `--sh-order 6`, giving $R = (l+1)(l+2)/2 = 28$ coefficients), and the operators above become per-coefficient scalar multiplications. The dominant peak of the local CSA-ODF replaces the DTI eigenvector in the deterministic step rule above, giving an accurate direction field in crossing-fibre voxels while preserving deterministic reproducibility.
+where FRT is the Funk-Radon transform and $\nabla_b^2$ is the Laplace-Beltrami operator. csttool expands $\ln(-\ln \tilde{E})$ in a real symmetric spherical-harmonic basis of order $l$ (default `--sh-order 6`, giving $R = (l+1)(l+2)/2 = 28$ coefficients), and the operators above become per-coefficient scalar multiplications. Retained ODF peaks replace the DTI eigenvector in the deterministic step rule above, allowing propagation through crossing-fibre voxels while preserving deterministic reproducibility.
 
-CSA-ODF is **single-shell**: it requires only one non-zero b-value. This is a deliberate choice — multi-shell methods such as constrained spherical deconvolution (CSD) demand acquisition protocols that are not always available clinically.
+CSA-ODF is **single-shell**. On multi-shell data, csttool uses every b0 volume
+plus one non-zero shell: the best-sampled shell between 700 and 3000 s/mm²,
+with ties resolved toward b=2000 s/mm². If that range is unavailable, the
+best-sampled remaining supported shell is used. Extremely undersampled inputs
+with no shell of six directions retain the best-sampled shell only as an
+explicitly warned, underdetermined diagnostic fallback. The selected shell,
+tolerance, direction count, fitted volume count, fallback and validated SH
+order are written to provenance.
+This keeps the implemented fit consistent with the CSA signal model; supplying
+multi-shell data does not cause all shells to be pooled silently.
 
 ## Stopping criteria
 
-csttool combines:
+Stopping depends on the selected tracking architecture:
 
-- **FA threshold** — `--fa-thr 0.2` by default. Streamlines stop where the FA map drops below this value (typical white-matter / grey-matter boundary).
-- **Streamline length** — `--min-length 20.0` and `--max-length 200.0` mm reject implausibly short or long bundles.
-- **Brain mask** — with `--use-brain-mask-stop`, the brain mask becomes a hard boundary.
+- **Preferred PLIC mode** uses continuous WM/GM/CSF partial-volume maps with
+  CMC when all three are supplied. Otherwise it uses the brain mask as a
+  permissive propagation domain. FA, GFA and peak amplitude are not hard
+  stopping surfaces. Ipsilateral motor and inferior inclusion targets,
+  curvature, midline and length checks determine acceptance.
+- **Legacy FA mode** stops at the FA threshold (`--fa-thr 0.2` by default);
+  `--use-brain-mask-stop` additionally enforces the brain-mask boundary.
+- **Length limits** reject implausibly short or long streamlines after
+  propagation.
 
 ## Atlas-based ROI filtering
 

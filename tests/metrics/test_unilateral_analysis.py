@@ -178,11 +178,12 @@ class TestBootstrapStandardErrors:
 # ---------------------------------------------------------------------------
 
 class TestEmptyBundle:
-    def test_bands_are_zeros_and_ses_are_none(self):
+    def test_empty_profiles_are_missing_and_ses_are_none(self):
         block = _block([], _scalar_map(11))
-        assert block["profile"] == [0.0] * 20
-        assert block["profile_p25"] == [0.0] * 20
-        assert block["profile_p75"] == [0.0] * 20
+        assert block["profile"] == [None] * 20
+        assert block["profile_p25"] == [None] * 20
+        assert block["profile_median"] == [None] * 20
+        assert block["profile_p75"] == [None] * 20
         assert block["profile_n"] == 0
         assert block["bootstrap_se"] is None
         for key in ("pontine_se", "plic_se", "precentral_se"):

@@ -9,6 +9,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--tracking-mode preferred`: role-separated, PLIC-seeded CST pipeline**
+  (`extract/modules/plic_cst.py`, `extract/modules/plic_seeding.py`). Brain
+  support, model-fit mask, seed mask and stopping model are resolved as
+  independent inputs instead of one overloaded FA/WM mask — the conflation that
+  collapsed CST recovery to 1 left / 17 right when an anatomical WM mask was
+  used as the seed. Seeds are the bilateral posterior limb of the internal
+  capsule from the **JHU ICBM-DTI-81** atlas (integrated through the data
+  manifest + loader, warped by the existing SyN transform, hemisphere-clamped
+  and position/overlap-validated). The model mask defaults to the permissive
+  brain mask (not FA ≥ 0.2). Stopping is **CMC** from continuous WM/GM/CSF PVE
+  (`--wm-pve/--gm-pve/--csf-pve`; GM valid terminal, CSF invalid) when supplied;
+  otherwise the instantiated criterion is
+  `BinaryStoppingCriterion(brain_mask)`, which stops at the brain-mask
+  propagation boundary. It is **not ACT** and uses no diffusion-scalar hard
+  stop. A valid CST connects the PLIC seed to ipsilateral motor and inferior
+  targets; full accepted trajectories remain diagnostic artifacts, while the
+  standard tractometry derivative is bounded from the last inferior-target
+  sample to the first motor-target sample and oriented inferior→superior.
+  New semantic CLI inputs on `run`: `--tracking-mode`, `--model-mask`,
+  `--seed-mask`, `--wm-pve/--gm-pve/--csf-pve`,
+  `--midline-tolerance-mm`. Per-subject QC gates flag a starved run (many
+  generated, near-zero target-valid) as a **failure**, never a healthy
+  extraction. `--tracking-mode legacy-fa` reproduces the historical behaviour.
+  The whole-brain track stage no longer reuses the resolved WM mask as a seed
+  territory (it feeds CSA peak estimation only); FA-threshold seeding is
+  unchanged there.
+
+  **Validation (this task).** A second audit found that the first preferred
+  validation was not physically valid: registration canonicalized the LAS DWI
+  to RAS, but its RAS PLIC/motor arrays were then consumed with the original LAS
+  DWI affine. Equal shapes hid a physical left/right mirror. Preferred mode now
+  inverse-reorients every registration-derived mask onto the original tracking
+  grid, validates physical side centroids, fits DTI only to b0 + b≤1200
+  s/mm², and fits CSA-ODF to one automatically selected supported shell (b=2400
+  for this 15-shell acquisition). End-to-end results are 652 left / 570 right
+  for sub_005 (count LI +0.067) and 1265 / 1363 for sub_024 (LI −0.037);
+  both pass bilateral recovery, motor coverage, inferior continuity,
+  no-collapse, plausibility and asymmetry gates, and fixed reruns reproduce the
+  retained bundles exactly. `DEFAULT_TRACKING_MODE` remains `legacy-fa`: two
+  subjects validate the repair but are not a cohort-wide basis for changing a
+  public default.
+
+- **Corrected preferred-mode provenance, QC and target-bounded tractometry.**
+  Preferred execution now skips the unused whole-brain tractogram, DAM
+  classification and FA-threshold WM-mask construction; its tracking
+  provenance contains only the low-b DTI scalar/model-support stage and the
+  criterion actually instantiated during PLIC extraction. The metrics JSON
+  now carries the complete preferred QC block: per-hemisphere PLIC seeds,
+  initiated branches, target reach counts/fractions, length and midline
+  exclusions, contralateral-target contacts, target coverage, retained counts,
+  deterministic bundle identity, registered thresholds, signed laterality,
+  coordinate-frame evidence and an overall result.
+
+  Standard metrics now consume target-bounded CST segments; full accepted
+  trajectories are preserved separately. Scalar validity is based on the
+  persisted tensor-fit domain and mathematical constraints, not arbitrary
+  “normal” cutoffs. Mathematically valid extrema are retained with their
+  streamline point/world location. Profiles expose mean, median, IQR and
+  per-node support; nodes below 50% support are missing/gapped. Streamline-,
+  point- and voxel-weighted quantities are explicitly labelled. The PDF adds a
+  compact preferred QC strip and wraps long method values without overlap.
+  Corrected target-bounded outputs contain 566 left / 286 right streamlines
+  for sub_005 (count LI +0.329; volume LI +0.155) and 1148 / 1177 for
+  sub_024 (count LI -0.012; volume LI +0.078). Both pass registered QC and
+  coordinate-frame gates; repeated seed-42 runs reproduce bounded and full
+  tractogram SHA-256 values exactly.
+
+- **White-matter mask as a resolved policy chain** (`tracking/modules/wm_mask.py`).
+  The WM mask that seeds tractography and gates CSA peak estimation is now
+  selected, not hard-coded: an external `--wm-mask` (same never-resampled
+  contract as `--brain-mask`) wins; otherwise `--wm-method auto` uses DIPY's
+  DAM tissue segmentation (`dipy.segment.tissue.dam_classifier`, Cheng et
+  al. 2020 — chosen because it needs no T1w and is deterministic) on
+  multi-shell acquisitions, and falls back to the historical
+  `dilate((FA > fa_thr) & brain_mask)` mask on single-shell data, on an empty
+  DAM result, or whenever `--wm-method legacy` pins it for bit-exact
+  reproducibility. Only the legacy mask is dilated; external and DAM masks are
+  used verbatim. Failures fall back with a recorded `fallback_reason`, never
+  abort. New flags on `track` and `run`: `--wm-mask`, `--wm-method`,
+  `--dam-wm-threshold`, `--dam-low-signal`. The DAM thresholds are recorded in
+  the tracking provenance block; `low_signal_threshold` is in raw signal
+  units and small-magnitude datasets must lower it. The generic
+  `load_external_mask` (in `brain_mask.py`) replaces the brain-only loader,
+  which was its only special case.
+
+- **New data product `*_space-orig_desc-WM_mask.nii.gz`** — the WM mask used
+  by the whole-brain tracking stage, written unconditionally by `track`
+  (`{stem}_wm_mask.nii.gz` in the stage tree, rescued to BIDS `dwi/` by `run`
+  before cleanup). Preferred PLIC extraction instead records its brain-mask
+  model domain explicitly and does not claim to use this DAM/legacy product.
+  The sidecar records `WmMaskSource` (external/dam/legacy), `WmMethod`, DAM
+  parameters, voxel count, fraction of brain, whether the mask was dilated,
+  the legacy `fa_thr`, and the fallback reason.
+
+- **Report QC strip: panel 2 is now the mask that constrained the reported
+  tracking result, not CST density.** Legacy reports show the persisted
+  white-matter seed/model mask and its external/DAM/legacy source. Preferred
+  reports instead show the brain-mask CSA model domain and label it
+  **Model mask**; they no longer display an unused DAM mask as though preferred
+  PLIC tracking consumed it. The density volume is unchanged: it still drives
+  slice selection and feeds the standalone density and tissue-plausibility
+  panels. The strip sidecar records the product, source, label and voxel counts;
+  HTML alt text follows the dynamic panel label.
+
+- **Preferred seed masks and registration transforms are now first-class
+  derivatives.** The exact left/right PLIC masks consumed by `LocalTracking`
+  are preserved as `desc-preferredSeed{Left,Right}_mask` NIfTIs with physical
+  centroid/orientation sidecars. The affine matrix, forward and backward SyN
+  displacement fields, and a self-describing transform JSON survive staging
+  cleanup under `dwi/transforms/`; transform JSON paths are rewritten to
+  portable basenames.
+
+**Fixes from the 20260922 real-data runs.** (1) `segment_wm_dam` sanitizes its
+input before calling DIPY: eddy-corrected DWI commonly carries negative
+interpolation noise, and DIPY's per-voxel log fit raised `Input y contains
+NaN` on the CDMD multi-shell data, aborting every DAM classification (the
+policy chain correctly fell back to legacy, but DAM was never actually tested).
+NaNs are replaced by 0 and negatives clipped to 0 — this only adds voxels to
+the low-signal exclusion, never manufacturing WM — and the sidecar records
+`input_sanitized`. (2) The strip's WM panel switched from a muted blue
+translucent fill to a saturated magenta (`style.WM_MASK = "#e7298a"`) with a
+same-hue outline: the print review showed the fill disappearing against the
+FA background at 48 mm panel width.
+
 - **`csttool.viz.layout` — shared millimetre-based figure layout.** The one-page
   report has always been laid out at its final physical size, so 1 Matplotlib
   point printed as 1 point; every other figure was sized in arbitrary inches and

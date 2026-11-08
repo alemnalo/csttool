@@ -25,7 +25,7 @@ import pytest
 
 from csttool.tracking.modules.brain_mask import (
     apply_brain_mask,
-    load_external_brain_mask,
+    load_external_mask,
     resolve_brain_mask,
 )
 
@@ -111,7 +111,7 @@ def test_shape_mismatch_raises(tmp_path):
     bad = _write_mask(tmp_path / "bad_shape.nii.gz",
                       np.ones((6, 7, 9), dtype=np.int16))
     with pytest.raises(ValueError, match="does not match the DWI spatial shape"):
-        load_external_brain_mask(bad, SHAPE + (5,), AFFINE)
+        load_external_mask(bad, SHAPE + (5,), AFFINE)
 
 
 def test_affine_mismatch_raises(tmp_path):
@@ -120,7 +120,7 @@ def test_affine_mismatch_raises(tmp_path):
     bad = _write_mask(tmp_path / "bad_affine.nii.gz",
                       np.ones(SHAPE, dtype=np.int16), affine=shifted)
     with pytest.raises(ValueError, match="affine is not compatible"):
-        load_external_brain_mask(bad, SHAPE + (5,), AFFINE)
+        load_external_mask(bad, SHAPE + (5,), AFFINE)
 
 
 def test_negligible_affine_difference_is_accepted(tmp_path):
@@ -129,14 +129,14 @@ def test_negligible_affine_difference_is_accepted(tmp_path):
     jittered[1, 3] += 1e-6
     ok = _write_mask(tmp_path / "jitter.nii.gz",
                      np.ones(SHAPE, dtype=np.int16), affine=jittered)
-    mask = load_external_brain_mask(ok, SHAPE + (5,), AFFINE)
+    mask = load_external_mask(ok, SHAPE + (5,), AFFINE)
     assert mask.all()
 
 
 def test_empty_mask_raises(tmp_path):
     empty = _write_mask(tmp_path / "empty.nii.gz", np.zeros(SHAPE, dtype=np.int16))
     with pytest.raises(ValueError, match="no nonzero voxels"):
-        load_external_brain_mask(empty, SHAPE + (5,), AFFINE)
+        load_external_mask(empty, SHAPE + (5,), AFFINE)
 
 
 def test_non_finite_mask_raises(tmp_path):
@@ -144,19 +144,19 @@ def test_non_finite_mask_raises(tmp_path):
     data[0, 0, 0] = np.nan
     bad = _write_mask(tmp_path / "nan.nii.gz", data)
     with pytest.raises(ValueError, match="non-finite"):
-        load_external_brain_mask(bad, SHAPE + (5,), AFFINE)
+        load_external_mask(bad, SHAPE + (5,), AFFINE)
 
 
 def test_four_dimensional_mask_raises(tmp_path):
     bad = _write_mask(tmp_path / "mask4d.nii.gz",
                       np.ones(SHAPE + (1,), dtype=np.int16))
     with pytest.raises(ValueError, match="must be 3D"):
-        load_external_brain_mask(bad, SHAPE + (5,), AFFINE)
+        load_external_mask(bad, SHAPE + (5,), AFFINE)
 
 
 def test_missing_mask_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        load_external_brain_mask(tmp_path / "nope.nii.gz", SHAPE + (5,), AFFINE)
+        load_external_mask(tmp_path / "nope.nii.gz", SHAPE + (5,), AFFINE)
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +172,7 @@ def test_non_binary_values_are_binarised(tmp_path):
     data[3] = 1e-8
     path = _write_mask(tmp_path / "graded.nii.gz", data)
 
-    mask = load_external_brain_mask(path, SHAPE + (5,), AFFINE)
+    mask = load_external_mask(path, SHAPE + (5,), AFFINE)
 
     assert mask.dtype == np.bool_
     assert mask[0].all() and mask[1].all() and mask[2].all() and mask[3].all()
@@ -265,6 +265,10 @@ def _run_cmd_track(tmp_path, **arg_overrides):
             patch("csttool.preprocess.modules.background_segmentation."
                   "background_segmentation") as mock_bg, \
             patch.object(track_mod, "fit_tensors") as mock_fit, \
+            patch.object(
+                track_mod, "tensor_validity_mask",
+                return_value=np.ones(SHAPE, dtype=bool),
+            ), \
             patch.object(track_mod, "estimate_directions"), \
             patch.object(track_mod, "seed_and_stop") as mock_seed, \
             patch.object(track_mod, "run_tractography") as mock_track, \
@@ -280,6 +284,8 @@ def _run_cmd_track(tmp_path, **arg_overrides):
         mock_track.return_value = []
         mock_save.return_value = {
             "tractogram": "t.trk", "fa_map": "fa.nii.gz", "md_map": "md.nii.gz",
+            "model_mask": "model.nii.gz",
+            "tensor_valid_mask": "tensor-valid.nii.gz",
         }
 
         result = track_mod.cmd_track(args)
@@ -310,6 +316,21 @@ def test_cmd_track_with_brain_mask_bypasses_segmentation(tmp_path, valid_mask_fi
     params = mock_save.call_args.kwargs["tracking_params"]
     assert params["brain_mask_source"] == "external"
     assert params["brain_mask_path"] == str(valid_mask_file)
+
+def test_preferred_scalar_stage_has_no_fa_or_dam_provenance(tmp_path):
+    result, _, mock_fit, mock_save = _run_cmd_track(
+        tmp_path, scalar_only=True
+    )
+    assert result["tractogram_path"] is None
+    assert mock_fit.call_args.kwargs["create_white_matter"] is False
+    assert mock_save.call_args.kwargs["save_tractogram"] is False
+    params = mock_save.call_args.kwargs["tracking_params"]
+    assert params["stage_role"] == "scalar-model-support"
+    assert params["model_mask_source"] == "brain_mask"
+    assert not {
+        "fa_thresh", "fa_threshold", "dam_wm_threshold", "dam_low_signal",
+        "wm_method", "wm_mask_source",
+    } & params.keys()
 
 
 def test_cmd_track_reports_invalid_mask_and_returns_none(tmp_path):

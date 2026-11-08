@@ -72,6 +72,26 @@ DATA_MANIFEST: Dict[str, Dict[str, Any]] = {
         "fsl_tag": "2103.0",
         "size_bytes": 36627,
     },
+
+    # JHU ICBM-DTI-81 white-matter label atlas (MNI152). Source of the
+    # posterior-limb-of-internal-capsule (PLIC) seed ROIs for the preferred
+    # CST pipeline: label 19 = PLIC right, 20 = PLIC left.
+    "jhu/JHU-ICBM-labels-1mm.nii.gz": {
+        "sha256": "3c3f5d2f1250a3df60982acff35a75b99fd549a05d5f8124a63f78221aa0ec16",
+        "source_url": "https://git.fmrib.ox.ac.uk/fsl/data_atlases/-/raw/2103.0/JHU/JHU-ICBM-labels-1mm.nii.gz",
+        "license": "FSL non-commercial",
+        "version": "JHU-ICBM-DTI-81 (FSL data_atlases)",
+        "fsl_tag": "2103.0",
+        "size_bytes": 52088,
+    },
+    "jhu/JHU-ICBM-labels-2mm.nii.gz": {
+        "sha256": "79a3badf78e91c861a10ec5b8eb277e17e6558d39ef93bfd1e365e7464cb9ebf",
+        "source_url": "https://git.fmrib.ox.ac.uk/fsl/data_atlases/-/raw/2103.0/JHU/JHU-ICBM-labels-2mm.nii.gz",
+        "license": "FSL non-commercial",
+        "version": "JHU-ICBM-DTI-81 (FSL data_atlases)",
+        "fsl_tag": "2103.0",
+        "size_bytes": 9634,
+    },
 }
 
 

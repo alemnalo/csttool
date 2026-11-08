@@ -274,6 +274,45 @@ def get_harvard_oxford_path(atlas_name: str, resolution: str = "1mm") -> Path:
     return path
 
 
+# JHU ICBM-DTI-81 label values for the internal capsule (FSL JHU-labels.xml).
+# The atlas stores the posterior limb as 19 (right) and 20 (left); these feed
+# the preferred CST pipeline's deep-white-matter seed. Anterior limb (17/18)
+# and retrolenticular part (21/22) are recorded for validation context only.
+JHU_PLIC_RIGHT_LABEL = 19
+JHU_PLIC_LEFT_LABEL = 20
+JHU_ATLAS_VERSION = "JHU-ICBM-DTI-81 (FSL data_atlases 2103.0)"
+
+
+def get_jhu_labels_path(resolution: str = "1mm") -> Path:
+    """Path to the JHU ICBM-DTI-81 white-matter label atlas (user-fetched).
+
+    Same tier-2 contract as :func:`get_harvard_oxford_path`: the file must be
+    installed in the csttool data directory (``csttool fetch-data`` stages it
+    from the FSL data_atlases distribution). Returns the validated path.
+
+    Parameters
+    ----------
+    resolution : str
+        "1mm" or "2mm" (default "1mm").
+    """
+    if resolution not in ("1mm", "2mm"):
+        raise ValueError(
+            f"Invalid resolution '{resolution}'. Must be '1mm' or '2mm'."
+        )
+    filename = f"JHU-ICBM-labels-{resolution}.nii.gz"
+    path = _USER_DATA_DIR / "jhu" / filename
+    manifest_key = f"jhu/{filename}"
+    if not path.exists():
+        raise DataNotInstalledError(
+            f"JHU ICBM-DTI-81 label atlas ({resolution}) not found at {path}.\n"
+            "Run 'csttool fetch-data --accept-fsl-license' to install "
+            "FSL-licensed atlas data (non-commercial use only). The PLIC seed "
+            "ROIs for --tracking-mode preferred are read from this atlas."
+        )
+    _validate_if_needed(path, manifest_key)
+    return path
+
+
 def is_data_installed() -> bool:
     """
     Check if all Tier 2 data files are installed.

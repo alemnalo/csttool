@@ -1,8 +1,14 @@
 import pytest
 import numpy as np
+from dipy.core.gradients import gradient_table
 from dipy.reconst.dti import TensorModel
-from csttool.tracking.modules.fit_tensors import fit_tensors
-from csttool.tracking.modules.estimate_directions import estimate_directions
+from csttool.tracking.modules.fit_tensors import (
+    fit_tensors, select_dti_volumes, tensor_validity_mask,
+)
+from csttool.tracking.modules.estimate_directions import (
+    estimate_directions,
+    select_csa_shell,
+)
 
 def test_fit_tensors(synthetic_image_data, synthetic_gtab):
     """Test standard tensor fitting."""
@@ -41,6 +47,64 @@ def test_fit_tensors(synthetic_image_data, synthetic_gtab):
     assert np.all(md >= 0)
     assert np.all(rd >= 0)
     assert np.all(ad >= 0)
+
+def test_tensor_validity_rejects_degenerate_and_invalid_fits():
+    class Fit:
+        pass
+
+    fit = Fit()
+    fit.evals = np.array([
+        [[[0.0015, 0.0005, 0.0004]]],
+        [[[0.0, 0.0, 0.0]]],
+        [[[0.0005, 0.0015, 0.0004]]],
+        [[[0.0015, 0.0005, -0.0001]]],
+    ])
+    fit.fa = np.array([[[0.6]], [[0.0]], [[0.6]], [[0.6]]])
+    valid = tensor_validity_mask(fit, np.ones((4, 1, 1), dtype=bool))
+    assert valid[:, 0, 0].tolist() == [True, False, False, False]
+
+
+def _multishell_gradient_table():
+    bvals = np.array([0.0, 0.0] + [950.0] * 8 + [2400.0] * 32 + [5000.0] * 32)
+    bvecs = np.zeros((len(bvals), 3), dtype=float)
+    directions = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+    ])
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+    bvecs[2:] = np.resize(directions, (len(bvals) - 2, 3))
+    return gradient_table(bvals=bvals, bvecs=bvecs, b0_threshold=50)
+
+
+def test_csa_selects_one_well_sampled_supported_shell():
+    gtab = _multishell_gradient_table()
+    data = np.zeros((2, 2, 2, len(gtab.bvals)))
+
+    selected_data, selected_gtab, metadata = select_csa_shell(data, gtab)
+
+    assert selected_data.shape[-1] == 34
+    assert len(selected_gtab.bvals) == 34
+    assert metadata["selected_shell_b"] == 2400.0
+    assert metadata["b0_count"] == 2
+    assert metadata["direction_count"] == 32
+    assert metadata["input_volume_count"] == 74
+
+
+def test_dti_excludes_high_b_shells():
+    gtab = _multishell_gradient_table()
+    data = np.zeros((2, 2, 2, len(gtab.bvals)))
+
+    selected_data, selected_gtab, metadata = select_dti_volumes(data, gtab)
+
+    assert selected_data.shape[-1] == 10
+    assert len(selected_gtab.bvals) == 10
+    assert metadata["fit_volume_count"] == 10
+    assert metadata["maximum_fitted_b"] == 950.0
+    assert metadata["fallback"] is None
 
 def test_estimate_directions(synthetic_image_data, synthetic_gtab):
     """Test CSA ODF direction estimation."""

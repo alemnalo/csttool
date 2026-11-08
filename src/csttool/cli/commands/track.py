@@ -1,6 +1,7 @@
 
 import argparse
 from pathlib import Path
+import numpy as np
 
 from dipy.io.image import load_nifti
 from ..utils import extract_stem_from_filename, get_gtab_for_preproc
@@ -8,14 +9,18 @@ from csttool.defaults import (
     DEFAULT_B0_THRESHOLD,
     DEFAULT_FA_THRESHOLD,
     DEFAULT_NPEAKS,
+    DEFAULT_MIN_SEPARATION_ANGLE,
     DEFAULT_RNG_SEED,
+    DEFAULT_RELATIVE_PEAK_THRESHOLD,
     DEFAULT_FIT_METHOD,
 )
 
 from csttool.tracking.modules import (
     fit_tensors,
+    tensor_validity_mask,
     estimate_directions,
     resolve_brain_mask,
+    resolve_wm_mask,
     validate_sh_order,
     seed_and_stop,
     run_tractography,
@@ -33,6 +38,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
     # Create RunContext with seed from CLI
     run_seed = getattr(args, 'rng_seed', None)
     ctx = RunContext(run_seed=run_seed) if run_seed is not None else RunContext(run_seed=DEFAULT_RNG_SEED)
+    scalar_only = bool(getattr(args, 'scalar_only', False))
 
     if not preproc_nii.exists():
         print(f"  ✗ Preprocessed NIfTI not found: {preproc_nii}")
@@ -97,30 +103,145 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
     # Step 2: Tensor fitting
     print(f"\n[Step 2/6] Tensor fit and scalar measures (FA, MD, RD, AD)...")
     try:
-        tenfit, fa, md, rd, ad, white_matter = fit_tensors(
+        tensor_result = fit_tensors(
             masked_data,
             gtab,
             brain_mask,
             fa_thresh=args.fa_thr,
             fit_method=getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
             visualize=getattr(args, 'show_plots', False),
-            verbose=verbose
+            verbose=verbose,
+            return_metadata=True,
+            create_white_matter=not scalar_only,
         )
+        if len(tensor_result) == 7:
+            (tenfit, fa, md, rd, ad, white_matter,
+             tensor_metadata) = tensor_result
+        elif len(tensor_result) == 6:
+            # Compatibility with injected/third-party fitters implementing the
+            # original public return contract.
+            tenfit, fa, md, rd, ad, white_matter = tensor_result
+            tensor_metadata = {}
+        else:
+            raise ValueError(
+                "fit_tensors returned an unexpected number of values."
+            )
     except Exception as e:
         print(f"  ✗ Tensor fitting failed: {e}")
         return None
 
+
+    if scalar_only:
+        tensor_valid = tensor_validity_mask(tenfit, brain_mask)
+        tensor_metadata["fit_domain_source"] = "brain_mask"
+        tensor_metadata["fit_domain_voxels"] = int(np.asarray(brain_mask).sum())
+        tensor_metadata["valid_tensor_voxels"] = int(tensor_valid.sum())
+        print("\n[Step 3/3] Saving preferred scalar/model-support products...")
+        tracking_params = {
+            'tracking_mode': 'preferred-plic',
+            'stage_role': 'scalar-model-support',
+            'scalar_model': 'DTI',
+            'fit_method': getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
+            'tensor_fit': tensor_metadata,
+            'brain_mask_source': mask_info['brain_mask_source'],
+            'brain_mask_path': mask_info['brain_mask_path'],
+            'model_mask_source': 'brain_mask',
+        }
+        try:
+            outputs = save_tracking_outputs(
+                [],
+                img,
+                fa,
+                md,
+                affine,
+                out_dir=args.out,
+                stem=stem,
+                rd=rd,
+                ad=ad,
+                tracking_params=tracking_params,
+                provenance=ctx.provenance,
+                verbose=verbose,
+                tenfit=tenfit,
+                white_matter=brain_mask,
+                wm_info={'mask_source': mask_info['brain_mask_source']},
+                save_tractogram=False,
+                mask_role='model',
+                tensor_valid_mask=tensor_valid,
+            )
+        except Exception as e:
+            print(f"  ✗ Saving preferred scalar products failed: {e}")
+            return None
+        return {
+            'tractogram_path': None,
+            'fa_path': outputs['fa_map'],
+            'md_path': outputs['md_map'],
+            'rd_path': outputs.get('rd_map'),
+            'ad_path': outputs.get('ad_map'),
+            'v1_path': outputs.get('v1_map'),
+            'model_mask_path': outputs.get('model_mask'),
+            'tensor_valid_mask_path': outputs.get('tensor_valid_mask'),
+            'wm_mask_path': None,
+            'stem': stem,
+            'tracking_params': tracking_params,
+        }
+
+    # The tensor fit also produced the legacy FA-threshold WM mask
+    # (``white_matter``); the resolver decides whether that, an external
+    # ``--wm-mask`` or DIPY's DAM segmentation is what this run actually
+    # seeds and estimates peaks in, and records why. This deliberately sits
+    # after ``fit_tensors`` so the legacy mask is available as the fallback
+    # without a second computation.
+    wm_mask_path = getattr(args, 'wm_mask', None)
+    wm_method = getattr(args, 'wm_method', 'auto')
+    if wm_mask_path is not None:
+        print(f"\n  → White matter mask: external ({wm_mask_path})")
+    elif wm_method == 'legacy':
+        print(f"\n  → White matter mask: legacy FA-threshold (pinned)")
+    else:
+        print(f"\n  → White matter mask: automatic (DAM, legacy fallback)")
+    try:
+        wm_mask, wm_info = resolve_wm_mask(
+            masked_data,
+            gtab,
+            affine,
+            brain_mask,
+            white_matter,
+            wm_mask_path=wm_mask_path,
+            method=wm_method,
+            dam_wm_threshold=getattr(args, 'dam_wm_threshold', None),
+            dam_low_signal=getattr(args, 'dam_low_signal', None),
+            b0_threshold=getattr(args, 'b0_threshold', None),
+            verbose=verbose,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"  ✗ White matter mask resolution failed: {e}")
+        return None
+    if verbose:
+        frac = wm_info['wm_fraction_of_brain'] * 100.0
+        print(f"    • WM mask source: {wm_info['wm_mask_source']} "
+              f"({wm_info['wm_voxels']:,} voxels, {frac:.1f}% of brain)")
+        if wm_info.get('fallback_reason'):
+            print(f"    • Fallback reason: {wm_info['fallback_reason']}")
+
     # Step 3: Direction field estimation
     print(f"\n[Step 3/6] Direction field estimation (CSA ODF model)...")
     try:
-        csapeaks = estimate_directions(
+        direction_result = estimate_directions(
             masked_data,
             gtab,
-            white_matter,
+            wm_mask,
             sh_order=args.sh_order,
             npeaks=getattr(args, 'npeaks', DEFAULT_NPEAKS),
-            verbose=verbose
+            verbose=verbose,
+            return_metadata=True,
         )
+        if isinstance(direction_result, tuple) and len(direction_result) == 2:
+            csapeaks, direction_metadata = direction_result
+        else:
+            # Compatibility with injected/third-party estimators implementing
+            # the original public return contract.
+            csapeaks = direction_result
+            direction_metadata = {}
     except Exception as e:
         print(f"  ✗ Direction estimation failed: {e}")
         return None
@@ -138,6 +259,14 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             density=args.seed_density,
             use_binary=False,
             use_brain_mask_stop=use_brain_mask_stop,
+            # Role separation (2026-09-22): the resolved WM mask feeds CSA peak
+            # estimation (the model role, above) ONLY. It never becomes the seed
+            # territory — an anatomical/DAM mask as the seed starves the cortical
+            # rim the ROI-endpoint CST extraction needs (see the preferred
+            # pipeline). The whole-brain track stage keeps its historical
+            # FA-threshold seeding; deep-WM seeding lives in --tracking-mode
+            # preferred, not here.
+            seed_mask=None,
             verbose=verbose
         )
     except Exception as e:
@@ -164,24 +293,46 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
     # Step 6: Save outputs
     print(f"\n[Step 6/6] Saving tractogram, scalar maps, and report...")
     
-    # Get the validated SH order (may have been reduced due to insufficient directions)
-    validated_sh_order = validate_sh_order(gtab, args.sh_order, verbose=False)
+    if 'validated_sh_order' in direction_metadata:
+        validated_sh_order = direction_metadata['validated_sh_order']
+    else:
+        validated_sh_order = validate_sh_order(
+            gtab, args.sh_order, verbose=verbose
+        )
     
     tracking_params = {
+        'tracking_mode': 'legacy-fa',
+        'tracking_algorithm': 'deterministic LocalTracking',
         'step_size': args.step_size,
         'fa_thresh': args.fa_thr,
         'seed_density': args.seed_density,
+        'seed_source': 'FA-threshold white-matter mask',
+        'model_mask_source': wm_info['wm_mask_source'],
         'sh_order': validated_sh_order,
         'sphere': 'symmetric362',
         'stopping_criterion': 'fa_threshold' + ('+brain_mask' if use_brain_mask_stop else ''),
-        'relative_peak_threshold': 0.8,
-        'min_separation_angle': 45,  # Peak extraction: minimum angle between detected peaks
+        'relative_peak_threshold': direction_metadata.get(
+            'relative_peak_threshold', DEFAULT_RELATIVE_PEAK_THRESHOLD
+        ),
+        'min_separation_angle': direction_metadata.get(
+            'min_separation_angle', DEFAULT_MIN_SEPARATION_ANGLE
+        ),
         'npeaks': getattr(args, 'npeaks', DEFAULT_NPEAKS),
         'random_seed': ctx.run_seed,
         'use_brain_mask_stop': use_brain_mask_stop,
         'fit_method': getattr(args, 'fit_method', DEFAULT_FIT_METHOD),
+        'scalar_model': 'DTI',
+        'tensor_fit': tensor_metadata,
+        'direction_model': direction_metadata,
         'brain_mask_source': mask_info['brain_mask_source'],
         'brain_mask_path': mask_info['brain_mask_path'],
+        'wm_mask_source': wm_info['wm_mask_source'],
+        'wm_mask_path': wm_info['wm_mask_path'],
+        'wm_method': wm_info['wm_method'],
+        'wm_voxels': wm_info['wm_voxels'],
+        'wm_fraction_of_brain': wm_info['wm_fraction_of_brain'],
+        'wm_dam_params': wm_info['dam_params'],
+        'wm_fallback_reason': wm_info['fallback_reason'],
     }
 
     try:
@@ -199,6 +350,8 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             provenance=ctx.provenance,
             verbose=verbose,
             tenfit=tenfit,
+            white_matter=wm_mask,
+            wm_info=wm_info,
         )
     except Exception as e:
         print(f"  ✗ Saving outputs failed: {e}")
@@ -211,7 +364,7 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
             streamlines=streamlines,
             fa=fa,
             md=md,
-            white_matter=white_matter,
+            white_matter=wm_mask,
             brain_mask=brain_mask,
             seeds=seeds,
             affine=affine,
@@ -250,10 +403,12 @@ def cmd_track(args: argparse.Namespace) -> dict | None:
         'tractogram_path': outputs['tractogram'],
         'fa_path': outputs['fa_map'],
         'md_path': outputs['md_map'],
-        'rd_path': outputs.get('rd_map'),  # May be None if not computed
-        'ad_path': outputs.get('ad_map'),  # May be None if not computed
-        'v1_path': outputs.get('v1_map'),  # None when no tenfit was supplied
-        'n_streamlines': len(streamlines),
+        'rd_path': outputs.get('rd_map'),
+        'ad_path': outputs.get('ad_map'),
+        'v1_path': outputs.get('v1_map'),
+        'wm_mask_path': outputs.get('wm_mask'),
+        'model_mask_path': outputs.get('model_mask'),
+        'tensor_valid_mask_path': outputs.get('tensor_valid_mask'),
         'stem': stem,
         'tracking_params': tracking_params
     }

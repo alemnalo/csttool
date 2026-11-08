@@ -378,10 +378,9 @@ def _build_regional_metrics(left, right, asym):
 def _build_methods_band(acquisition, processing, space, orientation_code, version):
     """Build the three compact methods-band columns as (label, value) row lists.
 
-    Terminology is verified against the implementation: DTI tensor model
-    (``fit_tensors.py``), CSA ODF direction model (``estimate_directions.py``),
-    deterministic LocalTracking (``run_tractography.py``), and FA-mask seeding
-    (``seed_and_stop.py``). "Anatomically constrained" is deliberately not used.
+    Preferred tracking metadata is resolved from the extraction that actually
+    produced the reported tractograms. Legacy reports retain their historical
+    fallbacks when those explicit fields are absent.
     """
     bvals = acquisition.get("b_values") if acquisition else None
     max_b = f"{bvals[-1]} s/mm²" if bvals else "N/A"
@@ -405,25 +404,64 @@ def _build_methods_band(acquisition, processing, space, orientation_code, versio
 
     tparams = (processing or {}).get("tracking_params", {}) or {}
     fit_method = tparams.get("fit_method", "WLS")
-    sh_order = tparams.get("sh_order")
-    dir_model = f"CSA ODF, SH {sh_order}" if sh_order is not None else "CSA ODF"
+    tensor_fit = tparams.get("tensor_fit", {}) or {}
+    max_tensor_b = tensor_fit.get("maximum_fitted_b")
+    scalar_model = f"DTI ({fit_method})"
+    if max_tensor_b is not None:
+        scalar_model = f"DTI ({fit_method}; b≤{max_tensor_b:g})"
+
+    direction = tparams.get("direction_model", {}) or {}
+    if isinstance(direction, dict) and direction:
+        direction_name = direction.get("model") or direction.get("name") or "CSA-ODF"
+        direction_sh = direction.get(
+            "validated_sh_order", tparams.get("sh_order")
+        )
+        direction_b = direction.get("selected_shell_b")
+        dir_model = direction_name.replace("-", " ")
+        if direction_b is not None:
+            dir_model += f", b={direction_b:g}"
+        if direction_sh is not None:
+            dir_model += f", SH {direction_sh}"
+    else:
+        sh_order = tparams.get("sh_order")
+        dir_model = f"CSA ODF, SH {sh_order}" if sh_order is not None else "CSA ODF"
+
     seed_density = tparams.get("seed_density")
-    seeding = f"FA mask, ×{seed_density}" if seed_density is not None else "FA mask"
-    fa_thresh = tparams.get("fa_thresh")
-    fa_str = str(fa_thresh) if fa_thresh is not None else "N/A"
+    seed_source = tparams.get("seed_source")
+    if seed_source:
+        seeding = str(seed_source)
+        if seed_density is not None:
+            seeding += f", ×{seed_density}"
+    else:
+        seeding = f"FA mask, ×{seed_density}" if seed_density is not None else "FA mask"
+    tracking = tparams.get("tracking_algorithm", "Deterministic")
+    tracking_mode = tparams.get("tracking_mode")
+    if tracking_mode and tracking_mode != "legacy-fa":
+        tracking = f"{tracking} ({tracking_mode})"
     step_size = tparams.get("step_size")
     step_str = f"{step_size} mm" if step_size is not None else "N/A"
     pre = (processing or {}).get("preprocessing", {}) or {}
     motion = "Yes" if pre.get("motion_correction") else "No"
     proc_rows = [
-        ("Scalar model", f"DTI ({fit_method})"),
+        ("Scalar model", scalar_model),
         ("Direction model", dir_model),
-        ("Tracking", "Deterministic"),
+        ("Tracking", tracking),
         ("Seeding", seeding),
-        ("FA threshold", fa_str),
+    ]
+    model_mask = tparams.get("model_mask_source")
+    stopping = tparams.get("stopping_criterion")
+    if model_mask is not None:
+        proc_rows.append(("Model mask", str(model_mask)))
+    if stopping is not None:
+        proc_rows.append(("Stopping", str(stopping)))
+    else:
+        fa_thresh = tparams.get("fa_thresh")
+        fa_str = str(fa_thresh) if fa_thresh is not None else "N/A"
+        proc_rows.append(("FA threshold", fa_str))
+    proc_rows.extend([
         ("Step size", step_str),
         ("Motion correction", motion),
-    ]
+    ])
 
     space_short = "Native" if (not space or "native" in space.lower()) else space
     extraction = (processing or {}).get("extraction", {}) or {}
@@ -474,6 +512,48 @@ def build_node_homology_view(node_homology):
     }
 
 
+def _build_preferred_qc_view(metadata, comparison):
+    """Compact PDF view of the auditable preferred QC JSON blocks."""
+    metadata = metadata or {}
+    tracking = metadata.get("tractography_qc", {}) or {}
+    qc = metadata.get("qc", {}) or {}
+    frame = metadata.get("coordinate_frame_qc", {}) or {}
+    if not tracking or not qc:
+        return {"available": False}
+    rows = []
+    for side, label in (("left", "Left"), ("right", "Right")):
+        item = tracking.get(side, {})
+        rows.append({
+            "side": label,
+            "seeds": item.get("plic_seed_count", "—"),
+            "motor": (
+                f"{item.get('motor_target_reach_count', 0)} "
+                f"({item.get('motor_target_reach_fraction', 0):.2f})"
+            ),
+            "inferior": (
+                f"{item.get('inferior_target_reach_count', 0)} "
+                f"({item.get('inferior_target_reach_fraction', 0):.2f})"
+            ),
+            "accepted": item.get("persisted_streamline_count", "—"),
+        })
+    asymmetry = comparison.get("asymmetry", {})
+    return {
+        "available": True,
+        "rows": rows,
+        "count_li": format_li(
+            asymmetry.get("streamline_count", {}).get("laterality_index", 0.0)
+        ),
+        "volume_li": format_li(
+            asymmetry.get("volume", {}).get("laterality_index", 0.0)
+        ),
+        "coordinate_frame": (
+            "PASS" if frame.get("overall_pass") else "FAIL"
+        ),
+        "overall": (
+            "PASS" if qc.get("overall_pass") else "FAIL"
+        ),
+    }
+
 def build_report_context(
     comparison,
     visualization_paths,
@@ -503,6 +583,12 @@ def build_report_context(
     acq_rows, proc_rows, space_rows = _build_methods_band(
         acquisition, processing, space, orient, version
     )
+    tracking_params = processing.get("tracking_params", {}) or {}
+    qc_mask_label = (
+        "Model mask"
+        if tracking_params.get("model_mask_source") == "brain_mask"
+        else "White matter mask"
+    )
 
     # The 1x4 strip replaces the 1x3 triptych. The legacy key is still read so a
     # caller that has not migrated (or a replay of an older run's paths) still
@@ -523,6 +609,8 @@ def build_report_context(
         "node_homology": build_node_homology_view(comparison.get("node_homology")),
         "profile_matrix": _embed_image(visualization_paths.get("profile_matrix")),
         "qc_strip": _embed_image(qc_path),
+        "qc_mask_label": qc_mask_label,
+        "preferred_qc": _build_preferred_qc_view(metadata, comparison),
         "provenance": _build_report_provenance((metadata or {}).get("provenance", {})),
     }
 
@@ -612,8 +700,12 @@ def save_json_report(comparison, output_dir, subject_id, metadata=None):
         'acquisition': metadata.get('acquisition', {}),
         'processing': metadata.get('processing', {}),
         'qc_thresholds': metadata.get('qc_thresholds', {}),
+        'qc': metadata.get('qc', {}),
+        'tractography_qc': metadata.get('tractography_qc', {}),
+        'coordinate_frame_qc': metadata.get('coordinate_frame_qc', {}),
+        'analysis_segment': metadata.get('analysis_segment', {}),
         'provenance': metadata.get('provenance', {}),
-        'metrics': metrics
+        'metrics': metrics,
     }
     
     # Save JSON
@@ -936,6 +1028,7 @@ def generate_complete_report(
     fa_path=None,
     v1_path=None,
     density_path=None,
+    wm_mask_path=None,
     roi_dseg_path=None,
     cst_left_path=None,
     cst_right_path=None,
@@ -1020,6 +1113,7 @@ def generate_complete_report(
             fa_path=fa_path,
             v1_path=v1_path,
             density_path=density_path,
+            wm_mask_path=wm_mask_path,
             roi_dseg_path=roi_dseg_path,
             cst_left_path=cst_left_path,
             cst_right_path=cst_right_path,

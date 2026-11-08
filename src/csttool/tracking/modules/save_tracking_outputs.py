@@ -1,4 +1,4 @@
-def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=None, ad=None, tracking_params=None, provenance=None, verbose=False, *, tenfit=None):
+def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=None, ad=None, tracking_params=None, provenance=None, verbose=False, *, tenfit=None, white_matter=None, wm_info=None, save_tractogram=True, mask_role="white_matter", tensor_valid_mask=None):
     """Save tractography outputs: tractogram, scalar maps, and processing report.
 
     Args:
@@ -50,6 +50,7 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
     from dipy.io.stateful_tractogram import StatefulTractogram, Space
     from dipy.io.streamline import save_tractogram
     from dipy.tracking.streamline import length
+    from csttool import __version__
     
     out_dir = Path(out_dir)
     
@@ -57,21 +58,23 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
     tractogram_dir = out_dir / "tractograms"
     scalar_dir = out_dir / "scalar_maps"
     log_dir = out_dir / "logs"
-    
-    tractogram_dir.mkdir(parents=True, exist_ok=True)
+
+    if save_tractogram:
+        tractogram_dir.mkdir(parents=True, exist_ok=True)
     scalar_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     
     outputs = {}
     
-    # 1. Save tractogram
-    tractogram_path = tractogram_dir / f"{stem}_whole_brain.trk"
-    sft = StatefulTractogram(streamlines, img, Space.RASMM)
-    save_tractogram(sft, str(tractogram_path))
-    outputs['tractogram'] = tractogram_path
-    
-    if verbose:
-        print(f"  ✓ Saved: {tractogram_path}")
+    # 1. Save a whole-brain tractogram only for the legacy whole-brain path.
+    if save_tractogram:
+        tractogram_path = tractogram_dir / f"{stem}_whole_brain.trk"
+        sft = StatefulTractogram(streamlines, img, Space.RASMM)
+        save_tractogram(sft, str(tractogram_path))
+        outputs['tractogram'] = tractogram_path
+
+        if verbose:
+            print(f"  ✓ Saved: {tractogram_path}")
 
     # 2. Save FA map
     fa_path = scalar_dir / f"{stem}_fa.nii.gz"
@@ -107,8 +110,42 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
         if verbose:
             print(f"  ✓ Saved: {ad_path}")
 
+    if tensor_valid_mask is not None:
+        validity_path = scalar_dir / f"{stem}_tensor_valid_mask.nii.gz"
+        nib.save(
+            nib.Nifti1Image(
+                np.asarray(tensor_valid_mask, dtype=np.uint8), affine
+            ),
+            validity_path,
+        )
+        outputs['tensor_valid_mask'] = validity_path
+        from csttool.bids.output import write_derivative_sidecar
+        write_derivative_sidecar(
+            validity_path,
+            sources=[],
+            description=(
+                "Tensor-fit validity domain for preferred scalar sampling."
+            ),
+            command_line=None,
+            software_versions=None,
+            extra={
+                "ValidityRules": [
+                    "inside brain mask",
+                    "finite FA and eigenvalues",
+                    "0 <= FA <= 1",
+                    "ordered eigenvalues lambda1 >= lambda2 >= lambda3 >= 0",
+                    "positive tensor trace (non-degenerate fitted diffusion)",
+                ],
+                "NumericScalarThresholdClipping": False,
+                "VoxelCount": int(
+                    np.asarray(tensor_valid_mask, dtype=bool).sum()
+                ),
+            },
+        )
+        if verbose:
+            print(f"  ✓ Saved: {validity_path}")
+
     # 5b. Save V1 principal-eigenvector field (world RAS+ frame), unconditional
-    # when the tensor fit is available (visualization-refactoring-plan §7.1).
     # The eigenvectors come out of DIPY in the b-vec (voxel) frame; we rotate them
     # into the anatomical world frame with the orthonormal polar factor of the
     # affine, so the stored product is self-describing and reproducible by a
@@ -165,6 +202,68 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
             "product will not be written. Pass tenfit=... to persist V1.",
             stacklevel=2,
         )
+
+    # Save the domain mask used by this execution path. Preferred mode writes a
+    # model/tensor-support mask; legacy mode writes its actual WM mask.
+    if white_matter is not None:
+        try:
+            from csttool.bids.output import write_derivative_sidecar
+            info = wm_info or {}
+            if mask_role == "model":
+                mask_path = scalar_dir / f"{stem}_model_mask.nii.gz"
+                description = (
+                    "Brain-mask domain used for low-b tensor fitting, CSA peak "
+                    "estimation, and preferred propagation-boundary support."
+                )
+                output_key = "model_mask"
+            else:
+                mask_path = scalar_dir / f"{stem}_wm_mask.nii.gz"
+                description = (
+                    "White-matter mask used for legacy seeding and CSA peak "
+                    "estimation."
+                )
+                output_key = "wm_mask"
+            nib.save(
+                nib.Nifti1Image(
+                    np.asarray(white_matter, dtype=np.uint8), affine
+                ),
+                mask_path,
+            )
+            outputs[output_key] = mask_path
+            extra = {
+                "MaskRole": mask_role,
+                "MaskSource": info.get("mask_source", info.get("wm_mask_source")),
+                "VoxelCount": int(np.asarray(white_matter, dtype=bool).sum()),
+            }
+            if mask_role == "white_matter":
+                extra.update({
+                    "WmMaskSource": info.get("wm_mask_source"),
+                    "WmMethod": info.get("wm_method"),
+                    "WmMaskPath": info.get("wm_mask_path"),
+                    "DamParams": info.get("dam_params"),
+                    "FallbackReason": info.get("fallback_reason"),
+                    "FractionOfBrain": info.get("wm_fraction_of_brain"),
+                    "Dilated": info.get("wm_mask_source") == "legacy",
+                    "FaThreshold": (
+                        tracking_params.get("fa_thresh")
+                        if tracking_params else None
+                    ),
+                    "DerivedFrom": f"{stem}_fa.nii.gz",
+                })
+            write_derivative_sidecar(
+                mask_path,
+                sources=[],
+                description=description,
+                command_line=None,
+                software_versions=None,
+                extra=extra,
+            )
+            if verbose:
+                print(f"  ✓ Saved: {mask_path}")
+        except Exception as exc:
+            print(f"  ⚠️ Could not save {mask_role} mask: {exc}")
+            import warnings
+            warnings.warn(f"{mask_role} mask product not written: {exc}")
     
     # 6. Compute statistics for report
     lengths = np.array([length(s) for s in streamlines]) if len(streamlines) > 0 else np.array([])
@@ -200,36 +299,69 @@ def save_tracking_outputs(streamlines, img, fa, md, affine, out_dir, stem, rd=No
         scalar_stats['ad_median'] = float(np.median(ad_valid)) if len(ad_valid) > 0 else 0.0
     
     output_files = {
-        'tractogram': str(tractogram_path),
         'fa_map': str(fa_path),
         'md_map': str(md_path),
     }
+    if 'tractogram' in outputs:
+        output_files['tractogram'] = str(outputs['tractogram'])
     if rd is not None:
         output_files['rd_map'] = str(outputs['rd_map'])
     if ad is not None:
         output_files['ad_map'] = str(outputs['ad_map'])
     if 'v1_map' in outputs:
         output_files['v1_map'] = str(outputs['v1_map'])
+    if 'wm_mask' in outputs:
+        output_files['wm_mask'] = str(outputs['wm_mask'])
+    if 'model_mask' in outputs:
+        output_files['model_mask'] = str(outputs['model_mask'])
+    if 'tensor_valid_mask' in outputs:
+        output_files['tensor_valid_mask'] = str(outputs['tensor_valid_mask'])
     
+    tracking_report = {
+        output_key: tracking_params[source_key]
+        for source_key, output_key in (
+            ('step_size', 'step_size_mm'),
+            ('seed_density', 'seed_density'),
+            ('sh_order', 'sh_order'),
+            ('sphere', 'sphere'),
+            ('relative_peak_threshold', 'relative_peak_threshold'),
+            ('min_separation_angle', 'min_separation_angle'),
+            ('brain_mask_source', 'brain_mask_source'),
+            ('brain_mask_path', 'brain_mask_path'),
+            ('tracking_mode', 'tracking_mode'),
+            ('tracking_algorithm', 'tracking_algorithm'),
+            ('seed_source', 'seed_source'),
+            ('model_mask_source', 'model_mask_source'),
+            ('scalar_model', 'scalar_model'),
+            ('fit_method', 'fit_method'),
+            ('tensor_fit', 'tensor_fit'),
+            ('direction_model', 'direction_model'),
+            ('stage_role', 'stage_role'),
+        )
+        if source_key in tracking_params
+    }
+    if 'fa_thresh' in tracking_params:
+        tracking_report['fa_threshold'] = tracking_params['fa_thresh']
+    if 'stopping_criterion' in tracking_params:
+        tracking_report['stopping_criterion'] = tracking_params['stopping_criterion']
+    if mask_role == "white_matter":
+        tracking_report.update({
+            'wm_mask_source': tracking_params.get('wm_mask_source'),
+            'wm_mask_path': tracking_params.get('wm_mask_path'),
+            'wm_method': tracking_params.get('wm_method'),
+            'wm_dam_params': tracking_params.get('wm_dam_params'),
+            'wm_fallback_reason': tracking_params.get('wm_fallback_reason'),
+            'wm_voxels': tracking_params.get('wm_voxels'),
+            'wm_fraction_of_brain': tracking_params.get('wm_fraction_of_brain'),
+        })
+
     report = {
         'processing_info': {
             'date': datetime.now().isoformat(),
             'subject_stem': stem,
-            'csttool_version': '0.0.1',
+            'csttool_version': __version__,
         },
-        'tracking_parameters': {
-            'step_size_mm': tracking_params.get('step_size', 0.5),
-            'fa_threshold': tracking_params.get('fa_thresh', 0.2),
-            'seed_density': tracking_params.get('seed_density', 1),
-            'sh_order': tracking_params.get('sh_order', 6),
-            'sphere': tracking_params.get('sphere', 'symmetric362'),
-            'stopping_criterion': tracking_params.get('stopping_criterion', 'fa_threshold'),
-            'relative_peak_threshold': tracking_params.get('relative_peak_threshold', 0.8),
-            'min_separation_angle': tracking_params.get('min_separation_angle', 45),
-            'brain_mask_source': tracking_params.get(
-                'brain_mask_source', 'automatic_background_segmentation'),
-            'brain_mask_path': tracking_params.get('brain_mask_path', None),
-        },
+        'tracking_parameters': tracking_report,
         'data_info': {
             'volume_shape': [int(x) for x in img.shape[:3]],
             'voxel_size_mm': [float(x) for x in img.header.get_zooms()[:3]],

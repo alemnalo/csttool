@@ -29,6 +29,14 @@ RIGHT = "#ff7f0e"   # orange
 MOTOR_LEFT = LEFT
 MOTOR_RIGHT = RIGHT
 BRAINSTEM = "#2ca02c"   # green
+# White-matter mask overlay (QC figures and the report QC strip). A saturated
+# magenta deliberately far from every grayscale value AND every other hue on
+# the page (LEFT blue, RIGHT orange, brainstem green, brain-mask red): the
+# strip panel is ~48 mm wide, and a muted blue fill at alpha 0.35 was shown in
+# the 20260922 print review to be hard to separate from the FA background at
+# that size. The strip additionally draws the same-hue outline (see the strip
+# renderer) so the territory boundary is legible even where the fill is thin.
+WM_MASK = "#e7298a"
 
 # Validation overlays (candidate vs reference) - a DIFFERENT axis of meaning than
 # L/R, so deliberately distinct hues to avoid colliding with hemisphere colours.

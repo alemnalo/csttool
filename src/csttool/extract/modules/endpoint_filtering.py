@@ -401,6 +401,24 @@ def save_cst_tractograms(
             print("  ⚠️ No CST streamlines to save")
         paths['cst_combined'] = None
 
+    # Preferred mode keeps the original accepted tracking trajectories as
+    # separate audit artifacts. The standard CST files above are the
+    # anatomically target-bounded analysis segments consumed by tractometry.
+    for key, suffix in (
+        ("cst_left_full", "cst_left_full"),
+        ("cst_right_full", "cst_right_full"),
+        ("cst_combined_full", "cst_bilateral_full"),
+    ):
+        bundle = cst_result.get(key)
+        if bundle is None or len(bundle) == 0:
+            continue
+        path = trk_dir / f"{prefix}{suffix}.trk"
+        sft = StatefulTractogram(bundle, reference_img, Space.RASMM)
+        save_tractogram(sft, str(path))
+        paths[key] = path
+        if verbose:
+            print(f"  ✓ Full tracking artifact: {path}")
+
     return paths
 
 
@@ -439,6 +457,7 @@ def save_extraction_report(
         'subject_id': subject_id,
         'provenance': get_provenance_dict(),
         'statistics': cst_result['stats'],
+        'parameters': cst_result.get('parameters', {}),
         'output_files': {
             'cst_left': str(output_paths.get('cst_left')) if output_paths.get('cst_left') else None,
             'cst_right': str(output_paths.get('cst_right')) if output_paths.get('cst_right') else None,
@@ -451,6 +470,17 @@ def save_extraction_report(
             'type': 'Affine + SyN',
             'direction': 'template → subject',
             'template': registration['template'],
+            'internal_orientation': 'RAS',
+            'original_orientation': list(
+                registration.get('original_orientation', ())
+            ),
+            'inverse_reorientation_required_for_tracking': bool(
+                registration.get('reorientation_transform') is not None
+            ),
+            'transform_files': {
+                key: Path(path).name
+                for key, path in registration.get('transform_paths', {}).items()
+            },
         }
     
     report_path = log_dir / f"{prefix}cst_extraction_report.json"

@@ -339,6 +339,8 @@ def cmd_run(args: argparse.Namespace) -> None:
             'warnings': preprocessing_warnings,
         }
     
+    tracking_mode = getattr(args, 'tracking_mode', 'legacy-fa')
+
     # =========================================================================
     # STEP 4: TRACK
     # =========================================================================
@@ -354,6 +356,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     v1_path = None
     density_path = None
     roi_dseg_path = None
+    model_mask_path = None
+    wm_mask_path = None
+    tensor_valid_mask_path = None
 
     try:
         if preproc_path is None:
@@ -372,24 +377,39 @@ def cmd_run(args: argparse.Namespace) -> None:
             npeaks=getattr(args, 'npeaks', DEFAULT_NPEAKS),
             rng_seed=getattr(args, 'rng_seed', DEFAULT_RNG_SEED),
             brain_mask=getattr(args, 'brain_mask', None),
+            wm_mask=getattr(args, 'wm_mask', None),
+            wm_method=getattr(args, 'wm_method', 'auto'),
+            dam_wm_threshold=getattr(args, 'dam_wm_threshold', None),
+            dam_low_signal=getattr(args, 'dam_low_signal', None),
             save_visualizations=getattr(args, 'save_visualizations', False),
             show_plots=getattr(args, 'show_plots', False),
             verbose=verbose,
+            scalar_only=(tracking_mode == 'preferred'),
             out=track_out
         )
         
         track_result = cmd_track(track_args)
         
         if track_result:
-            tractogram_path = Path(track_result['tractogram_path'])
+            if track_result.get('tractogram_path'):
+                tractogram_path = Path(track_result['tractogram_path'])
             fa_path = Path(track_result['fa_path'])
             md_path = Path(track_result['md_path'])
-            # RD and AD maps (if available)
-            rd_path = Path(track_result['rd_path']) if 'rd_path' in track_result else None
-            ad_path = Path(track_result['ad_path']) if 'ad_path' in track_result else None
-            # World-frame V1; None when the tensor fit was unavailable.
+            rd_path = Path(track_result['rd_path']) if track_result.get('rd_path') else None
+            ad_path = Path(track_result['ad_path']) if track_result.get('ad_path') else None
             v1_path = Path(track_result['v1_path']) if track_result.get('v1_path') else None
-            step_results['track'] = {'success': True, 'result': track_result}
+            wm_mask_path = (
+                Path(track_result['wm_mask_path'])
+                if track_result.get('wm_mask_path') else None
+            )
+            model_mask_path = (
+                Path(track_result['model_mask_path'])
+                if track_result.get('model_mask_path') else None
+            )
+            tensor_valid_mask_path = (
+                Path(track_result['tensor_valid_mask_path'])
+                if track_result.get('tensor_valid_mask_path') else None
+            )
             
             # Capture tracking parameters
             if 'tracking_params' in track_result:
@@ -421,12 +441,28 @@ def cmd_run(args: argparse.Namespace) -> None:
     extraction_method = getattr(args, 'extraction_method', 'passthrough')
     
     try:
-        if tractogram_path is None or fa_path is None:
-            raise RuntimeError("No tractogram or FA map available")
+        if fa_path is None or (
+            tracking_mode != 'preferred' and tractogram_path is None
+        ):
+            raise RuntimeError("Required tracking products are unavailable")
         
         extract_out = args.out / "extraction"
         
-        if extraction_method == "roi-seeded":
+        if tracking_mode == 'preferred':
+            # Role-separated PLIC-seeded pipeline: independent of the whole-brain
+            # tractogram (it seeds the internal capsule and tracks over a
+            # permissive domain). See run_preferred_extraction.
+            from csttool.cli.commands.extract import run_preferred_extraction
+            args.preferred_brain_mask_path = model_mask_path
+            extract_result = run_preferred_extraction(
+                preproc_path=preproc_path,
+                fa_path=fa_path,
+                output_dir=extract_out,
+                subject_id=subject_id,
+                args=args,
+                verbose=verbose,
+            )
+        elif extraction_method == "roi-seeded":
             extract_result = run_roi_seeded_extraction(
                 preproc_path=preproc_path,
                 fa_path=fa_path,
@@ -477,17 +513,65 @@ def cmd_run(args: argparse.Namespace) -> None:
                              if extract_result.get('roi_dseg_path') else None)
             step_results['extract'] = {'success': True, 'result': extract_result}
 
-            # Carry artifact-index diagnostic into report metadata. Only the
-            # bidirectional method populates artifact_index in its stats; for all
-            # other methods it stays None (rendered as N/A downstream), because the
-            # index only describes the bidirectional bundle.
             stats = extract_result['stats']
+            parameters = extract_result.get('parameters', {})
+            actual_method = stats.get('method', extraction_method)
             pipeline_metadata['extraction'] = {
-                'method': extraction_method,
+                'method': actual_method,
+                'tracking_mode': tracking_mode,
                 'artifact_index': stats.get('artifact_index'),
+                'artifact_index_available': stats.get('artifact_index') is not None,
                 'forward_reverse_ratio_left': stats.get('forward_reverse_ratio_left'),
                 'forward_reverse_ratio_right': stats.get('forward_reverse_ratio_right'),
+                'preferred_qc': stats.get('qc'),
+                'tractography_qc': stats.get('tractography_qc'),
+                'coordinate_frame_qc': stats.get('coordinate_frame_qc'),
+                'qc_thresholds': stats.get('qc_thresholds'),
+                'analysis_segment': stats.get('analysis_segment'),
             }
+            if tracking_mode == 'preferred':
+                preferred_tracking = {
+                    'tracking_mode': parameters.get(
+                        'tracking_mode', 'preferred-plic'
+                    ),
+                    'tracking_algorithm': parameters.get(
+                        'tracking_algorithm', 'deterministic LocalTracking'
+                    ),
+                    'seed_source': parameters.get('seed_source'),
+                    'model_mask_source': parameters.get('model_mask_source'),
+                    'model_mask_path': str(model_mask_path) if model_mask_path else None,
+                    'tensor_valid_mask_path': (
+                        str(tensor_valid_mask_path)
+                        if tensor_valid_mask_path else None
+                    ),
+                    'stopping_criterion': (
+                        parameters.get('stopping', {}).get('label')
+                    ),
+                    'stopping_mode': (
+                        parameters.get('stopping', {}).get('mode')
+                    ),
+                    'stopping': parameters.get('stopping'),
+                    'direction_model': parameters.get('direction_model'),
+                    'sh_order': parameters.get('sh_order'),
+                    'npeaks': parameters.get('npeaks'),
+                    'seed_density': parameters.get('seed_density'),
+                    'step_size': parameters.get('step_size'),
+                    'relative_peak_threshold': parameters.get(
+                        'relative_peak_threshold'
+                    ),
+                    'min_separation_angle': parameters.get(
+                        'min_separation_angle'
+                    ),
+                    'random_seed': parameters.get('random_seed'),
+                    'fit_method': parameters.get('fit_method'),
+                    'scalar_model': 'DTI',
+                    'tensor_fit': pipeline_metadata.get(
+                        'tracking', {}
+                    ).get('tensor_fit'),
+                }
+                pipeline_metadata.setdefault('tracking', {}).update(
+                    preferred_tracking
+                )
 
             if extract_result['stats']['cst_total_count'] == 0:
                 print(f"  ⚠️ No CST streamlines extracted")
@@ -515,6 +599,17 @@ def cmd_run(args: argparse.Namespace) -> None:
         if cst_left_path is None or cst_right_path is None:
             raise RuntimeError("No CST tractograms available")
         
+        report_mask_path = wm_mask_path
+        report_mask_label = "White matter mask"
+        report_mask_source = None
+        if tracking_mode == 'preferred':
+            report_mask_path = model_mask_path
+            report_mask_label = "Model mask"
+            report_mask_source = (
+                pipeline_metadata.get('tracking', {}).get('model_mask_source')
+                or 'brain_mask'
+            )
+
         metrics_out = args.out / "metrics"
         metrics_args = argparse.Namespace(
             cst_left=cst_left_path,
@@ -526,6 +621,10 @@ def cmd_run(args: argparse.Namespace) -> None:
             v1=v1_path,
             density=density_path,
             roi_dseg=roi_dseg_path,
+            wm_mask=report_mask_path,
+            report_mask_label=report_mask_label,
+            report_mask_source=report_mask_source,
+            tensor_valid_mask=tensor_valid_mask_path,
             subject_id=subject_id,
             generate_pdf=getattr(args, 'generate_pdf', False),
             save_visualizations=getattr(args, 'save_visualizations', False),
@@ -743,21 +842,22 @@ def _write_bids_derivatives(
 
     dwi_dir   = subses_dir / "dwi"
     tract_dir = dwi_dir / "tractography"
+    xfm_dir   = dwi_dir / "transforms"
     fig_dir   = subses_dir / "figures"    # QC images
     rep_dir   = subses_dir / "reports"    # HTML, PDF, tabular, logs
 
-    for d in (dwi_dir, tract_dir, fig_dir, rep_dir):
+    for d in (dwi_dir, tract_dir, xfm_dir, fig_dir, rep_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     def _fname(suffix, ext, **entities):
         return bids_filename(sub_label, suffix, ext, session=ses_label, **entities)
 
-    def _qc_name(stage, label):
+    def _qc_name(stage, label, ext=".png"):
         parts = [f"sub-{sub_label}"]
         if ses_label:
             parts.append(f"ses-{ses_label}")
         parts += [f"stage-{stage}", f"qc-{label}"]
-        return "_".join(parts) + ".png"
+        return "_".join(parts) + ext
 
     def _rep_name(stem, ext):
         parts = [f"sub-{sub_label}"]
@@ -842,6 +942,21 @@ def _write_bids_derivatives(
             if verbose:
                 print(f"    BIDS: {dst.relative_to(bids_out)}")
 
+    extract_result = step_results.get("extract", {}).get("result", {}) or {}
+    for key, desc_val in (
+        ("cst_left_full_path", "CSTleftFullTrajectory"),
+        ("cst_right_full_path", "CSTrightFullTrajectory"),
+        ("cst_combined_full_path", "CSTbilateralFullTrajectory"),
+    ):
+        src_path = extract_result.get(key)
+        if src_path and Path(src_path).exists():
+            dst = tract_dir / _fname(
+                "tractogram", ".trk", space="orig", desc=desc_val
+            )
+            shutil.move(src_path, dst)
+            if verbose:
+                print(f"    BIDS: {dst.relative_to(bids_out)}")
+
     # ------------------------------------------------------------------
     # New scientific NIfTI data products (visualization-refactor M2/M3)
     # ------------------------------------------------------------------
@@ -860,6 +975,38 @@ def _write_bids_derivatives(
                 shutil.move(sidecar, dwi_dir / _fname("dwimap", ".json", space="orig", desc="V1"))
             if verbose:
                 print(f"    BIDS: {dst.relative_to(bids_out)}")
+    # The white-matter mask product (tracking stage, same scalar_maps/
+    # directory) is rescued for the same reason: the rmtree below removes it
+    # wholesale, and the report QC strip's WM panel reads this product.
+    if v1_src.is_dir():
+        for nii in v1_src.glob("*_wm_mask.nii.gz"):
+            dst = dwi_dir / _fname("mask", ".nii.gz", space="orig", desc="WM")
+            shutil.move(nii, dst)
+            sidecar = nii.with_name(nii.name.replace(".nii.gz", ".json"))
+            if sidecar.exists():
+                shutil.move(sidecar, dwi_dir / _fname("mask", ".json", space="orig", desc="WM"))
+            if verbose:
+                print(f"    BIDS: {dst.relative_to(bids_out)}")
+    if v1_src.is_dir():
+        for pattern, desc in (
+            ("*_model_mask.nii.gz", "trackingModel"),
+            ("*_tensor_valid_mask.nii.gz", "tensorValid"),
+        ):
+            for nii in v1_src.glob(pattern):
+                dst = dwi_dir / _fname(
+                    "mask", ".nii.gz", space="orig", desc=desc
+                )
+                shutil.move(nii, dst)
+                sidecar = nii.with_name(nii.name.replace(".nii.gz", ".json"))
+                if sidecar.exists():
+                    shutil.move(
+                        sidecar,
+                        dwi_dir / _fname(
+                            "mask", ".json", space="orig", desc=desc
+                        ),
+                    )
+                if verbose:
+                    print(f"    BIDS: {dst.relative_to(bids_out)}")
     # ROI segmentation (extraction stage) lives in <stage>/nifti/, which the
     # rmtree below removes wholesale — the very reason the three roi_*.nii.gz
     # masks have never reached a consumer. Rescue it first.
@@ -873,6 +1020,30 @@ def _write_bids_derivatives(
                 shutil.move(sidecar, dwi_dir / _fname("dseg", ".json", space="orig", desc="CSTroi"))
             if verbose:
                 print(f"    BIDS: {dst.relative_to(bids_out)}")
+    # Exact preferred-mode seed masks are scientific inputs, not temporary
+    # registration products. Preserve both hemispheres and their provenance.
+    if roi_src.is_dir():
+        for side, desc in (
+            ("left", "preferredSeedLeft"),
+            ("right", "preferredSeedRight"),
+        ):
+            for nii in roi_src.glob(f"*_desc-preferredSeed-{side}_mask.nii.gz"):
+                dst = dwi_dir / _fname(
+                    "mask", ".nii.gz", space="orig", desc=desc
+                )
+                shutil.move(nii, dst)
+                sidecar = nii.with_name(
+                    nii.name.replace(".nii.gz", ".json")
+                )
+                if sidecar.exists():
+                    shutil.move(
+                        sidecar,
+                        dwi_dir / _fname(
+                            "mask", ".json", space="orig", desc=desc
+                        ),
+                    )
+                if verbose:
+                    print(f"    BIDS: {dst.relative_to(bids_out)}")
     dens_src = args.out / "extraction" / "scalar_maps"
     if dens_src.is_dir():
         for nii in dens_src.glob("*_cst_density.nii.gz"):
@@ -881,6 +1052,26 @@ def _write_bids_derivatives(
             sidecar = nii.with_name(nii.name.replace(".nii.gz", ".json"))
             if sidecar.exists():
                 shutil.move(sidecar, dwi_dir / _fname("dwimap", ".json", space="orig", desc="CSTdensity"))
+            if verbose:
+                print(f"    BIDS: {dst.relative_to(bids_out)}")
+
+    # Registration transforms are required to reproduce the exact atlas warp.
+    # Preserve the affine, both SyN fields and their DIPY geometry metadata.
+    transform_src = args.out / "extraction" / "transforms"
+    if transform_src.is_dir():
+        for src in transform_src.iterdir():
+            if not src.is_file():
+                continue
+            dst = xfm_dir / src.name
+            shutil.move(src, dst)
+            if dst.suffix == ".json":
+                metadata = json.loads(dst.read_text())
+                if isinstance(metadata.get("files"), dict):
+                    metadata["files"] = {
+                        key: Path(path).name
+                        for key, path in metadata["files"].items()
+                    }
+                    dst.write_text(json.dumps(metadata, indent=2) + "\n")
             if verbose:
                 print(f"    BIDS: {dst.relative_to(bids_out)}")
 
@@ -899,6 +1090,12 @@ def _write_bids_derivatives(
             stage, label = _resolve_qc_name(png.name)
             dst = fig_dir / _qc_name(stage, label)
             shutil.move(png, dst)
+            sidecar = png.with_suffix(".json")
+            if sidecar.exists():
+                shutil.move(
+                    sidecar,
+                    fig_dir / _qc_name(stage, label, ext=".json"),
+                )
             if verbose:
                 print(f"    BIDS: {dst.relative_to(bids_out)}")
 

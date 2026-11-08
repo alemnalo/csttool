@@ -75,8 +75,20 @@ class TestDescribeRegistrationTemplate:
 class TestExtractionReportRecordsTemplate:
     @staticmethod
     def _cst_result():
-        return {"stats": {"n_left": 2, "n_right": 3}}
-
+        return {
+            "stats": {"n_left": 2, "n_right": 3},
+            "parameters": {
+                "tracking_mode": "preferred-plic",
+                "seed_source": "JHU ICBM-DTI-81 PLIC labels 19/20",
+                "model_mask_source": "brain_mask",
+                "stopping": {"mode": "dwi-binary"},
+                "direction_model": {
+                    "model": "CSA-ODF",
+                    "selected_shell_b": 2400.0,
+                    "fit_volume_count": 146,
+                },
+            },
+        }
     @staticmethod
     def _paths():
         return {"cst_left": "l.trk", "cst_right": "r.trk", "cst_combined": "c.trk"}
@@ -93,6 +105,38 @@ class TestExtractionReportRecordsTemplate:
         report = self._read(out)
         assert report["registration"]["template"]["name"] == "FMRIB58_FA"
         assert report["registration"]["template"]["license"] == "FSL non-commercial"
+
+    def test_runtime_configuration_is_recorded(self, tmp_path):
+        tpl = describe_registration_template("mni152_t1")
+        out = save_extraction_report(
+            self._cst_result(),
+            self._paths(),
+            tmp_path,
+            "sub-config",
+            registration={
+                "template": tpl,
+                "original_orientation": ("L", "A", "S"),
+                "reorientation_transform": np.array([[0, -1], [1, 1], [2, 1]]),
+                "transform_paths": {"metadata": tmp_path / "transform.json"},
+            },
+        )
+        report = self._read(out)
+
+        parameters = report["parameters"]
+        assert parameters["tracking_mode"] == "preferred-plic"
+        assert parameters["seed_source"] == "JHU ICBM-DTI-81 PLIC labels 19/20"
+        assert parameters["model_mask_source"] == "brain_mask"
+        assert parameters["stopping"]["mode"] == "dwi-binary"
+        assert parameters["direction_model"]["model"] == "CSA-ODF"
+        assert parameters["direction_model"]["selected_shell_b"] == 2400.0
+        assert parameters["direction_model"]["fit_volume_count"] == 146
+        assert report["registration"]["original_orientation"] == ["L", "A", "S"]
+        assert report["registration"][
+            "inverse_reorientation_required_for_tracking"
+        ] is True
+        assert report["registration"]["transform_files"]["metadata"].endswith(
+            "transform.json"
+        )
 
     def test_fallback_is_recorded_distinctly(self, tmp_path):
         tpl = describe_registration_template(

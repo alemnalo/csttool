@@ -39,6 +39,7 @@ from ...reproducibility.context import DEFAULT_SEED
 from .unilateral_analysis import (
     orient_streamlines_inferior_to_superior,
     sample_scalar_per_streamline,
+    sample_scalar_nodes,
     _sample_streamline_values,
 )
 
@@ -364,26 +365,13 @@ def tangent_v1_angles(streamlines, v1, affine, n_points=20,
 # QC-5 + QC-7: the per-streamline profile matrix and its attrition
 # ---------------------------------------------------------------------------
 def profile_matrix(streamlines, scalar_map, affine, n_points=20,
-                   min_points=MIN_PROFILE_POINTS):
-    """Per-streamline x per-node scalar matrix, plus the attrition that produced it.
+                   min_points=MIN_PROFILE_POINTS, tensor_valid_mask=None,
+                   scalar_name=None):
+    """Return the per-streamline/node matrix and complete sample attrition.
 
-    `compute_tract_profile` builds exactly this matrix and then collapses it with
-    ``np.mean``, discarding both the dispersion and the record of what it threw
-    away. ``matrix.mean(axis=0)`` here equals that function's output; the second
-    return value makes the discards auditable.
-
-    Returns
-    -------
-    matrix : ndarray, shape (n_contributing, n_points)
-        Inferior (pontine) end first. Empty with shape (0, n_points) if nothing
-        contributed.
-    attrition : dict
-        ``n_input``; ``n_too_short`` (fewer than 2 points, rejected before
-        sampling); ``n_no_inbounds`` (every point outside the scalar grid);
-        ``n_insufficient_inbounds`` (between 1 and ``min_points`` - 1 usable
-        samples); ``n_contributing``; ``points_total`` and ``points_in_bounds``
-        over the streamlines that reached sampling; and ``point_retention``, the
-        ratio of the two (None when nothing was sampled).
+    Preferred mode geometrically normalizes each target-bounded streamline to
+    ``n_points`` and leaves unsupported scalar nodes as NaN. Legacy callers
+    without a tensor-validity mask retain the historical value-resampling path.
     """
     attrition = {
         "n_input": len(streamlines),
@@ -394,12 +382,18 @@ def profile_matrix(streamlines, scalar_map, affine, n_points=20,
         "points_total": 0,
         "points_in_bounds": 0,
         "point_retention": None,
+        "invalid_node_samples": 0,
+        "rejected_by_reason": {
+            "out_of_bounds": 0,
+            "outside_tensor_fit_domain": 0,
+            "nonfinite": 0,
+            "mathematically_invalid": 0,
+        },
     }
     if len(streamlines) == 0:
         return np.zeros((0, n_points)), attrition
 
     oriented = orient_streamlines_inferior_to_superior(streamlines)
-
     rows = []
     for streamline in oriented:
         points = np.asarray(streamline)
@@ -407,18 +401,39 @@ def profile_matrix(streamlines, scalar_map, affine, n_points=20,
             attrition["n_too_short"] += 1
             continue
 
-        values = _sample_streamline_values(points, scalar_map, affine)
-        attrition["points_total"] += len(points)
-        attrition["points_in_bounds"] += len(values)
+        if tensor_valid_mask is None:
+            values = _sample_streamline_values(points, scalar_map, affine)
+            attrition["points_total"] += len(points)
+            attrition["points_in_bounds"] += len(values)
+            if len(values) == 0:
+                attrition["n_no_inbounds"] += 1
+                continue
+            if len(values) < min_points:
+                attrition["n_insufficient_inbounds"] += 1
+                continue
+            rows.append(_resample_series(values, n_points))
+            continue
 
-        if len(values) == 0:
+        normalized_points = _resample_points(points, n_points)
+        values, valid, reasons = sample_scalar_nodes(
+            normalized_points,
+            scalar_map,
+            affine,
+            tensor_valid_mask=tensor_valid_mask,
+            scalar_name=scalar_name,
+        )
+        attrition["points_total"] += n_points
+        attrition["points_in_bounds"] += int(valid.sum())
+        attrition["invalid_node_samples"] += int((~valid).sum())
+        for reason, count in reasons.items():
+            attrition["rejected_by_reason"][reason] += int(count)
+        if valid.sum() == 0:
             attrition["n_no_inbounds"] += 1
             continue
-        if len(values) < min_points:
+        if valid.sum() < min_points:
             attrition["n_insufficient_inbounds"] += 1
             continue
-
-        rows.append(_resample_series(values, n_points))
+        rows.append(values)
 
     attrition["n_contributing"] = len(rows)
     if attrition["points_total"] > 0:
@@ -431,21 +446,60 @@ def profile_matrix(streamlines, scalar_map, affine, n_points=20,
 
 
 def profile_dispersion(matrix, percentiles=(5, 25, 50, 75, 95)):
-    """Per-node percentiles of a profile matrix.
-
-    Returns a dict keyed ``p5``, ``p25``, ``p50``, ``p75``, ``p95`` (following
-    ``percentiles``) plus ``mean`` and ``n``, each an ``n_points`` vector except
-    ``n`` which is the contributing streamline count. Empty input yields None
-    vectors so callers can render a placeholder without a special case.
-    """
+    """Node-wise mean, robust percentiles, and contributing support."""
     matrix = np.asarray(matrix, dtype=float)
     if matrix.size == 0:
-        return {f"p{int(p)}": None for p in percentiles} | {"mean": None, "n": 0}
-    out = {
-        f"p{int(p)}": np.percentile(matrix, p, axis=0) for p in percentiles
-    }
-    out["mean"] = matrix.mean(axis=0)
+        return {
+            **{f"p{int(p)}": None for p in percentiles},
+            "mean": None,
+            "n": 0,
+            "support_fraction": [],
+            "node_support": [],
+        }
+    finite = np.isfinite(matrix)
+    counts = finite.sum(axis=0)
+    fractions = counts / matrix.shape[0]
+    with np.errstate(invalid="ignore"):
+        out = {
+            f"p{int(p)}": np.nanpercentile(matrix, p, axis=0)
+            for p in percentiles
+        }
+        out["mean"] = np.nanmean(matrix, axis=0)
     out["n"] = int(matrix.shape[0])
+    out["support_fraction"] = fractions.tolist()
+    out["node_support"] = [
+        {
+            "node": int(index),
+            "contributing_streamlines": int(count),
+            "contributing_fraction": float(fraction),
+            "invalid_or_missing_samples": int(matrix.shape[0] - count),
+            "center": "mean",
+            "robust_distribution": "interquartile_range",
+            "mean": (
+                float(out["mean"][index])
+                if np.isfinite(out["mean"][index]) else None
+            ),
+            "median": (
+                float(out.get("p50", np.full(len(counts), np.nan))[index])
+                if np.isfinite(
+                    out.get("p50", np.full(len(counts), np.nan))[index]
+                ) else None
+            ),
+            "p25": (
+                float(out.get("p25", np.full(len(counts), np.nan))[index])
+                if np.isfinite(
+                    out.get("p25", np.full(len(counts), np.nan))[index]
+                ) else None
+            ),
+            "p75": (
+                float(out.get("p75", np.full(len(counts), np.nan))[index])
+                if np.isfinite(
+                    out.get("p75", np.full(len(counts), np.nan))[index]
+                ) else None
+            ),
+        }
+        for index, (count, fraction) in enumerate(zip(counts, fractions))
+    ]
     return out
 
 

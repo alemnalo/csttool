@@ -51,6 +51,21 @@
         {% endfor %}
     </section>
 
+    {% if preferred_qc.available %}
+    <section class="preferred-qc">
+        <strong class="preferred-qc-title">Preferred-mode QC</strong>
+        {% for row in preferred_qc.rows %}
+        <span class="preferred-qc-side"><b>{{ row.side }}:</b> {{ row.seeds }} seeds · {{ row.motor }} motor · {{ row.inferior }} inferior · {{ row.accepted }} retained</span>
+        {% endfor %}
+        <span class="preferred-qc-status">
+            Count LI <b>{{ preferred_qc.count_li }}</b> ·
+            Volume LI <b>{{ preferred_qc.volume_li }}</b><br>
+            Frame <b>{{ preferred_qc.coordinate_frame }}</b> ·
+            Overall <b>{{ preferred_qc.overall }}</b>
+        </span>
+    </section>
+    {% endif %}
+
     {# ===== Global metrics ===== #}
     <section class="global-metrics">
         <h2 class="section-title">Global metrics <small>Diffusivity units: mm²/s (×10⁻³)</small></h2>
@@ -141,7 +156,7 @@
     <section class="qc">
         <h2 class="section-title">Tractography QC</h2>
         {% if qc_strip %}
-        <img class="qc-strip" src="{{ qc_strip }}" alt="Report QC strip (DEC-FA, CST density, extraction ROIs, CST over FA)">
+        <img class="qc-strip" src="{{ qc_strip }}" alt="Report QC strip (DEC-FA, {{ qc_mask_label|lower }}, extraction ROIs, CST over FA)">
         {% else %}
         <div class="figure-placeholder">[Tractography QC]</div>
         {% endif %}

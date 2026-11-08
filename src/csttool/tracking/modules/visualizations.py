@@ -20,9 +20,9 @@ from csttool.viz.utils import deterministic_subsample, viz_rng
 # Mask overlay colours for the tracking QC figures. Deliberately outside the
 # LEFT/RIGHT hemisphere hues: neither mask carries laterality meaning, and a
 # blue fill that matched ``style.LEFT`` would invite exactly that misreading.
-_WM_MASK_COLOR = '#4c72b0'      # the FA-derived seeding/stopping mask
+_WM_MASK_COLOR = _style.WM_MASK    # the seeding/stopping mask (shared with the report strip)
 _BRAIN_MASK_COLOR = '#d62728'   # the brain-mask boundary it is nested inside
-_BRAIN_MASK_FILL = '#4c72b0'    # brain-mask *area* on the tensor-maps column
+_BRAIN_MASK_FILL = _style.WM_MASK    # brain-mask *area* on the tensor-maps column
 
 
 # =============================================================================

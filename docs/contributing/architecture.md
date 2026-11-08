@@ -47,9 +47,14 @@ The full pipeline path through the codebase:
 2. `cli/commands/run.py:cmd_run` parses run-specific flags and calls each stage in turn:
 3. `ingest.import_subject` → DICOM/NIfTI ingestion, BIDS-style staging.
 4. `preprocess.preprocess` → optional reslice, MPPCA denoise (Patch2Self/NLMeans optional), brain-mask via median Otsu, optional Gibbs unringing, optional motion correction (with b-vector rotation).
-5. `tracking.modules.run_tracking` → CSA-ODF model fit, deterministic propagation with `ThresholdStoppingCriterion`, writes whole-brain `.trk`.
-6. `extract.extract_cst` → atlas registration (DIPY `SymmetricDiffeomorphicRegistration`), ROI dilation, filter streamlines by chosen method.
-7. `metrics.compute_metrics` → analyse each hemisphere, compute laterality index, render HTML report, optionally rasterise to PDF.
+5. `tracking.modules.run_tracking` → legacy mode fits CSA-ODF and performs
+   whole-brain FA-stopped propagation; preferred mode writes only low-b DTI
+   scalars, V1, the brain model domain and tensor-validity domain.
+6. `extract.extract_cst` → atlas registration + ROI filtering in legacy mode,
+   or preferred PLIC seeding with binary brain-boundary/CMC stopping,
+   dual-target acceptance and target-bounded analysis segments.
+7. `metrics.compute_metrics` → analyse each bounded hemisphere with explicit
+   scalar support, compute laterality indices, and render HTML/PDF reports.
 
 Each stage is independently CLI-callable (`csttool preprocess`, `csttool track`, etc.) — the public entry function is the same one `run` invokes.
 

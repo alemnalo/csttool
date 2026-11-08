@@ -5,6 +5,7 @@ from csttool.tracking.modules import (
     fit_tensors,
     load_and_mask,
     resolve_brain_mask,
+    resolve_wm_mask,
     run_tractography,
     save_tracking_outputs,
     seed_and_stop,
@@ -15,7 +16,9 @@ __all__ = [
     "fit_tensors",
     "load_and_mask",
     "resolve_brain_mask",
+    "resolve_wm_mask",
     "run_tractography",
     "save_tracking_outputs",
     "seed_and_stop",
 ]
+

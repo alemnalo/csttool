@@ -12,6 +12,7 @@ HTML assertions are string-based (no external parser dependency) to keep the
 test self-contained, matching the style of the existing report tests.
 """
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -136,14 +137,18 @@ def make_qc_strip(tmp_path, subject_id):
     """
     from .test_report_qc_strip import (
         RAS_AFFINE as STRIP_AFFINE, _bundle, _density, _dseg, _fa,
-        _v1_superior, _write_nifti, _write_trk,
+        _v1_superior, _wm_mask, _write_nifti, _write_trk,
     )
     from csttool.metrics.modules.visualizations import plot_report_qc_strip
 
+    wm_nii = _write_nifti(tmp_path / "s_wm.nii.gz", _wm_mask(), STRIP_AFFINE)
+    (tmp_path / "s_wm.json").write_text(json.dumps(
+        {"WmMaskSource": "legacy", "WmMethod": "legacy"}))
     return plot_report_qc_strip(
         fa_path=_write_nifti(tmp_path / "s_fa.nii.gz", _fa(), STRIP_AFFINE),
         v1_path=_write_nifti(tmp_path / "s_v1.nii.gz", _v1_superior(), STRIP_AFFINE),
         density_path=_write_nifti(tmp_path / "s_d.nii.gz", _density(), STRIP_AFFINE),
+        wm_mask_path=wm_nii,
         roi_dseg_path=_write_nifti(tmp_path / "s_s.nii.gz", _dseg(), STRIP_AFFINE),
         cst_left_path=_write_trk(tmp_path / "s_l.trk", _bundle(-8.0), STRIP_AFFINE),
         cst_right_path=_write_trk(tmp_path / "s_r.trk", _bundle(8.0), STRIP_AFFINE),
@@ -287,7 +292,7 @@ class TestHtmlStructure:
         assert "Axial (RAS)" not in rendered_html
 
     def test_qc_alt_text_names_all_four_panels(self, rendered_html):
-        alt = "Report QC strip (DEC-FA, CST density, extraction ROIs, CST over FA)"
+        alt = "Report QC strip (DEC-FA, white matter mask, extraction ROIs, CST over FA)"
         assert alt in rendered_html
 
     def test_li_classes_by_sign(self, rendered_html):
@@ -301,6 +306,94 @@ class TestHtmlStructure:
         assert ">Deterministic<" in rendered_html or "Tracking</dt><dd>Deterministic" in rendered_html
         assert "FA mask" in rendered_html             # seeding (not "anatomically constrained")
         assert "Anatomically constrained" not in rendered_html
+
+    def test_preferred_methods_show_runtime_configuration(self, tmp_path):
+        metadata = full_metadata()
+        metadata["processing"]["tracking_params"].update({
+            "tracking_mode": "preferred-plic",
+            "tracking_algorithm": "deterministic LocalTracking",
+            "seed_source": "JHU ICBM-DTI-81 PLIC labels 19/20",
+            "model_mask_source": "brain_mask",
+            "stopping_criterion": (
+                "ROI-constrained DWI-only (permissive brain-mask domain)"
+            ),
+            "direction_model": {
+                "model": "CSA-ODF",
+                "selected_shell_b": 2400.0,
+                "validated_sh_order": 6,
+                "fit_volume_count": 146,
+            },
+            "tensor_fit": {"maximum_fitted_b": 950.0},
+        })
+        metadata["processing"]["extraction"] = {
+            "method": "preferred-plic",
+            "tracking_mode": "preferred",
+        }
+        context = build_report_context(
+            make_comparison(),
+            {"qc_strip": None, "profile_matrix": None},
+            "sub-x",
+            version="0.5.0",
+            space="Native Space",
+            metadata=metadata,
+            fa_affine=RAS_AFFINE,
+        )
+
+        processing = dict(context["proc_rows"])
+        space = dict(context["space_rows"])
+        assert processing["Scalar model"] == "DTI (WLS; b≤950)"
+        assert processing["Direction model"] == "CSA ODF, b=2400, SH 6"
+        assert processing["Tracking"] == (
+            "deterministic LocalTracking (preferred-plic)"
+        )
+        assert processing["Seeding"] == (
+            "JHU ICBM-DTI-81 PLIC labels 19/20, ×1"
+        )
+        assert processing["Model mask"] == "brain_mask"
+        assert processing["Stopping"] == (
+            "ROI-constrained DWI-only (permissive brain-mask domain)"
+        )
+        assert space["Extraction"] == "preferred-plic"
+
+    def test_preferred_qc_section_exposes_counts_reach_li_and_frame(self):
+        metadata = full_metadata()
+        metadata.update({
+            "tractography_qc": {
+                "left": {
+                    "plic_seed_count": 100,
+                    "motor_target_reach_count": 70,
+                    "motor_target_reach_fraction": 0.70,
+                    "inferior_target_reach_count": 80,
+                    "inferior_target_reach_fraction": 0.80,
+                    "persisted_streamline_count": 50,
+                },
+                "right": {
+                    "plic_seed_count": 120,
+                    "motor_target_reach_count": 72,
+                    "motor_target_reach_fraction": 0.60,
+                    "inferior_target_reach_count": 90,
+                    "inferior_target_reach_fraction": 0.75,
+                    "persisted_streamline_count": 55,
+                },
+            },
+            "qc": {"overall_pass": True},
+            "coordinate_frame_qc": {"overall_pass": True},
+        })
+        context = build_report_context(
+            make_comparison(), {}, "sub-qc",
+            version="0.6.0", space="Native Space",
+            metadata=metadata, fa_affine=RAS_AFFINE,
+        )
+        assert context["preferred_qc"]["available"] is True
+        assert context["preferred_qc"]["rows"][0] == {
+            "side": "Left",
+            "seeds": 100,
+            "motor": "70 (0.70)",
+            "inferior": "80 (0.80)",
+            "accepted": 50,
+        }
+        assert context["preferred_qc"]["coordinate_frame"] == "PASS"
+        assert context["preferred_qc"]["overall"] == "PASS"
 
     def test_length_row_shows_genuine_median(self, rendered_html):
         # median_length present -> "84.0 (40.0-130.0)" (the median, not the mean 85.0).
@@ -1070,6 +1163,26 @@ class TestPdfOnePage:
 
     def test_exactly_one_page_full(self, tmp_path):
         reader = _render_pdf(tmp_path, "sub-ALS_participant1280_ses-01", full_metadata())
+        assert len(reader.pages) == 1
+
+    def test_exactly_one_page_with_preferred_qc(self, tmp_path):
+        metadata = full_metadata()
+        metadata.update({
+            "tractography_qc": {
+                side: {
+                    "plic_seed_count": 16000,
+                    "motor_target_reach_count": 9000,
+                    "motor_target_reach_fraction": 0.56,
+                    "inferior_target_reach_count": 15000,
+                    "inferior_target_reach_fraction": 0.94,
+                    "persisted_streamline_count": 600,
+                }
+                for side in ("left", "right")
+            },
+            "qc": {"overall_pass": True},
+            "coordinate_frame_qc": {"overall_pass": True},
+        })
+        reader = _render_pdf(tmp_path, "sub-preferred", metadata)
         assert len(reader.pages) == 1
 
     def test_exactly_one_page_empty_metadata(self, tmp_path):

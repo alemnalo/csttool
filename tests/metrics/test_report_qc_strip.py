@@ -3,7 +3,7 @@
 The strip replaces a 1x3 triptych that showed the same information from three
 angles. Its whole claim is that four panels answer four *different* questions on
 **one** slice, so these tests assert the properties that claim rests on: four
-slots always present, one shared slice index, one legend, one colourbar, equal
+slots always present, one shared slice index, one legend, equal
 physical viewports, the documented colours, and byte-reproducibility.
 
 Three defects the strip must fix rather than inherit are covered explicitly:
@@ -22,7 +22,6 @@ import numpy as np
 import pytest
 
 from csttool.metrics.modules.visualizations import (
-    format_density_percent,
     QC_STRIP_MAX_HEIGHT_MM,
     QC_STRIP_MIN_HEIGHT_MM,
     QC_STRIP_WIDTH_MM,
@@ -120,6 +119,26 @@ def _write_trk(path, streamlines, affine):
     return path
 
 
+def _wm_mask():
+    """A brain-ish WM territory: the high-FA core of the FA blob."""
+    wm = np.zeros(SHAPE, dtype=np.uint8)
+    wm[8:16, 6:14, 4:14] = 1
+    return wm
+
+
+def _write_wm_product(tmp_path, affine, name="wm_mask", source="dam"):
+    """Write the WM mask product the way ``save_tracking_outputs`` does:
+    NIfTI plus a sidecar naming the source."""
+    nii = _write_nifti(tmp_path / f"{name}.nii.gz", _wm_mask(), affine)
+    sidecar = {
+        "WmMaskSource": source,
+        "WmMethod": "auto",
+        "VoxelCount": int(_wm_mask().sum()),
+    }
+    (tmp_path / f"{name}.json").write_text(json.dumps(sidecar))
+    return nii
+
+
 @pytest.fixture
 def subject(tmp_path):
     """Every strip input, written to disk as the real products are."""
@@ -128,6 +147,7 @@ def subject(tmp_path):
         "fa_path": _write_nifti(tmp_path / "fa.nii.gz", _fa(), affine),
         "v1_path": _write_nifti(tmp_path / "v1.nii.gz", _v1_superior(), affine),
         "density_path": _write_nifti(tmp_path / "density.nii.gz", _density(), affine),
+        "wm_mask_path": _write_wm_product(tmp_path, affine),
         "roi_dseg_path": _write_nifti(tmp_path / "dseg.nii.gz", _dseg(), affine),
         "cst_left_path": _write_trk(tmp_path / "left.trk", _bundle(-8.0, seed=1), affine),
         "cst_right_path": _write_trk(tmp_path / "right.trk", _bundle(8.0, seed=2), affine),
@@ -234,11 +254,6 @@ def _key_band(probe):
     return sorted(keys, key=lambda ax: ax["box_mm"][0])
 
 
-def _colourbar_axes(probe):
-    """Panel 2's colourbar box, in mm. It is the one axes carrying a QuadMesh."""
-    bars = [ax for ax in probe["axes"] if ax["collections"] and not ax["images"]]
-    assert len(bars) == 1, f"expected one colourbar, found {len(bars)}"
-    return bars[0]["box_mm"]
 
 
 def _caption_axes(probe):
@@ -279,15 +294,34 @@ class TestFourSlots:
         panels = _panels(strip_probe)
         assert len(panels) == 4
         assert panels[0]["title"] == "DEC-FA"
-        assert panels[1]["title"] == "CST density"
+        assert panels[1]["title"] == "White matter mask"
         assert panels[2]["title"] == "Extraction ROIs"
         assert panels[3]["title"] == "CST over FA"
+
+    def test_preferred_tracking_labels_brain_domain_as_model_mask(
+        self, subject, tmp_path, strip_probe
+    ):
+        path = _render(
+            subject,
+            tmp_path,
+            mask_label="Model mask",
+            mask_source="brain_mask",
+        )
+        assert _panels(strip_probe)[1]["title"] == "Model mask"
+        assert any(
+            "model mask (brain_mask)" in text
+            for axis in strip_probe["axes"]
+            for text in axis["texts"]
+        )
+        sidecar = _sidecar(path)
+        assert sidecar["MaskLabel"] == "Model mask"
+        assert sidecar["WmMaskSource"] == "brain_mask"
 
     @pytest.mark.parametrize(
         "missing, title, note",
         [
             ("v1_path", "DEC-FA", "world-frame V1 not produced"),
-            ("density_path", "CST density", "density map not produced"),
+            ("wm_mask_path", "White matter mask", "WM mask not produced"),
             ("roi_dseg_path", "Extraction ROIs", "ROI segmentation not produced"),
         ],
     )
@@ -324,13 +358,14 @@ class TestFourSlots:
     ):
         """Only FA is required; everything else degrades in place."""
         _render(subject, tmp_path, v1_path=None, density_path=None,
-                roi_dseg_path=None, cst_left_path=None, cst_right_path=None)
+                roi_dseg_path=None, wm_mask_path=None,
+                cst_left_path=None, cst_right_path=None)
         assert len(_panels(strip_probe)) == 4
 
     def test_degraded_panels_are_named_in_the_sidecar(self, subject, tmp_path):
-        path = _render(subject, tmp_path, v1_path=None, density_path=None)
+        path = _render(subject, tmp_path, v1_path=None, wm_mask_path=None)
         degraded = _sidecar(path)["DegradedPanels"]
-        assert "dec_fa" in degraded and "density" in degraded
+        assert "dec_fa" in degraded and "wm_mask" in degraded
         assert "roi_dseg" not in degraded
 
 
@@ -449,7 +484,7 @@ class TestPanelContent:
         paths = {
             "fa_path": _write_nifti(tmp_path / "fa.nii.gz", _fa(), LAS_AFFINE),
             "v1_path": _write_nifti(tmp_path / "v1.nii.gz", _v1_superior(), LAS_AFFINE),
-            "density_path": None, "roi_dseg_path": None,
+            "density_path": None, "wm_mask_path": None, "roi_dseg_path": None,
             "cst_left_path": None, "cst_right_path": None,
         }
         plot_report_qc_strip(output_dir=tmp_path, subject_id="sub-las", **paths)
@@ -457,107 +492,41 @@ class TestPanelContent:
         bright = rgb.sum(axis=2) > 0.1
         assert rgb[..., 2][bright].mean() > rgb[..., 0][bright].mean()
 
-    def test_the_sidecar_separates_the_true_maximum_from_the_display_cap(
+    def test_the_sidecar_names_the_wm_mask_product_and_its_source(
         self, subject, tmp_path
     ):
-        """Two different numbers. The display cap is a presentation choice; the
-        maximum is a property of the data. They were previously one key named
-        ``DensityVmax``, which reads like the second and held the first."""
+        """Panel 2 is auditable without opening the derivatives tree: the
+        sidecar names the product, the source recorded by that product's own
+        sidecar, and the voxel counts the reader sees projected."""
         sidecar = _sidecar(_render(subject, tmp_path))
-        assert 0 < sidecar["DensityDisplayVmax"] <= 1.0
-        assert 0 < sidecar["DensityMaxFraction"] <= 1.0
-        assert sidecar["DensityMaxFraction"] >= sidecar["DensityDisplayVmax"]
-        assert sidecar["DensityDisplayPercentile"] == 99.0
-        assert sidecar["DensityDisplayPercentileBasis"] == "non-zero voxels"
-        assert isinstance(sidecar["DensityDisplayClipped"], bool)
-        assert "DensityVmax" not in sidecar, "the misleading key must be gone"
-
-    def test_the_colourbar_names_the_bilateral_denominator(self, subject,
-                                                           tmp_path, strip_probe):
-        """"streamline fraction" could equally have meant a fraction of one
-        streamline, of one hemisphere's streamlines, or of every streamline
-        generated. The denominator is the one thing a reader cannot guess, and
-        it is what sets the ceiling: a voxel every left streamline visits reads
-        n_left / (n_left + n_right), not 100%."""
-        _render(subject, tmp_path)
-        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-        assert texts.count("Fraction of bilateral CST streamlines") == 1
-        assert "streamline fraction" not in texts
-        assert not any("vmax=" in t for t in texts)
-
-    def test_the_colourbar_endpoints_are_percentages(self, subject, tmp_path,
-                                                     strip_probe):
-        """Display only — the stored volume stays a fraction in [0, 1]."""
-        path = _render(subject, tmp_path)
-        sidecar = _sidecar(path)
-        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-        assert "0%" in texts
-        expected = format_density_percent(
-            sidecar["DensityDisplayVmax"],
-            saturated=sidecar["DensityDisplayClipped"],
+        assert sidecar["WmMaskSource"] == "dam"
+        assert sidecar["WmMaskProduct"].endswith("wm_mask.nii.gz")
+        assert sidecar["WmMaskVoxels"] == int(_wm_mask().sum())
+        assert sidecar["WmMaskSlabVoxels"] >= 1
+        assert "DensityMaxFraction" not in sidecar, (
+            "the density panel's keys must be gone with the panel"
         )
-        assert expected in texts
-        assert expected.endswith("%")
-        # The raw fraction must not appear anywhere on the figure.
-        assert f"{sidecar['DensityDisplayVmax']:.3g}" not in texts
 
-    def test_a_clipped_endpoint_is_marked_as_a_floor_not_a_maximum(
+    def test_the_wm_key_names_the_source_it_was_resolved_from(
         self, subject, tmp_path, strip_probe
     ):
-        """A long-tailed density — like a real subject's, whose true maximum is
-        ~1.9x its 99th percentile — puts voxels above the cap, so they share the
-        top colour and a bare number would misname the maximum."""
-        path = _render(subject, tmp_path,
-                       density_path=_write_nifti(tmp_path / "tail.nii.gz",
-                                                 _long_tailed_density(),
-                                                 RAS_AFFINE))
-        sidecar = _sidecar(path)
-        assert sidecar["DensityDisplayClipped"] is True
-        assert sidecar["DensityMaxFraction"] > sidecar["DensityDisplayVmax"]
+        """The source is the whole point of the panel: external / DAM / legacy
+        is what the reader must be able to audit."""
+        _render(subject, tmp_path)
         texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-        upper = [t for t in texts if t.startswith("\u2265")]
-        assert len(upper) == 1, "the capped endpoint must carry a >= marker"
-        assert format_density_percent(sidecar["DensityMaxFraction"]) not in texts, (
-            "the true maximum must not be printed as the endpoint"
-        )
+        assert texts.count("white matter mask (dam)") == 1
 
-    def test_an_unclipped_endpoint_is_stated_exactly(self, subject, tmp_path,
-                                                     strip_probe):
-        """The counterpart: where the cap happens to reach the true maximum,
-        nothing saturates and no ">=" may be claimed."""
-        path = _render(subject, tmp_path)
-        sidecar = _sidecar(path)
-        assert sidecar["DensityDisplayClipped"] is False, "fixture must not saturate"
-        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-        assert not any(t.startswith("\u2265") for t in texts)
-        assert format_density_percent(sidecar["DensityDisplayVmax"]) in texts
-
-    @pytest.mark.parametrize("long_tail", [False, True])
-    def test_the_caption_states_the_clipping_rule_that_the_code_applies(
-        self, subject, tmp_path, strip_probe, long_tail
+    def test_the_wm_key_degrades_when_the_source_is_unknown(
+        self, subject, tmp_path, strip_probe
     ):
-        """The rule stated on the page must be the rule the code ran — a caption
-        naming a percentile the visualization does not use is worse than none.
-
-        It is stated whenever a density panel exists, saturating or not: the
-        rule describes how the scale top was chosen, and a caption that explained
-        the scale for some subjects and not others would be harder to read.
-        """
-        from csttool.metrics.modules.visualizations import (
-            _DENSITY_DISPLAY_PERCENTILE,
-        )
-
-        density = _long_tailed_density() if long_tail else _density()
-        path = _render(subject, tmp_path,
-                       density_path=_write_nifti(tmp_path / "d.nii.gz", density,
-                                                 RAS_AFFINE))
-        assert "density scale capped at non-zero P99" in _caption_text(strip_probe)
-        assert _DENSITY_DISPLAY_PERCENTILE == 99.0
-        # And it is genuinely that percentile of the non-zero voxels.
-        nonzero = density[density > 0]
-        assert _sidecar(path)["DensityDisplayVmax"] == pytest.approx(
-            float(np.percentile(nonzero, _DENSITY_DISPLAY_PERCENTILE))
-        )
+        """An older product without a sidecar still draws the panel — it
+        degrades the label rather than guessing a source."""
+        bare = _write_nifti(tmp_path / "bare_wm.nii.gz", _wm_mask(),
+                            RAS_AFFINE)
+        _render(subject, tmp_path, wm_mask_path=bare)
+        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
+        assert texts.count("white matter mask") == 1
+        assert not any(t.startswith("white matter mask (") for t in texts)
 
     def test_no_label_calls_the_display_cap_a_maximum(self, subject, tmp_path,
                                                       strip_probe):
@@ -565,15 +534,6 @@ class TestPanelContent:
         for ax in strip_probe["axes"]:
             for text in ax["texts"]:
                 assert "max" not in text.lower(), f"{text!r} calls the cap a maximum"
-
-    def test_no_colourbar_when_density_is_unavailable(self, subject, tmp_path,
-                                                      strip_probe):
-        _render(subject, tmp_path, density_path=None)
-        texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-        assert not any("Fraction of bilateral" in t for t in texts)
-        # And the caption must not advertise a clipping rule for a panel that
-        # was never drawn.
-        assert "capped at non-zero" not in _caption_text(strip_probe)
 
     def test_every_panel_is_radiological(self, subject, tmp_path, strip_probe):
         """All four must agree on which side of the page is anatomical left.
@@ -785,7 +745,7 @@ class TestDeterminism:
 # mismatch decides whether Matplotlib's apply_aspect shrinks the image box
 # horizontally or vertically, so the suite exercised a geometry regime that
 # never reached a report: titles drifted up to 2.5 mm off their panels, ~5 mm of
-# the canvas went to dead white, and the colourbar label overprinted the shared
+# the canvas went to dead white. Every test below is therefore parametrised over
 # caption by 0.46 mm. Every test below is therefore parametrised over shapes
 # spanning both regimes, and asserts bbox relations rather than pixels.
 # ---------------------------------------------------------------------------
@@ -818,6 +778,8 @@ def _layout_subject(tmp_path, shape, n_streamlines=12, density_scale=1.0):
     dseg[sx // 2 - 1:sx // 2 + 1, sy // 2 - 1:sy // 2 + 1, 1:3] = 1
     dseg[sx // 3:sx // 3 + 2, sy // 2 - 1:sy // 2 + 1, sz - 3:sz - 1] = 2
     dseg[2 * sx // 3:2 * sx // 3 + 2, sy // 2 - 1:sy // 2 + 1, sz - 3:sz - 1] = 3
+    wm = np.zeros(shape, dtype=np.uint8)
+    wm[fa > 0.5] = 1
 
     def bundle(x_world, seed):
         rng = np.random.default_rng(seed)
@@ -832,10 +794,14 @@ def _layout_subject(tmp_path, shape, n_streamlines=12, density_scale=1.0):
         return out
 
     tag = "x".join(str(v) for v in shape)
+    wm_nii = _write_nifti(tmp_path / f"wm_{tag}.nii.gz", wm, affine)
+    (tmp_path / f"wm_{tag}.json").write_text(json.dumps(
+        {"WmMaskSource": "legacy", "WmMethod": "legacy"}))
     return {
         "fa_path": _write_nifti(tmp_path / f"fa_{tag}.nii.gz", fa, affine),
         "v1_path": _write_nifti(tmp_path / f"v1_{tag}.nii.gz", v1, affine),
         "density_path": _write_nifti(tmp_path / f"den_{tag}.nii.gz", density, affine),
+        "wm_mask_path": wm_nii,
         "roi_dseg_path": _write_nifti(tmp_path / f"ds_{tag}.nii.gz", dseg, affine),
         "cst_left_path": _write_trk_shaped(
             tmp_path / f"l_{tag}.trk", bundle(-sx / 3.0, 1), affine, shape),
@@ -887,7 +853,7 @@ class TestFurnitureLayout:
             assert y0 >= -0.05 and y1 <= height_mm + 0.05, f"{text!r} off-canvas in y"
 
     def test_no_two_annotations_overlap(self, tmp_path, strip_probe, shape):
-        """The colourbar label used to overprint the shared caption by a
+        """No two items of furniture may overprint: key labels, caption and
         measured 0.46 mm, because its band was 2.2 mm and its type needed 2.77."""
         _render(_layout_subject(tmp_path, shape), tmp_path)
         items = _furniture(strip_probe)
@@ -991,7 +957,7 @@ class TestFurnitureLayout:
         self, tmp_path, strip_probe, shape
     ):
         """Same box for all four whatever the key contains, so DEC axes, a
-        colourbar, ROI colours and hemisphere counts still line up as a row."""
+        the WM key, ROI colours and hemisphere counts still line up as a row."""
         from csttool.metrics.modules.visualizations import _STRIP_KEY_MM
 
         _render(_layout_subject(tmp_path, shape), tmp_path)
@@ -1013,8 +979,8 @@ class TestFurnitureLayout:
                                    key["text_anchor_y_mm"]):
                 assert va == "baseline", f"{text!r} is not set on a baseline"
                 baselines.add(round(y, 4))
-        # Two rows only: the shared label row, and panel 2's tick row on its bar.
-        assert len(baselines) == 2, f"key labels sit on {len(baselines)} baselines"
+        # One row only: every key label sits on the shared label row.
+        assert len(baselines) == 1, f"key labels sit on {len(baselines)} baselines"
 
     def test_the_caption_is_set_much_further_from_the_keys_than_they_are_from_the_images(
         self, tmp_path, strip_probe, shape
@@ -1036,24 +1002,6 @@ class TestFurnitureLayout:
             f"{image_to_key:.2f} mm between image and key — too close to read "
             "as a caption for the composite"
         )
-
-    def test_the_colourbar_reads_as_one_unit(self, tmp_path, strip_probe, shape):
-        """Label above, bar, and the two end ticks straddling it — the ticks
-        must overlap the bar vertically, not sit on a third line below it."""
-        _render(_layout_subject(tmp_path, shape), tmp_path)
-        key = _key_band(strip_probe)[1]
-        bar = _colourbar_axes(strip_probe)
-        ticks = [b for t, b in zip(key["texts"], key["text_bboxes_mm"])
-                 if b and t.rstrip("%").lstrip("\u2265").replace(".", "").isdigit()]
-        label = [b for t, b in zip(key["texts"], key["text_bboxes_mm"])
-                 if b and t == "Fraction of bilateral CST streamlines"][0]
-        assert len(ticks) == 2
-        for box in ticks:
-            overlap = min(box[3], bar[3]) - max(box[1], bar[1])
-            assert overlap > 0, "an end tick does not straddle the bar"
-        assert label[1] > bar[3], "the quantity name must sit above the bar"
-        # The bar is thick enough to read as a scale rather than a rule.
-        assert bar[3] - bar[1] >= 2.0
 
     def test_type_hierarchy_holds(self, tmp_path, strip_probe, shape):
         """Titles outrank keys, and the strip's titles match the profile
@@ -1086,23 +1034,6 @@ def test_streamline_counts_do_not_reflow_the_layout(tmp_path, strip_probe,
         for box in [b for b in key["text_bboxes_mm"] + key["line_bboxes_mm"] if b]:
             assert box[0] >= cx0 - 0.05 and box[2] <= cx1 + 0.05
 
-
-@pytest.mark.parametrize("scale, expected", [(1e-4, "0.004%"), (1.0, "40%"),
-                                             (105.0, "4200%")])
-def test_density_endpoint_magnitude_does_not_reflow_the_colourbar(
-    tmp_path, strip_probe, scale, expected
-):
-    """The endpoint is subject-adaptive and printed beside the bar. Under the
-    old ``{vmax:.4f}`` inside a sentence, reaching two integer digits pushed the
-    label into the neighbouring panels; the bar is now measured around whatever
-    the endpoint needs, so the column absorbs the change instead."""
-    _render(_layout_subject(tmp_path, (30, 24, 18), density_scale=scale), tmp_path)
-    texts = [t for ax in strip_probe["axes"] for t in ax["texts"]]
-    assert any(t.lstrip("\u2265") == expected for t in texts), texts
-    key = _key_band(strip_probe)[1]
-    cx0, _, cx1, _ = key["box_mm"]
-    for box in [b for b in key["text_bboxes_mm"] if b]:
-        assert box[0] >= cx0 - 0.05 and box[2] <= cx1 + 0.05
 
 
 class TestStripGeometryFunction:
@@ -1190,49 +1121,13 @@ class TestStripGeometryFunction:
         assert heights == sorted(heights, reverse=True)
 
 
-class TestDensityPercentFormatting:
-    """``format_density_percent`` — display only, never the stored value."""
-
-    @pytest.mark.parametrize("fraction, expected", [
-        (0.074, "7.4%"),        # the validation subject's display cap
-        (0.138952, "13.9%"),    # its true maximum
-        (0.5, "50%"),           # no meaningless trailing zero
-        (1.0, "100%"),
-        (0.0, "0%"),
-        (0.42665, "42.7%"),     # a fully occupied unilateral voxel
-        (0.004, "0.4%"),
-        (0.00042, "0.042%"),    # two significant figures below 1%
-    ])
-    def test_reads_as_a_percentage(self, fraction, expected):
-        assert format_density_percent(fraction) == expected
-
-    def test_saturation_marks_the_endpoint_as_a_floor(self):
-        assert format_density_percent(0.074, saturated=True) == "\u22657.4%"
-        assert format_density_percent(0.074, saturated=False) == "7.4%"
-
-    def test_zero_never_carries_a_saturation_marker(self):
-        """The lower endpoint is exact by construction."""
-        assert format_density_percent(0.0, saturated=True) == "0%"
-
-    def test_every_output_is_a_percentage(self):
-        for fraction in (0.0, 1e-6, 0.001, 0.074, 0.5, 1.0):
-            assert format_density_percent(fraction).endswith("%")
-
-    def test_formatting_does_not_touch_the_underlying_value(self):
-        """A formatter, not a transform: the caller's float is unchanged and the
-        label is derived from it rather than replacing it."""
-        value = 0.0740321
-        assert format_density_percent(value) == "7.4%"
-        assert value == 0.0740321
-
-
 class TestAnnotationFitsWhateverItSays:
     """The two auto-fits that keep dynamic text inside its box."""
 
     def test_the_caption_shrinks_rather_than_clipping(self):
         """The figure is saved with its exact bbox, so an overlong caption is
         cut off at the canvas edge rather than wrapped. It grows with the slice
-        index, the rule name, the slab and the density note, so it is measured."""
+        index, the rule name and the slab, so it is measured."""
         import matplotlib.pyplot as plt
         from csttool.metrics.modules.visualizations import (
             _STRIP_CAPTION_MIN_PT, _STRIP_CAPTION_PT, _fit_caption_fontsize,
@@ -1251,26 +1146,6 @@ class TestAnnotationFitsWhateverItSays:
         fitted = _fit_caption_fontsize(ax, renderer, long_text, _STRIP_CAPTION_PT)
         assert _STRIP_CAPTION_MIN_PT <= fitted < _STRIP_CAPTION_PT
         plt.close(fig)
-
-    @pytest.mark.parametrize("shape", LAYOUT_SHAPES,
-                             ids=lambda s: "x".join(str(v) for v in s))
-    def test_the_colourbar_ticks_keep_clear_of_the_column_edge(self, tmp_path,
-                                                               strip_probe, shape):
-        """Solving the bar width against the ticks lands the wider one exactly
-        on the boundary; the edge margin is what keeps it off.
-
-        The threshold is an absolute millimetre figure, deliberately not
-        ``_STRIP_CBAR_EDGE_MM`` — asserting against the constant under test
-        would pass for any value of it, including zero.
-        """
-        _render(_layout_subject(tmp_path, shape, density_scale=1.0), tmp_path)
-        key = _key_band(strip_probe)[1]
-        cx0, _, cx1, _ = key["box_mm"]
-        for text, box in zip(key["texts"], key["text_bboxes_mm"]):
-            if box is None or not text.rstrip("%").lstrip("\u2265").replace(".", "").isdigit():
-                continue
-            assert box[0] - cx0 >= 0.5, f"{text!r} crowds the left column edge"
-            assert cx1 - box[2] >= 0.5, f"{text!r} crowds the right column edge"
 
 
 class TestSharedLayoutPrimitive:
